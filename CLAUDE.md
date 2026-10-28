@@ -107,7 +107,7 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS (sin Docker ni internet)
+npm test             # prueba de seguridad RLS (sin Docker ni internet)  · también la ejecuta GitHub en cada push
 npm run lint         # revisar el código
 npm run build        # compilar como en producción
 npm run iconos       # regenerar iconos provisionales (usa Playwright del sistema)
@@ -138,3 +138,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-10-28 | Prueba RLS con PGlite + `node:test` (sin Docker, sin Vitest) | Cero instalación para el usuario; evita conflictos de dependencias |
 | 2026-10-28 | Login con lista de proveedores (`login/providers.ts`) | Añadir Apple = descomentar una línea + configurarlo en Supabase |
 | 2026-10-28 | Migraciones aplicadas a mano en el SQL Editor | Lo más sencillo sin CLI; revisable más adelante |
+| 2026-10-28 | GitHub Actions ejecuta lint + prueba RLS + build en cada push | Detecta fallos de seguridad antes de publicar |
