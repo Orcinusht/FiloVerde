@@ -3,7 +3,7 @@
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import type { Provider } from '@supabase/supabase-js'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createRegistroClient } from '@/lib/supabase/server'
 import { MENSAJE_EMAIL_REPETIDO, mensajeError } from '@/lib/supabase/errores'
 
 // El login se hace en el servidor: así los errores reales quedan en los
@@ -30,7 +30,7 @@ export async function entrarConEmail(email: string, password: string): Promise<R
 export async function crearCuenta(email: string, password: string): Promise<Resultado> {
   let conSesion = false
   try {
-    const supabase = await createClient()
+    const supabase = createRegistroClient()
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -43,7 +43,13 @@ export async function crearCuenta(email: string, password: string): Promise<Resu
       console.warn('[auth:registro]', { code: 'email_exists (oculto por Supabase)' })
       return { error: MENSAJE_EMAIL_REPETIDO }
     }
-    conSesion = Boolean(data.session)
+    // Si en Supabase está desactivada la confirmación por email, entramos ya.
+    if (data.session) {
+      const servidor = await createClient()
+      const { error: e2 } = await servidor.auth.setSession(data.session)
+      if (e2) return { error: mensajeError('registro', e2) }
+      conSesion = true
+    }
   } catch (e) {
     return { error: mensajeError('registro', e) }
   }

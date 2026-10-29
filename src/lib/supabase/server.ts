@@ -1,6 +1,7 @@
 import 'server-only'
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config'
 
 // Cliente de Supabase para el servidor (rutas y componentes de servidor).
@@ -22,5 +23,15 @@ export async function createClient() {
         }
       },
     },
+  })
+}
+
+// Cliente SIN cookies y con flujo "implicit", solo para el registro.
+// Así el enlace del email de confirmación trae la sesión en el propio enlace
+// y funciona en cualquier navegador (con el flujo PKCE solo valía en el
+// navegador donde se hizo el registro). Ver src/app/auth/callback.
+export function createRegistroClient() {
+  return createSupabaseClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: { flowType: 'implicit', persistSession: false, autoRefreshToken: false },
   })
 }
