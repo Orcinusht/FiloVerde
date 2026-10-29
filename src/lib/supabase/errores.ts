@@ -31,7 +31,9 @@ export function mensajeError(accion: string, error: unknown): string {
   const codigo = e.code && MENSAJES[e.code] ? e.code : codigoPorTexto(e.message ?? '')
   if (codigo) return MENSAJES[codigo]
   if (e.status === 429) return MENSAJES.over_request_rate_limit
-  return MENSAJE_INESPERADO
+  // Mostramos el código técnico (sin datos personales) para poder diagnosticar.
+  const ref = [e.code, e.status].filter(Boolean).join(' · ') || e.name
+  return ref ? `${MENSAJE_INESPERADO} (código: ${ref})` : MENSAJE_INESPERADO
 }
 
 // Por si Supabase no envía el código: lo deducimos del texto (en inglés).
