@@ -17,7 +17,7 @@ export function LoginForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [cargando, setCargando] = useState(false)
-  const [error, setError] = useState<string | null>(params.get('error') ? 'No se pudo iniciar sesión. Inténtalo de nuevo.' : null)
+  const [error, setError] = useState<string | null>(errorInicial(params.get('error')))
   const [aviso, setAviso] = useState<string | null>(null)
 
   // Ejecuta una acción de servidor y muestra su resultado.
@@ -115,3 +115,10 @@ export function LoginForm() {
   )
 }
 
+// Mensaje al volver de un enlace o de Google con error (?error=...).
+function errorInicial(codigo: string | null): string | null {
+  if (codigo === 'enlace')
+    return 'El enlace ha caducado o ya se usó. Si ya confirmaste tu email, entra con tu email y contraseña.'
+  if (codigo) return 'No se pudo iniciar sesión. Inténtalo de nuevo.'
+  return null
+}

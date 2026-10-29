@@ -60,7 +60,8 @@ src/
     (app)/            pantallas con sesión + barra inferior
       apuestas/ graficas/ bankroll/ ajustes/
     login/            pantalla de entrada (providers.ts = proveedores, actions.ts = login en servidor)
-    auth/callback/    vuelta de Google y del email de confirmación
+    auth/callback/    vuelta de Google (intercambia el "code" por sesión)
+    auth/confirm/     enlace del email de confirmación (token_hash; vale en cualquier navegador)
     api/diagnostico/  comprueba la configuración de Supabase (sin mostrar claves)
     manifest.ts       datos de instalación de la PWA
   components/         piezas de interfaz reutilizables
@@ -114,6 +115,12 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
 
 Los mensajes al usuario se traducen en `src/lib/supabase/errores.ts`.
 
+**Plantilla del email de confirmación** (Supabase → Authentication → Emails → *Confirm signup*):
+el enlace debe ser
+`{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`.
+Con la plantilla por defecto (`{{ .ConfirmationURL }}`) el enlace solo funciona en el mismo
+navegador del registro; si se abre desde la app de correo, acaba en el login.
+
 ## Comandos
 
 ```bash
@@ -153,3 +160,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-10-28 | GitHub Actions ejecuta lint + prueba RLS + build en cada push | Detecta fallos de seguridad antes de publicar |
 | 2026-10-29 | Login con email y Google mediante Server Actions (antes, en el navegador) | El error real queda en los logs de Vercel; mensajes concretos en español |
 | 2026-10-29 | Ruta pública `/api/diagnostico` | Comprobar la configuración desde el móvil sin exponer claves |
+| 2026-10-29 | Email de confirmación con `token_hash` → `/auth/confirm` (en vez del `code` PKCE) | El enlace abierto desde la app de correo no tenía la cookie del registro y acababa en el login |
