@@ -3,7 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config'
 
 // Rutas a las que se puede entrar sin sesión.
-const RUTAS_PUBLICAS = ['/login', '/auth']
+const RUTAS_PUBLICAS = ['/login', '/auth', '/api/diagnostico']
 
 // Renueva la sesión en cada visita (así no caduca mientras uses la app)
 // y manda a /login a quien no tenga sesión.

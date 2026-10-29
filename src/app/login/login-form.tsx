@@ -1,9 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import type { Provider } from '@supabase/supabase-js'
-import { createClient } from '@/lib/supabase/client'
+import { crearCuenta, entrarConEmail, entrarConProveedor, type Resultado } from './actions'
 import { PROVEEDORES } from './providers'
 
 type Modo = 'entrar' | 'registro'
@@ -12,7 +12,6 @@ const input =
   'h-12 w-full rounded-xl border border-border bg-surface px-4 text-base outline-none focus:border-brand'
 
 export function LoginForm() {
-  const router = useRouter()
   const params = useSearchParams()
   const [modo, setModo] = useState<Modo>('entrar')
   const [email, setEmail] = useState('')
@@ -21,53 +20,30 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(params.get('error') ? 'No se pudo iniciar sesión. Inténtalo de nuevo.' : null)
   const [aviso, setAviso] = useState<string | null>(null)
 
-  const callbackUrl = () => `${window.location.origin}/auth/callback`
-
-  async function conProveedor(provider: Provider) {
+  // Ejecuta una acción de servidor y muestra su resultado.
+  // Si todo va bien, la acción redirige ella sola a la app.
+  async function ejecutar(accion: () => Promise<Resultado>) {
     setError(null)
+    setAviso(null)
     setCargando(true)
-    const { error } = await createClient().auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: callbackUrl() },
-    })
-    if (error) {
-      setError(traducir(error.message))
+    try {
+      const r = await accion()
+      setError(r?.error ?? null)
+      setAviso(r?.aviso ?? null)
+    } catch {
+      setError('No se pudo conectar. Revisa tu conexión e inténtalo de nuevo.')
+    } finally {
       setCargando(false)
     }
   }
 
-  async function conEmail(e: React.FormEvent) {
+  function conProveedor(provider: Provider) {
+    ejecutar(() => entrarConProveedor(provider))
+  }
+
+  function conEmail(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    setAviso(null)
-    setCargando(true)
-    const supabase = createClient()
-
-    if (modo === 'entrar') {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) {
-        setError(traducir(error.message))
-        setCargando(false)
-        return
-      }
-      router.replace('/apuestas')
-      router.refresh()
-      return
-    }
-
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo: callbackUrl() },
-    })
-    setCargando(false)
-    if (error) return setError(traducir(error.message))
-    if (data.session) {
-      router.replace('/apuestas')
-      router.refresh()
-    } else {
-      setAviso('Te hemos enviado un email. Ábrelo y pulsa el enlace para activar tu cuenta.')
-    }
+    ejecutar(() => (modo === 'entrar' ? entrarConEmail(email, password) : crearCuenta(email, password)))
   }
 
   return (
@@ -139,10 +115,3 @@ export function LoginForm() {
   )
 }
 
-function traducir(mensaje: string): string {
-  if (/invalid login credentials/i.test(mensaje)) return 'Email o contraseña incorrectos.'
-  if (/email not confirmed/i.test(mensaje)) return 'Falta confirmar tu email. Revisa tu bandeja de entrada.'
-  if (/already registered/i.test(mensaje)) return 'Ya existe una cuenta con ese email.'
-  if (/password/i.test(mensaje)) return 'La contraseña no es válida (mínimo 8 caracteres).'
-  return 'Algo ha fallado. Inténtalo de nuevo.'
-}

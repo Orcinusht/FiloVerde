@@ -59,8 +59,9 @@ src/
   app/
     (app)/            pantallas con sesión + barra inferior
       apuestas/ graficas/ bankroll/ ajustes/
-    login/            pantalla de entrada (providers.ts = lista de proveedores)
+    login/            pantalla de entrada (providers.ts = proveedores, actions.ts = login en servidor)
     auth/callback/    vuelta de Google y del email de confirmación
+    api/diagnostico/  comprueba la configuración de Supabase (sin mostrar claves)
     manifest.ts       datos de instalación de la PWA
   components/         piezas de interfaz reutilizables
   lib/
@@ -102,6 +103,17 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
 - Claves secretas solo en `src/lib/server/` (protegido con `import 'server-only'`) y usadas
   desde rutas de servidor. Nunca con prefijo `NEXT_PUBLIC_`.
 
+## Si el login falla
+
+1. Abrir `https://filo-verde.vercel.app/api/diagnostico`: dice si las variables existen,
+   si tienen buen formato, qué tipo de clave es y si Supabase responde (nunca muestra valores).
+2. Vercel → proyecto → **Logs**: buscar `[auth:` para ver el error real de Supabase
+   (`code`, `status`, `message`; sin emails ni contraseñas).
+3. Supabase → **Logs & Analytics** → *Auth* (errores de registro/login) y *API Gateway*
+   (peticiones rechazadas antes de llegar a Auth, p. ej. clave incorrecta).
+
+Los mensajes al usuario se traducen en `src/lib/supabase/errores.ts`.
+
 ## Comandos
 
 ```bash
@@ -139,3 +151,5 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-10-28 | Login con lista de proveedores (`login/providers.ts`) | Añadir Apple = descomentar una línea + configurarlo en Supabase |
 | 2026-10-28 | Migraciones aplicadas a mano en el SQL Editor | Lo más sencillo sin CLI; revisable más adelante |
 | 2026-10-28 | GitHub Actions ejecuta lint + prueba RLS + build en cada push | Detecta fallos de seguridad antes de publicar |
+| 2026-10-29 | Login con email y Google mediante Server Actions (antes, en el navegador) | El error real queda en los logs de Vercel; mensajes concretos en español |
+| 2026-10-29 | Ruta pública `/api/diagnostico` | Comprobar la configuración desde el móvil sin exponer claves |
