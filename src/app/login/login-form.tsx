@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { Provider } from '@supabase/supabase-js'
 import { crearCuenta, entrarConEmail, entrarConProveedor, type Resultado } from './actions'
@@ -16,25 +16,26 @@ export function LoginForm() {
   const [modo, setModo] = useState<Modo>('entrar')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [cargando, setCargando] = useState(false)
+  const [cargando, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(errorInicial(params.get('error')))
   const [aviso, setAviso] = useState<string | null>(null)
 
   // Ejecuta una acción de servidor y muestra su resultado.
-  // Si todo va bien, la acción redirige ella sola a la app.
-  async function ejecutar(accion: () => Promise<Resultado>) {
+  // Si todo va bien, la acción redirige ella sola a la app (dentro de la
+  // transición, Next.js gestiona esa redirección sin tratarla como error).
+  function ejecutar(accion: () => Promise<Resultado>) {
     setError(null)
     setAviso(null)
-    setCargando(true)
-    try {
-      const r = await accion()
-      setError(r?.error ?? null)
-      setAviso(r?.aviso ?? null)
-    } catch {
-      setError('No se pudo conectar. Revisa tu conexión e inténtalo de nuevo.')
-    } finally {
-      setCargando(false)
-    }
+    startTransition(async () => {
+      try {
+        const r = await accion()
+        setError(r?.error ?? null)
+        setAviso(r?.aviso ?? null)
+      } catch (e) {
+        if (esRedireccion(e)) throw e
+        setError('No se pudo conectar. Revisa tu conexión e inténtalo de nuevo.')
+      }
+    })
   }
 
   function conProveedor(provider: Provider) {
@@ -121,4 +122,9 @@ function errorInicial(codigo: string | null): string | null {
     return 'El enlace ha caducado o ya se usó. Si ya confirmaste tu email, entra con tu email y contraseña.'
   if (codigo) return 'No se pudo iniciar sesión. Inténtalo de nuevo.'
   return null
+}
+
+// Las redirecciones de Next.js viajan como un error especial; no son fallos.
+function esRedireccion(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && String((e as { digest?: string }).digest).startsWith('NEXT_REDIRECT')
 }

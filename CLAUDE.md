@@ -122,6 +122,12 @@ correo). `/auth/callback` (página) la lee y la guarda en el servidor. Si algún
 plantilla a `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`, también funciona
 (ruta `/auth/confirm`).
 
+**Confirmación por email: DESACTIVADA** (Supabase → Authentication → Sign In / Providers →
+Email → *Confirm email*). El servidor de correo gratuito de Supabase solo envía ~2 emails/hora
+y suele entregar solo a miembros del equipo. Al registrarse se entra directamente. Antes de
+abrir la app a más gente: configurar un SMTP propio (p. ej. Resend) y volver a activarla; el
+código ya soporta los dos casos.
+
 ## Comandos
 
 ```bash
@@ -163,3 +169,5 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-10-29 | Ruta pública `/api/diagnostico` | Comprobar la configuración desde el móvil sin exponer claves |
 | 2026-10-29 | Email de confirmación con `token_hash` → `/auth/confirm` (en vez del `code` PKCE) | El enlace abierto desde la app de correo no tenía la cookie del registro y acababa en el login |
 | 2026-10-29 | Registro con flujo *implicit* y `/auth/callback` como página que guarda la sesión en servidor | El enlace del email funciona en cualquier navegador sin tocar la plantilla de Supabase |
+| 2026-10-30 | Confirmación por email desactivada en Supabase | Límite de ~2 emails/hora del correo gratuito; la app es de momento para un solo usuario. Revisar (SMTP propio) si se abre a más gente |
+| 2026-10-30 | Acciones de login llamadas dentro de `startTransition` | Next gestiona la redirección del servidor sin mostrar un falso error |
