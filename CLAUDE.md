@@ -70,6 +70,7 @@ src/
     server/           SOLO servidor: claves secretas (p. ej. Claude en Fase 1)
   proxy.ts            renueva sesión y protege rutas
 supabase/migrations/  esquema de la base de datos (SQL, en orden)
+supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
 tests/                prueba de seguridad RLS
 scripts/              utilidades (generar iconos)
 public/               sw.js e iconos
@@ -142,6 +143,10 @@ npm run iconos       # regenerar iconos provisionales (usa Playwright del sistem
 **Desplegar:** hacer push a `main` en GitHub → Vercel publica solo. Las ramas generan
 URLs de prueba (preview).
 
+**Comprobar la seguridad en el Supabase real:** pegar `supabase/pruebas/comprobar_rls_en_vivo.sql`
+en Supabase → SQL Editor y pulsar Run. Usa las dos cuentas más antiguas, intenta que una acceda
+a lo de la otra y muestra una tabla ✅/❌. Borra sus datos de prueba al terminar.
+
 **Aplicar migraciones:** de momento, a mano en Supabase → SQL Editor, pegando cada archivo de
 `supabase/migrations/` en orden. (Si más adelante se usa la CLI de Supabase, marcar las ya
 aplicadas con `supabase migration repair --status applied <versión>`.)
@@ -171,3 +176,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-10-29 | Registro con flujo *implicit* y `/auth/callback` como página que guarda la sesión en servidor | El enlace del email funciona en cualquier navegador sin tocar la plantilla de Supabase |
 | 2026-10-30 | Confirmación por email desactivada en Supabase | Límite de ~2 emails/hora del correo gratuito; la app es de momento para un solo usuario. Revisar (SMTP propio) si se abre a más gente |
 | 2026-10-30 | Acciones de login llamadas dentro de `startTransition` | Next gestiona la redirección del servidor sin mostrar un falso error |
+| 2026-11-01 | Script de comprobación de RLS en vivo (`supabase/pruebas/`) | Demuestra el aislamiento entre usuarios sobre la base de datos real, no solo la simulada |
