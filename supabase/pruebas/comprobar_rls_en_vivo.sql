@@ -45,6 +45,8 @@ with x as (insert into selecciones (apuesta_id, evento, cuota)
   insert into ids select 'seleccion', id from x;
 with x as (insert into movimientos_bankroll (tipo, importe) values ('ajuste', 1) returning id)
   insert into ids select 'movimiento', id from x;
+with x as (insert into transcripciones (modelo, resultado) values ('PRUEBA-RLS', 'ok') returning id)
+  insert into ids select 'transcripcion', id from x;
 
 insert into resultado
   select 1, 'A ve su propia apuesta (control)', '1', count(*)::text, count(*) = 1
@@ -92,7 +94,37 @@ begin
   exception when others then
     insert into resultado values (10, 'B añade una selección a la apuesta de A', 'rechazado', 'rechazado', true);
   end;
+  -- Fase 1
+  begin
+    perform public.guardar_apuesta((select v from ids where k = 'apuesta'),
+      '{"importe": 1, "tipo": "simple", "estado": "pendiente"}'::jsonb, '[{"evento": "intruso"}]'::jsonb);
+    insert into resultado values (15, 'B edita la apuesta de A con guardar_apuesta', 'rechazado', 'PERMITIDO', false);
+  exception when others then
+    insert into resultado values (15, 'B edita la apuesta de A con guardar_apuesta', 'rechazado', 'rechazado', true);
+  end;
+  begin
+    insert into apuestas (importe, imagen_origen) values (100, (select a from params)::text || '/x.jpg');
+    raise exception 'PERMITIDO';
+  exception when others then
+    insert into resultado values (16, 'B enlaza en su apuesta una captura de A', 'rechazado',
+      case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+  end;
+  begin
+    insert into storage.objects (bucket_id, name) values ('capturas', (select a from params)::text || '/PRUEBA-RLS.jpg');
+    raise exception 'PERMITIDO';  -- se deshace igualmente: no deja nada
+  exception when others then
+    insert into resultado values (17, 'B sube un archivo a la carpeta de capturas de A', 'rechazado',
+      case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+  end;
 end $$;
+
+insert into resultado
+  select 13, 'B ve la transcripción (coste IA) de A', '0', count(*)::text, count(*) = 0
+  from transcripciones where id in (select v from ids);
+insert into resultado
+  select 14, 'B ve las capturas de A en el bucket', '0', count(*)::text, count(*) = 0
+  from storage.objects where bucket_id = 'capturas'
+    and (storage.foldername(name))[1] = (select a from params)::text;
 
 reset role;
 
@@ -109,6 +141,11 @@ reset role;
 
 -- ---------- 4. Comprobar que A conserva sus datos y limpiar ----------
 insert into resultado
+  select 18, 'A ve sus propias capturas (control; 0 si aún no ha subido ninguna)', '≥ 0', count(*)::text, true
+  from storage.objects where bucket_id = 'capturas'
+    and (storage.foldername(name))[1] = (select a from params)::text;
+
+insert into resultado
   select 12, 'La apuesta de A sigue intacta tras los ataques de B', 'importe 1000',
          'importe ' || coalesce(max(importe)::text, 'BORRADA'), coalesce(max(importe), 0) = 1000
   from apuestas where id in (select v from ids);
@@ -116,6 +153,7 @@ insert into resultado
 delete from apuestas where id in (select v from ids);             -- borra también su selección
 delete from casas_apuestas where id in (select v from ids);
 delete from movimientos_bankroll where id in (select v from ids);
+delete from transcripciones where id in (select v from ids);
 
 select
   n as "#",

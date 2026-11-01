@@ -15,7 +15,7 @@ import { PGlite } from '@electric-sql/pglite'
 const ROOT = join(import.meta.dirname, '..')
 const ANA = '00000000-0000-0000-0000-00000000000a'
 const BETO = '00000000-0000-0000-0000-00000000000b'
-const TABLAS = ['casas_apuestas', 'estrategias', 'apuestas', 'selecciones', 'movimientos_bankroll']
+const TABLAS = ['casas_apuestas', 'estrategias', 'apuestas', 'selecciones', 'movimientos_bankroll', 'transcripciones']
 
 let db
 const ids = {}
@@ -61,6 +61,11 @@ before(async () => {
     await tx.query(`insert into selecciones (apuesta_id, evento, cuota) values ($1, 'Betis - Sevilla', 1.85)`, [ids.apuesta])
     await tx.query(`insert into movimientos_bankroll (tipo, importe) values ('deposito', 5000)`)
     await tx.query(`insert into storage.objects (bucket_id, name) values ('capturas', $1)`, [`${ANA}/ticket.png`])
+    await tx.query(
+      `insert into transcripciones (imagen, modelo, resultado, tokens_entrada, tokens_salida, coste_usd)
+       values ($1, 'claude-sonnet-5-5', 'ok', 2500, 600, 0.011)`,
+      [`${ANA}/ticket.png`],
+    )
   })
 })
 
@@ -110,6 +115,14 @@ test('Beto NO puede crear datos a nombre de Ana ni colgarse de los suyos', async
     'selección con user_id de Ana': [`insert into selecciones (apuesta_id, user_id) values ($1, $2)`, [ids.apuesta, ANA]],
     'apuesta propia usando la casa de Ana': [`insert into apuestas (casa_id, importe) values ($1, 100)`, [ids.casa]],
     'captura en la carpeta de Ana': [`insert into storage.objects (bucket_id, name) values ('capturas', $1)`, [`${ANA}/x.png`]],
+    'apuesta propia enlazando la captura de Ana': [
+      `insert into apuestas (importe, imagen_origen) values (100, $1)`,
+      [`${ANA}/ticket.png`],
+    ],
+    'transcripción a nombre de Ana': [
+      `insert into transcripciones (user_id, modelo, resultado) values ($1, 'x', 'ok')`,
+      [ANA],
+    ],
   }
   for (const [nombre, [sql, params]] of Object.entries(intentos)) {
     await assert.rejects(como(BETO, (tx) => tx.query(sql, params)), nombre)
@@ -133,4 +146,66 @@ test('Una selección no puede tener un user_id distinto al de su apuesta (ni siq
 test('El bucket de capturas es privado', async () => {
   const { rows } = await db.query(`select public from storage.buckets where id = 'capturas'`)
   assert.equal(rows[0].public, false)
+})
+
+// ---------- Fase 1: guardar_apuesta() ----------
+
+const datos = (extra = {}) => JSON.stringify({ importe: 500, tipo: 'combinada', estado: 'pendiente', ...extra })
+const sels = JSON.stringify([
+  { evento: 'A - B', cuota: 1.5 },
+  { evento: 'C - D', cuota: 2, estado: 'ganada' },
+])
+
+test('guardar_apuesta crea apuesta + selecciones en orden para quien la llama', async () => {
+  await como(BETO, async (tx) => {
+    const { rows } = await tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb) as id`, [
+      datos({ imagen_origen: `${BETO}/b.jpg` }),
+      sels,
+    ])
+    const s = await tx.query(`select evento, orden, estado, user_id from selecciones where apuesta_id = $1 order by orden`, [rows[0].id])
+    assert.deepEqual(s.rows.map((r) => [r.evento, r.orden, r.estado]), [['A - B', 0, 'pendiente'], ['C - D', 1, 'ganada']])
+    assert.ok(s.rows.every((r) => r.user_id === BETO))
+    throw new Error('deshacer') // la transacción se deshace: no deja datos
+  }).catch((e) => assert.equal(e.message, 'deshacer'))
+})
+
+test('guardar_apuesta: Beto NO puede editar la apuesta de Ana ni usar su casa o su captura', async () => {
+  await assert.rejects(
+    como(BETO, (tx) => tx.query(`select public.guardar_apuesta($1, $2::jsonb, $3::jsonb)`, [ids.apuesta, datos(), sels])),
+    /no encontrada/,
+  )
+  await assert.rejects(
+    como(BETO, (tx) => tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb)`, [datos({ casa_id: ids.casa }), sels])),
+    'casa de Ana',
+  )
+  await assert.rejects(
+    como(BETO, (tx) =>
+      tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb)`, [datos({ imagen_origen: `${ANA}/ticket.png` }), sels]),
+    ),
+    'captura de Ana',
+  )
+  await como(ANA, async (tx) => {
+    const { rows } = await tx.query(`select importe, tipo from apuestas where id = $1`, [ids.apuesta])
+    assert.equal(Number(rows[0].importe), 1000, 'la apuesta de Ana sigue igual')
+    assert.equal(await cuantas(tx, 'selecciones'), 1)
+  })
+})
+
+test('guardar_apuesta: un visitante sin sesión no puede usarla', async () => {
+  await assert.rejects(
+    como(null, (tx) => tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb)`, [datos(), sels])),
+    /permission denied/,
+  )
+})
+
+test('guardar_apuesta: si una selección es inválida no se guarda nada', async () => {
+  await como(ANA, async (tx) => {
+    const antes = await cuantas(tx, 'apuestas')
+    await tx.query('savepoint s')
+    await assert.rejects(
+      tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb)`, [datos(), JSON.stringify([{ cuota: 0.5 }])]),
+    )
+    await tx.query('rollback to savepoint s')
+    assert.equal(await cuantas(tx, 'apuestas'), antes)
+  })
 })

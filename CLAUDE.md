@@ -17,8 +17,10 @@ archivo o panel ponerlas).
 
 ### Fases
 0. **Cimientos** (hecha): PWA vacía, login, base de datos con RLS, despliegue.
-1. Capturas → transcripción con IA (API de Claude, solo desde servidor) → revisión → guardado.
-2. Listas, gráficas y métricas.
+1. **Registrar apuestas** (en verificación en el móvil): capturas → transcripción con IA (API de
+   Claude, solo desde servidor) → revisión → guardado; lista, detalle, edición, borrado, registro
+   manual y coste de la IA en Ajustes.
+2. Gráficas y métricas.
 3. Pendiente de definir.
 
 ## Principios
@@ -46,7 +48,8 @@ archivo o panel ponerlas).
 | Login y datos | Supabase (Auth con Google + email/contraseña, Postgres, Storage) en región UE |
 | Sesión | `@supabase/ssr` con cookies; `src/proxy.ts` la renueva en cada visita |
 | PWA | `src/app/manifest.ts` + `public/sw.js` (solo cachea estáticos, nunca datos) |
-| Pruebas | `node:test` + PGlite (Postgres en memoria, sin Docker) |
+| IA | API de Claude (`@anthropic-ai/sdk`), solo desde el servidor; respuesta validada con `zod` |
+| Pruebas | `node:test` + PGlite (Postgres en memoria, sin Docker) · simulador local + Playwright |
 | Hosting | Vercel, despliegue automático desde GitHub (`main`) |
 
 > Ojo: Next.js 16 cambia cosas respecto a versiones antiguas (p. ej. `middleware.ts` ahora es
@@ -58,28 +61,38 @@ archivo o panel ponerlas).
 src/
   app/
     (app)/            pantallas con sesión + barra inferior
-      apuestas/ graficas/ bankroll/ ajustes/
+      apuestas/         lista (filtros) · nueva/ (capturas o ?manual=1) · [id]/ (detalle y edición)
+        actions.ts      guardar, borrar, crear casa/estrategia, descartar captura (Server Actions)
+      ajustes/          tema, coste de la IA (coste-ia.tsx), cuenta
+      graficas/ bankroll/
+    api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada)
     login/            pantalla de entrada (providers.ts = proveedores, actions.ts = login en servidor)
     auth/callback/    vuelta de Google (?code) y del email de confirmación (#tokens) → sesión
     auth/confirm/     alternativa para el email si se usa plantilla con token_hash
     api/diagnostico/  comprueba la configuración de Supabase (sin mostrar claves)
     manifest.ts       datos de instalación de la PWA
   components/         piezas de interfaz reutilizables
+    apuestas/         formulario de revisión, flujo de capturas, lista, filtros, visor de captura
   lib/
+    apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
+                      cálculos, validación del formulario, esquema de la IA (propuesta.ts)
+    navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
-    server/           SOLO servidor: claves secretas (p. ej. Claude en Fase 1)
+    server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
+                      capturas.ts (bucket), datos.ts (lecturas de la BD)
   proxy.ts            renueva sesión y protege rutas
 supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
-tests/                prueba de seguridad RLS
-scripts/              utilidades (generar iconos)
+tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts)
+scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
 
 ## Base de datos
 
 Tablas (todas con `user_id`): `perfiles`, `casas_apuestas`, `estrategias`, `apuestas`,
-`selecciones`, `movimientos_bankroll`. Bucket privado de Storage: `capturas`, con rutas
+`selecciones`, `movimientos_bankroll`, `transcripciones` (una fila por lectura de la IA: modelo,
+tokens, coste aprox. en USD, resultado). Bucket privado de Storage: `capturas`, con rutas
 `<user_id>/<archivo>`.
 
 - RLS activado en **todas** las tablas y en el bucket: cada usuario solo ve y modifica lo suyo.
@@ -90,6 +103,12 @@ Tablas (todas con `user_id`): `perfiles`, `casas_apuestas`, `estrategias`, `apue
 - `divisa` en apuestas y movimientos: si no se indica, toma la del perfil (trigger).
 - Estados y tipos con `CHECK` (no enums). Para añadir un estado: nueva migración que cambie el `CHECK`.
 - Movimientos: `deposito` y `retirada` con importe positivo; `ajuste` puede ser +/−.
+- `guardar_apuesta(p_id, p_apuesta, p_selecciones)`: guarda apuesta + selecciones de una vez
+  (todo o nada). Corre con los permisos del usuario (RLS aplica). Al editar sustituye las selecciones.
+- `selecciones.orden`: orden en el resguardo. `apuestas.imagen_origen` solo puede apuntar a la
+  carpeta del propio usuario (CHECK).
+- `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
+  `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
 **Cambios en la base de datos = nueva migración** en `supabase/migrations/` (nunca editar una
 ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
@@ -104,6 +123,26 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
   repositorio. La app no la usa.
 - Claves secretas solo en `src/lib/server/` (protegido con `import 'server-only'`) y usadas
   desde rutas de servidor. Nunca con prefijo `NEXT_PUBLIC_`.
+
+## IA (lectura de capturas)
+
+- **Modelo:** variable `ANTHROPIC_MODEL`. Si no existe, `claude-sonnet-5-5` (por defecto en
+  `src/lib/server/env.ts`). Si la lectura falla a menudo, cambiar a **`claude-opus-5-5`**
+  (≈ el doble de caro). Opción barata: `claude-haiku-5-5`.
+  **Cómo cambiarlo:** Vercel → proyecto → Settings → Environment Variables → `ANTHROPIC_MODEL` =
+  `claude-opus-5-5` (Production y Preview) → Save → Deployments → último → **Redeploy**.
+  Para volver atrás, borrar la variable y Redeploy. Ajustes muestra el modelo actual.
+  Si se usa un modelo nuevo, añadir su precio en `src/lib/server/ia/precios.ts`.
+- Flujo: el móvil reduce la imagen → `POST /api/capturas` (comprueba tipo real y ≤ 4 MB, sube a
+  `capturas/<user_id>/<uuid>.jpg`) → `POST /api/capturas/transcribir` (IA) → formulario de revisión
+  → `guardarApuesta` (vuelve a validar todo en el servidor).
+- La IA devuelve JSON con esquema estricto (`lib/apuestas/propuesta.ts`), copia las cuotas tal cual
+  y el código las pasa a decimal. Lo dudoso va en `dudosos` (resaltado en ámbar). El texto de la
+  imagen se trata como datos, nunca como instrucciones.
+- Errores de la IA: mensajes en español en `lib/server/ia/transcribir.ts`; en Vercel → Logs,
+  buscar `[ia:transcribir]`. La imagen nunca se pierde: reintentar o rellenar a mano.
+- Topes: 5 capturas por tanda, 60 lecturas por hora y usuario.
+- Coste: cada lectura guarda tokens y coste aprox. en `transcripciones`; resumen en Ajustes.
 
 ## Si el login falla
 
@@ -134,7 +173,9 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS (sin Docker ni internet)  · también la ejecuta GitHub en cada push
+npm test             # prueba de seguridad RLS + lógica de apuestas (sin Docker ni internet) · también en GitHub
+npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
+                     # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
 npm run build        # compilar como en producción
 npm run iconos       # regenerar iconos provisionales (usa Playwright del sistema)
@@ -178,3 +219,14 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-10-30 | Acciones de login llamadas dentro de `startTransition` | Next gestiona la redirección del servidor sin mostrar un falso error |
 | 2026-11-01 | Script de comprobación de RLS en vivo (`supabase/pruebas/`) | Demuestra el aislamiento entre usuarios sobre la base de datos real, no solo la simulada |
 | 2026-11-01 | **Fase 0 cerrada** | Verificado en el móvil (login Google y email, sesión persistente, instalación como app, modo claro/oscuro) y RLS en vivo: 12/12 comprobaciones OK |
+| 2026-11-01 | IA: `claude-sonnet-5-5` por defecto, cambiable con `ANTHROPIC_MODEL` sin tocar código | Buena lectura a mitad de precio que Opus 5.5 (~0,01 $/captura estimado); medir el coste real en Ajustes |
+| 2026-11-01 | Esfuerzo `low` y salida con esquema JSON estricto (`output_config.format`) | Transcribir no necesita razonar mucho: menos tokens y respuesta siempre con la forma esperada |
+| 2026-11-01 | Plan B automático de Anthropic (`fallbacks: "default"`) en Sonnet/Opus 5.5 | Si el modelo rechaza una imagen, otro la reintenta en la misma llamada |
+| 2026-11-01 | La IA copia las cuotas como aparecen; la conversión a decimal la hace el código | Conversión exacta y comprobable con pruebas; la IA no "calcula" |
+| 2026-11-01 | Subida y lectura por rutas (`/api/capturas/*`), no Server Actions | Las Server Actions limitan el cuerpo a 1 MB; además el móvil no habla directo con Supabase |
+| 2026-11-01 | Imagen reducida en el móvil a 1.600 px JPEG; HEIC con conversor cargado solo si hace falta | Subida rápida, por debajo del límite de Vercel (4,5 MB) y menos tokens |
+| 2026-11-01 | Capturas servidas por `/api/capturas/ver` (con la sesión, RLS) en vez de URLs firmadas | El móvil no conecta bien directo con Supabase |
+| 2026-11-01 | Tanda máxima de 5 capturas; se leen en cola mientras se revisa la primera | Petición del usuario; evita esperas y gasto accidental |
+| 2026-11-01 | Función `guardar_apuesta` en la BD (todo o nada) | Nunca queda una apuesta sin sus selecciones |
+| 2026-11-01 | Fechas del formulario en hora de España (`Europe/Madrid`) | Zona del perfil por defecto; revisar si se usa otra zona |
+| 2026-11-01 | Simulador local (PGlite + migraciones reales + Claude falso) y prueba Playwright | El entorno de desarrollo en la nube no llega a Vercel ni a Supabase reales |

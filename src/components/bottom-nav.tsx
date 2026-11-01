@@ -13,8 +13,15 @@ const SECCIONES = [
 ] as const
 
 export function BottomNav() {
-  const pathname = usePathname()
+  return <Barra pathname={usePathname()} />
+}
 
+// Versión sin sección marcada, mientras se conoce la dirección (páginas como /apuestas/[id]).
+export function BottomNavCargando() {
+  return <Barra pathname="" />
+}
+
+function Barra({ pathname }: { pathname: string }) {
   return (
     <nav
       aria-label="Navegación principal"
