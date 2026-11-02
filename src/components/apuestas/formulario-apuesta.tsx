@@ -447,6 +447,19 @@ export function FormularioApuesta(props: Props) {
           />
         )}
 
+        <CasillasConducta
+          valores={valores}
+          onCambio={(c) =>
+            setValores((v) => {
+              const n = { ...v, ...c }
+              // Al desmarcar la principal, su subcasilla se guarda como "no".
+              if (!n.en_directo) n.viendo_partido = false
+              if (!n.precipitada) n.recuperar_perdidas = false
+              return n
+            })
+          }
+        />
+
         {deporteDeLaApuesta && (
           <p className="text-sm">
             <span className="text-muted">Deporte de la apuesta: </span>
@@ -740,6 +753,67 @@ function TarjetaSeleccion({
         <Desplegable value={s.estado} onChange={(v) => onCambio('estado', v)} marca={dudosos[k('estado')]} opciones={ESTADOS_SELECCION.map((e) => [e, NOMBRE_ESTADO[e]])} />
       </Campo>
     </li>
+  )
+}
+
+// ---------- en directo y precipitada (las marca siempre el usuario) ----------
+
+type Conducta = Pick<ValoresFormulario, 'en_directo' | 'viendo_partido' | 'precipitada' | 'recuperar_perdidas'>
+
+function CasillasConducta({ valores, onCambio }: { valores: Conducta; onCambio: (c: Partial<Conducta>) => void }) {
+  return (
+    <div role="group" aria-label="Cómo fue la apuesta" className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
+      <div className="min-w-0 space-y-1">
+        <Casilla etiqueta="En directo" marcada={valores.en_directo} onCambio={(m) => onCambio({ en_directo: m })} />
+        {valores.en_directo && (
+          <Casilla
+            sub
+            etiqueta="Veía el partido"
+            marcada={valores.viendo_partido}
+            onCambio={(m) => onCambio({ viendo_partido: m })}
+          />
+        )}
+      </div>
+      <div className="min-w-0 space-y-1">
+        <Casilla etiqueta="Precipitada" marcada={valores.precipitada} onCambio={(m) => onCambio({ precipitada: m })} />
+        {valores.precipitada && (
+          <Casilla
+            sub
+            etiqueta="Para recuperar pérdidas"
+            marcada={valores.recuperar_perdidas}
+            onCambio={(m) => onCambio({ recuperar_perdidas: m })}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Casilla({
+  etiqueta,
+  marcada,
+  onCambio,
+  sub,
+}: {
+  etiqueta: string
+  marcada: boolean
+  onCambio: (m: boolean) => void
+  sub?: boolean
+}) {
+  return (
+    <label
+      className={`flex min-h-12 min-w-0 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm font-medium ${
+        sub ? 'ml-4 border-dashed' : ''
+      } ${marcada ? 'border-brand bg-brand/10' : 'border-border bg-background'}`}
+    >
+      <input
+        type="checkbox"
+        checked={marcada}
+        onChange={(e) => onCambio(e.target.checked)}
+        className="size-5 shrink-0 accent-[var(--brand)]"
+      />
+      <span className="min-w-0">{etiqueta}</span>
+    </label>
   )
 }
 

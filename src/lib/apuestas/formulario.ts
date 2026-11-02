@@ -48,6 +48,11 @@ export type ValoresFormulario = {
   resultado_economico: string // neto en euros, con signo: "-10,00"
   importe_recuperado: string // solo para cash out (no se guarda; sirve para calcular)
   notas: string
+  // Conducta: la marca SIEMPRE el usuario (la IA nunca). Sin marcar = pre-partido y normal.
+  en_directo: boolean
+  viendo_partido: boolean // solo si en_directo
+  precipitada: boolean
+  recuperar_perdidas: boolean // solo si precipitada
   selecciones: ValoresSeleccion[]
 }
 
@@ -74,6 +79,10 @@ export type DatosApuesta = {
   estado: EstadoApuesta
   resultado_economico: number | null // céntimos
   notas: string | null
+  en_directo: boolean
+  viendo_partido: boolean
+  precipitada: boolean
+  recuperar_perdidas: boolean
   selecciones: DatosSeleccion[]
 }
 
@@ -135,6 +144,10 @@ export function valoresVacios(): ValoresFormulario {
     resultado_economico: '',
     importe_recuperado: '',
     notas: '',
+    en_directo: false,
+    viendo_partido: false,
+    precipitada: false,
+    recuperar_perdidas: false,
     selecciones: [seleccionVacia()],
   }
 }
@@ -297,6 +310,11 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
       estado: estado as EstadoApuesta,
       resultado_economico: resultado ?? null,
       notas: notas || null,
+      // Solo vale "true" de verdad; las subcasillas, solo si su casilla está marcada.
+      en_directo: bruto.en_directo === true,
+      viendo_partido: bruto.en_directo === true && bruto.viendo_partido === true,
+      precipitada: bruto.precipitada === true,
+      recuperar_perdidas: bruto.precipitada === true && bruto.recuperar_perdidas === true,
       selecciones,
     },
   }

@@ -382,3 +382,105 @@ test('Si falla la lista inicial, la cuenta nueva se crea igualmente', async () =
   assert.equal(rows[0].n, 1)
   await db.query('rollback')
 })
+
+// ---------- Fase 1: en directo y precipitada ----------
+
+const guardarConducta = (tx, id, extra, estado = 'pendiente') =>
+  tx
+    .query(`select public.guardar_apuesta($1, $2::jsonb, '[{"evento":"x","deporte":"Fútbol"}]'::jsonb) as id`, [
+      id,
+      JSON.stringify({ importe: 500, estado, ...extra }),
+    ])
+    .then((r) => r.rows[0].id)
+const conducta = async (tx, id) =>
+  (
+    await tx.query(
+      `select en_directo, viendo_partido, precipitada, recuperar_perdidas, precipitada_momento from apuestas where id = $1`,
+      [id],
+    )
+  ).rows[0]
+
+test('Apuestas existentes: pre-partido y normales, y se siguen editando igual', async () => {
+  await como(ANA, async (tx) => {
+    const c = await conducta(tx, ids.apuesta)
+    assert.deepEqual(c, { en_directo: false, viendo_partido: false, precipitada: false, recuperar_perdidas: false, precipitada_momento: null })
+    await tx.query('savepoint s')
+    // Edición sin los campos nuevos (como antes): se conserva todo.
+    await guardarConducta(tx, ids.apuesta, { importe: 1500 })
+    const { rows } = await tx.query(`select importe, precipitada from apuestas where id = $1`, [ids.apuesta])
+    assert.equal(Number(rows[0].importe), 1500)
+    assert.equal(rows[0].precipitada, false)
+    await tx.query('rollback to savepoint s')
+  })
+})
+
+test('Directo: viendo y no viendo; nunca "veía el partido" sin directo', async () => {
+  await como(ANA, async (tx) => {
+    await tx.query('savepoint s')
+    const a = await guardarConducta(tx, null, { en_directo: true, viendo_partido: true })
+    assert.equal((await conducta(tx, a)).viendo_partido, true)
+    const b = await guardarConducta(tx, null, { en_directo: true, viendo_partido: false })
+    assert.deepEqual([(await conducta(tx, b)).en_directo, (await conducta(tx, b)).viendo_partido], [true, false])
+    await tx.query('savepoint e')
+    await assert.rejects(guardarConducta(tx, null, { en_directo: false, viendo_partido: true }), /check|viendo/)
+    await tx.query('rollback to savepoint e')
+    await assert.rejects(tx.query(`update apuestas set en_directo = false where id = $1`, [a]), /viendo/, 'quitar directo sin quitar "veía"')
+    await tx.query('rollback to savepoint s')
+  })
+})
+
+test('Precipitada: el momento lo pone SIEMPRE la base de datos', async () => {
+  await como(ANA, async (tx) => {
+    await tx.query('savepoint s')
+    // Marcada al registrar (pendiente) → al_registrar, aunque el navegador mande otra cosa.
+    const a = await guardarConducta(tx, null, { precipitada: true, precipitada_momento: 'al_resolver' })
+    assert.equal((await conducta(tx, a)).precipitada_momento, 'al_registrar')
+    // Se resuelve después y se guarda sin tocar la casilla → se conserva.
+    await guardarConducta(tx, a, { precipitada: true, estado: 'ganada' }, 'ganada')
+    assert.equal((await conducta(tx, a)).precipitada_momento, 'al_registrar', 'se conserva al resolver')
+    // Se reabre (vuelve a pendiente) → se conserva.
+    await guardarConducta(tx, a, { precipitada: true })
+    assert.equal((await conducta(tx, a)).precipitada_momento, 'al_registrar', 'se conserva al reabrir')
+    // Marcada solo al resolver (ya resuelta) → al_resolver.
+    const b = await guardarConducta(tx, null, {}, 'perdida')
+    assert.equal((await conducta(tx, b)).precipitada_momento, null)
+    await guardarConducta(tx, b, { precipitada: true, recuperar_perdidas: true }, 'perdida')
+    assert.equal((await conducta(tx, b)).precipitada_momento, 'al_resolver')
+    // Captura que llega resuelta y marcada → al_resolver.
+    const c = await guardarConducta(tx, null, { precipitada: true }, 'ganada')
+    assert.equal((await conducta(tx, c)).precipitada_momento, 'al_resolver')
+    // Desmarcar → se borran la subcasilla y el momento.
+    await guardarConducta(tx, b, { precipitada: false, recuperar_perdidas: false }, 'perdida')
+    assert.deepEqual(await conducta(tx, b), { en_directo: false, viendo_partido: false, precipitada: false, recuperar_perdidas: false, precipitada_momento: null })
+    // Intento directo de poner un momento sin precipitada → se ignora (lo pone la BD).
+    await tx.query(`update apuestas set precipitada_momento = 'al_registrar' where id = $1`, [b])
+    assert.equal((await conducta(tx, b)).precipitada_momento, null)
+    await tx.query('rollback to savepoint s')
+  })
+})
+
+test('Reglas: "recuperar pérdidas" sin precipitada y momento incoherente se rechazan', async () => {
+  await assert.rejects(
+    como(ANA, (tx) => guardarConducta(tx, null, { precipitada: false, recuperar_perdidas: true })),
+    /recuperar/,
+  )
+  // Aunque se saltara el disparador, la tabla rechaza un momento sin precipitada.
+  await db.query('begin')
+  await db.query('alter table public.apuestas disable trigger apuestas_precipitada_momento')
+  await assert.rejects(db.query(`update apuestas set precipitada_momento = 'al_registrar' where id = $1`, [ids.apuesta]), /momento/)
+  await db.query('rollback')
+  await db.query('begin')
+  await db.query('alter table public.apuestas disable trigger apuestas_precipitada_momento')
+  await assert.rejects(db.query(`update apuestas set precipitada = true where id = $1`, [ids.apuesta]), /momento/)
+  await db.query('rollback')
+})
+
+test('Beto NO ve ni cambia las casillas de conducta de Ana', async () => {
+  await como(BETO, async (tx) => {
+    const r = await tx.query(`select en_directo, precipitada from apuestas where id = $1`, [ids.apuesta])
+    assert.equal(r.rows.length, 0)
+    const u = await tx.query(`update apuestas set precipitada = true, en_directo = true where id = $1`, [ids.apuesta])
+    assert.equal(u.affectedRows, 0)
+  })
+  await como(ANA, async (tx) => assert.equal((await conducta(tx, ids.apuesta)).precipitada, false))
+})

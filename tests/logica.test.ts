@@ -298,3 +298,33 @@ test('catálogo para la IA: compacto y con tope de tamaño', () => {
   assert.ok(txt.length <= 4000, `${txt.length} caracteres`)
   assert.ok(JSON.parse(txt).Fútbol.length > 0)
 })
+
+// ---------- En directo y precipitada ----------
+
+test('casillas de conducta: solo "true" de verdad, y subcasillas solo con su casilla', () => {
+  const base = { ...valoresVacios(), importe: '5', cuota_total: '2', selecciones: [sel()] }
+  const ok = validarFormulario({ ...base, en_directo: true, viendo_partido: true, precipitada: true, recuperar_perdidas: true })
+  assert.ok(ok.ok)
+  assert.deepEqual(
+    [ok.datos.en_directo, ok.datos.viendo_partido, ok.datos.precipitada, ok.datos.recuperar_perdidas],
+    [true, true, true, true],
+  )
+  const raro = validarFormulario({ ...base, en_directo: 'sí', viendo_partido: true, precipitada: false, recuperar_perdidas: true })
+  assert.ok(raro.ok)
+  assert.deepEqual(
+    [raro.datos.en_directo, raro.datos.viendo_partido, raro.datos.precipitada, raro.datos.recuperar_perdidas],
+    [false, false, false, false],
+    'lo que no sea true no cuenta, y sin casilla principal no hay subcasilla',
+  )
+  assert.equal('precipitada_momento' in ok.datos, false, 'el momento nunca sale del navegador')
+})
+
+test('la IA nunca marca directo ni precipitada (por defecto: pre-partido y normal)', () => {
+  const p = esquemaPropuestaIA.parse({ hay_apuestas: true, motivo: null, apuestas: [apuestaIA({ estado: 'ganada', importe_cobrado: 18.5 })] })
+  const [r] = propuestaARevisiones(p)
+  assert.deepEqual(
+    [r.valores.en_directo, r.valores.viendo_partido, r.valores.precipitada, r.valores.recuperar_perdidas],
+    [false, false, false, false],
+  )
+  assert.ok(!('en_directo' in esquemaPropuestaIA.shape.apuestas.element.shape), 'sin campos nuevos en el esquema de la IA')
+})

@@ -56,6 +56,10 @@ async function Detalle({ params }: { params: PageProps<'/apuestas/[id]'>['params
         ? centimosATexto(apuesta.resultado_economico + apuesta.importe)
         : '',
     notas: apuesta.notas ?? '',
+    en_directo: apuesta.en_directo === true,
+    viendo_partido: apuesta.viendo_partido === true,
+    precipitada: apuesta.precipitada === true,
+    recuperar_perdidas: apuesta.recuperar_perdidas === true,
     selecciones: apuesta.selecciones.map((s) => ({
       evento: s.evento ?? '',
       liga: s.liga ?? '',

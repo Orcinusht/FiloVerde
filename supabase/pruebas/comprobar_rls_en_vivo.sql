@@ -104,6 +104,46 @@ exception when others then
     case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
 end $$;
 
+-- En directo y precipitada
+do $$
+declare v uuid; m text;
+begin
+  v := public.guardar_apuesta(null,
+    '{"importe": 500, "notas": "PRUEBA-RLS", "en_directo": true, "viendo_partido": true, "precipitada": true, "precipitada_momento": "al_resolver"}'::jsonb,
+    '[{"evento": "PRUEBA-RLS", "deporte": "Fútbol"}]'::jsonb);
+  insert into ids values ('apuesta_conducta', v);
+  select precipitada_momento into m from apuestas where id = v;
+  insert into resultado values (32, 'A marca precipitada al registrar (el navegador manda otro momento)', 'al_registrar', coalesce(m, 'vacío'), m = 'al_registrar');
+  perform public.guardar_apuesta(v, '{"importe": 500, "estado": "ganada", "resultado_economico": 400, "en_directo": true, "viendo_partido": true, "precipitada": true}'::jsonb,
+    '[{"evento": "PRUEBA-RLS", "deporte": "Fútbol"}]'::jsonb);
+  select precipitada_momento into m from apuestas where id = v;
+  insert into resultado values (33, 'A resuelve sin tocar «precipitada»: el momento se conserva', 'al_registrar', coalesce(m, 'vacío'), m = 'al_registrar');
+exception when others then
+  insert into resultado values (32, 'A guarda una apuesta en directo y precipitada (control)', 'guardada', 'ERROR: ' || sqlerrm, false);
+end $$;
+
+do $$
+begin
+  update apuestas set en_directo = false where id = (select v from ids where k = 'apuesta_conducta');
+  insert into resultado values (34, 'A deja «veía el partido» sin «en directo»', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (34, 'A deja «veía el partido» sin «en directo»', 'rechazado', 'rechazado', true);
+end $$;
+
+do $$
+begin
+  update apuestas set recuperar_perdidas = true, precipitada = false where id = (select v from ids where k = 'apuesta_conducta');
+  insert into resultado values (35, 'A marca «recuperar pérdidas» sin «precipitada»', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (35, 'A marca «recuperar pérdidas» sin «precipitada»', 'rechazado', 'rechazado', true);
+end $$;
+
+update apuestas set precipitada = false where id in (select v from ids where k = 'apuesta_conducta');
+update apuestas set precipitada_momento = 'al_registrar' where id in (select v from ids where k = 'apuesta_conducta');
+insert into resultado
+  select 36, 'A intenta poner un momento sin «precipitada»: se ignora', 'vacío', coalesce(precipitada_momento, 'vacío'), precipitada_momento is null
+  from apuestas where id in (select v from ids where k = 'apuesta_conducta');
+
 do $$
 begin
   update transcripciones set coste_usd = 0 where id in (select v from ids);
@@ -199,6 +239,9 @@ end $$;
 insert into resultado
   select 23, 'B ve las selecciones «mismo partido» de A', '0', count(*)::text, count(*) = 0
   from selecciones where apuesta_id in (select v from ids where k = 'apuesta_mp');
+
+with x as (update apuestas set en_directo = true, precipitada = true where id in (select v from ids) returning 1)
+  insert into resultado select 37, 'B marca «en directo» o «precipitada» en una apuesta de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
 
 insert into resultado
   select 27, 'B ve los deportes de A', '0', count(*)::text, count(*) = 0

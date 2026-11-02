@@ -381,7 +381,18 @@ APUESTAS.dos_deportes = apuesta({
 APUESTAS.liga_nueva = apuesta({
   selecciones: [sel('Benfica - Oporto', 'Benfica', '1.85', { liga: 'Liga Portugal' })],
 })
+// Captura hecha con el partido EN JUEGO (marcador y minuto en pantalla): la IA no lo anota.
+APUESTAS.en_juego = apuesta({
+  importe: 8, cuota_total: '2.40', ganancia_potencial: 19.2,
+  selecciones: [sel('Girona - Villarreal', 'Girona', '2.40', { evento_fecha: '2026-11-04', evento_hora: '18:30' })],
+})
+APUESTAS.en_juego_resuelta = apuesta({
+  importe: 6, cuota_total: '1.50', ganancia_potencial: 9, estado: 'ganada', importe_cobrado: 9,
+  selecciones: [sel('Osasuna - Getafe', 'Osasuna', '1.50', { estado: 'ganada', evento_fecha: '2026-11-04', evento_hora: '16:15' })],
+})
 const RESPUESTAS = {
+  en_juego: con(APUESTAS.en_juego),
+  en_juego_resuelta: con(APUESTAS.en_juego_resuelta),
   deducido: con(APUESTAS.deducido),
   dos_deportes: con(APUESTAS.dos_deportes),
   liga_nueva: con(APUESTAS.liga_nueva),
@@ -402,6 +413,16 @@ createServer(async (req, res) => {
     cola = JSON.parse(cuerpo)
     return res.writeHead(204).end()
   }
+  if (url.pathname === '/__conducta') {
+    // Solo para las pruebas locales: lo que hay guardado (como administrador).
+    const { rows } = await db.query(
+      `select a.id, a.estado, a.en_directo, a.viendo_partido, a.precipitada, a.recuperar_perdidas, a.precipitada_momento,
+              (select evento from selecciones s where s.apuesta_id = a.id order by orden limit 1) as evento
+       from apuestas a order by a.created_at`,
+    )
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify(rows))
+  }
   if (url.pathname === '/__archivos') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify([...archivos.keys()]))
@@ -417,6 +438,7 @@ createServer(async (req, res) => {
       model: b.model, beta: req.headers['anthropic-beta'] ?? null, fallbacks: b.fallbacks ?? null, effort: b.output_config?.effort,
       formato: b.output_config?.format?.type, bytesImagen: img ? Buffer.from(img.source.data, 'base64').length : 0,
       clave: req.headers['x-api-key'] ? 'presente' : 'falta', maxTokens: b.max_tokens,
+      instruccionDirecto: String(b.system ?? '').includes('indican solo el momento en que se hizo la CAPTURA'),
       catalogo: (b.messages?.[0]?.content?.find((c) => c.type === 'text' && c.text.startsWith('<catalogo>'))?.text ?? ''),
     })
     const modo = cola.shift() ?? 'simple'

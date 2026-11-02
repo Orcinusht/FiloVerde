@@ -45,6 +45,10 @@ archivo o panel ponerlas).
 - **Fase 2: las métricas por liga, deporte y casa cuentan APUESTAS, no selecciones.** Una
   combinada de 3 partidos de LaLiga es 1 apuesta de LaLiga; un "mismo partido" con 4 condiciones
   es 1 apuesta (en la BD cada condición repite evento/liga/fecha: no sumarlas como si fueran 4).
+- **Fase 2 · directo y precipitada:** sin marcar significa **pre-partido** y **normal**; las
+  métricas lo tratan así y deben avisar de que una apuesta en directo que se olvidó marcar cuenta
+  como pre-partido. Para medir el sesgo, comparar "precipitada" marcada **al registrar** frente a
+  **al resolver** (`precipitada_momento`). Avisar cuando una subdivisión tenga muy pocas apuestas.
 - **La app registra y analiza; no recomienda apuestas.**
 - Importes en **céntimos** (enteros). Cuotas **siempre en decimal** en la base de datos; el
   formato de cuota del perfil (decimal / fraccional / americana) es solo para mostrar.
@@ -145,7 +149,18 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   si hay varios, "Mixto". Lo calcula SIEMPRE `guardar_apuesta` (`deporte_resumen()`), al crear y
   al editar; lo que mande el navegador se ignora.
 - `transcripciones.version_instrucciones`: versión de las instrucciones de la IA (vacía = 1, sin
-  catálogo; 2 = con catálogo). Ajustes compara el coste medio por versión.
+  catálogo; 2 = con catálogo; 3 = ignora señales de directo). Ajustes compara el coste medio por versión.
+- **Conducta** (la marca SIEMPRE el usuario, nunca la IA): `apuestas.en_directo` y
+  `viendo_partido` (solo si en directo), `precipitada` y `recuperar_perdidas` (solo si
+  precipitada). Booleanos no nulos, falso por defecto: sin marcar = pre-partido y normal (así
+  quedaron las apuestas anteriores). La BD rechaza "veía el partido" sin directo y "recuperar
+  pérdidas" sin precipitada (CHECK).
+- `apuestas.precipitada_momento` (`al_registrar` · `al_resolver`): solo existe si `precipitada`.
+  Lo pone SIEMPRE el disparador `apuestas_precipitada_momento` (en cualquier escritura; lo que
+  mande el navegador se ignora): al marcarla, `al_registrar` si el estado que se guarda es
+  pendiente y `al_resolver` si ya está resuelta (también una captura que llega resuelta). Si ya
+  estaba marcada se conserva, **también si se reabre una apuesta resuelta**; al desmarcarla se
+  borra. No se muestra en pantalla. Por eso guardar nunca falla por la regla del momento.
 - `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
   `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
@@ -188,6 +203,8 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
   de ahí. El servidor lo comprueba: lo que no esté en el catálogo (o una liga de otro deporte)
   sale en ámbar como **"nueva"** con "Crear y usar". Coste extra medido: ~200 tokens de catálogo
   + ~150 de instrucciones ≈ +0,0007 $ por captura con Sonnet 5.5 (≈ +6 %).
+- Directo: la IA tiene orden expresa de IGNORAR "En juego", marcador y minuto (reflejan el
+  momento de la captura, no el de apostar). No hay campos de directo/precipitada en su esquema.
 - Clasificación: varios partidos distintos = combinada; un partido con varias condiciones sin
   cuotas individuales (Crear apuesta, Bet Builder, Same Game Multi) = mismo_partido; un solo
   mercado = simple. La IA propone; el formulario deja cambiar el tipo y pregunta qué conservar si
@@ -303,3 +320,9 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-03 | `transcripciones.version_instrucciones` | Medir el coste real antes/después de cambiar las instrucciones |
 | 2026-11-03 | Campos de fecha/hora sin aspecto nativo, rejilla de 2 columnas con `min-width: 0` (también en `fieldset`) | En iPhone se salían de la tarjeta; revisado a 320/375/390/430 px |
 | 2026-11-03 | Migración `20261103000001` solo aditiva y repetible (se puede ejecutar dos veces) | No rompe `main`; segura si se pega de nuevo por error |
+| 2026-11-04 | Casillas "En directo" (+ "Veía el partido") y "Precipitada" (+ "Para recuperar pérdidas"), siempre del usuario | Datos de conducta para la Fase 2 sin pasos extra al registrar ni al resolver |
+| 2026-11-04 | Cuatro booleanos en vez de una columna "conducta" con varios valores | Métricas más simples; la BD impide combinaciones imposibles (CHECK) |
+| 2026-11-04 | `precipitada_momento` calculado por un disparador de la tabla | Vale para cualquier camino de escritura; se conserva al reabrir; nunca se fía del navegador |
+| 2026-11-04 | La IA ignora señales de directo (instrucciones v3) sin tocar su esquema | La captura refleja el momento de la captura, no el de la apuesta |
+| 2026-11-04 | Filtros "En directo" y "Precipitadas" y marcas LIVE / ⚡ en la lista | Encontrarlas rápido sin abrir cada apuesta |
+| 2026-11-04 | Migración `20261104000001` solo aditiva y repetible, después de la de deportes | No rompe `main` |

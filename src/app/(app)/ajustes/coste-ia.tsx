@@ -55,6 +55,12 @@ function Fila({ nombre, valor }: { nombre: string; valor: string }) {
   )
 }
 
+const NOMBRE_VERSION: Record<number, string> = {
+  1: 'antes del catálogo',
+  2: 'con catálogo',
+  3: 'ignora señales de directo',
+}
+
 // Coste medio antes y después de cambiar las instrucciones de la IA (p. ej. con el catálogo).
 function ComparativaVersiones({
   porVersion,
@@ -74,7 +80,7 @@ function ComparativaVersiones({
           <li key={v.version} className="flex justify-between gap-3">
             <span>
               v{v.version}
-              {v.version === 1 ? ' (antes del catálogo)' : v.version === 2 ? ' (con catálogo)' : ''} · {v.lecturas}
+              {NOMBRE_VERSION[v.version] ? ` (${NOMBRE_VERSION[v.version]})` : ''} · {v.lecturas}
             </span>
             <span className="font-medium">{v.medioUsd == null ? '—' : usd(v.medioUsd)}</span>
           </li>

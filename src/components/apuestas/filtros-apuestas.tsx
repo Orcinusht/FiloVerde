@@ -11,17 +11,29 @@ export function FiltrosApuestas({
   deporte,
   casas,
   deportes,
+  directo,
+  precipitada,
 }: {
   estado: string
   casa: string
   deporte: string
+  directo: boolean
+  precipitada: boolean
   casas: Opcion[]
   deportes: string[]
 }) {
   const router = useRouter()
 
-  function ir(nuevoEstado: string, nuevaCasa: string, nuevoDeporte = deporte) {
+  function ir(
+    nuevoEstado: string,
+    nuevaCasa: string,
+    nuevoDeporte = deporte,
+    nuevoDirecto = directo,
+    nuevaPrecipitada = precipitada,
+  ) {
     const q = new URLSearchParams()
+    if (nuevoDirecto) q.set('directo', '1')
+    if (nuevaPrecipitada) q.set('precipitada', '1')
     if (nuevoEstado) q.set('estado', nuevoEstado)
     if (nuevaCasa) q.set('casa', nuevaCasa)
     if (nuevoDeporte) q.set('deporte', nuevoDeporte)
@@ -63,6 +75,24 @@ export function FiltrosApuestas({
           </option>
         ))}
       </select>
+      <Chip etiqueta="En directo" activo={directo} onClick={() => ir(estado, casa, deporte, !directo, precipitada)} />
+      <Chip etiqueta="Precipitadas" activo={precipitada} onClick={() => ir(estado, casa, deporte, directo, !precipitada)} />
     </div>
+  )
+}
+
+function Chip({ etiqueta, activo, onClick }: { etiqueta: string; activo: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={activo}
+      onClick={onClick}
+      className={`h-11 min-w-0 rounded-xl border px-3 text-sm font-medium ${
+        activo ? 'border-brand bg-brand text-brand-foreground' : 'border-border bg-surface'
+      }`}
+    >
+      {activo ? '✓ ' : ''}
+      {etiqueta}
+    </button>
   )
 }

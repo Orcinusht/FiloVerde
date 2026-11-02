@@ -22,6 +22,8 @@ export type FilaApuesta = {
   resultado_economico: number | null
   casa: string | null
   deporte: string | null // deporte resumen (o "Mixto")
+  en_directo: boolean
+  precipitada: boolean
   n_selecciones: number
   primer_evento: string | null
 }
@@ -40,6 +42,10 @@ export type DetalleApuesta = {
   resultado_economico: number | null
   notas: string | null
   imagen_origen: string | null
+  en_directo: boolean
+  viendo_partido: boolean
+  precipitada: boolean
+  recuperar_perdidas: boolean
   selecciones: {
     evento: string | null
     liga: string | null
@@ -77,13 +83,20 @@ export async function listarEstrategias(): Promise<Opcion[]> {
 
 export const POR_PAGINA = 50
 
-export async function listarApuestas(filtros: { estado?: string; casa?: string; deporte?: string; pagina?: number }) {
+export async function listarApuestas(filtros: {
+  estado?: string
+  casa?: string
+  deporte?: string
+  directo?: boolean
+  precipitada?: boolean
+  pagina?: number
+}) {
   const supabase = await createClient()
   const pagina = Math.max(0, filtros.pagina ?? 0)
   let q = supabase
     .from('apuestas')
     .select(
-      'id, fecha, tipo, importe, divisa, cuota_total, estado, resultado_economico, deporte, casas_apuestas(nombre), selecciones(evento, pronostico, orden)',
+      'id, fecha, tipo, importe, divisa, cuota_total, estado, resultado_economico, deporte, en_directo, precipitada, casas_apuestas(nombre), selecciones(evento, pronostico, orden)',
       { count: 'exact' },
     )
     .order('fecha', { ascending: false })
@@ -91,6 +104,8 @@ export async function listarApuestas(filtros: { estado?: string; casa?: string; 
     .range(pagina * POR_PAGINA, pagina * POR_PAGINA + POR_PAGINA - 1)
   if (filtros.estado) q = q.eq('estado', filtros.estado)
   if (filtros.deporte) q = q.eq('deporte', filtros.deporte)
+  if (filtros.directo) q = q.eq('en_directo', true)
+  if (filtros.precipitada) q = q.eq('precipitada', true)
   if (filtros.casa === 'sin') q = q.is('casa_id', null)
   else if (filtros.casa) q = q.eq('casa_id', filtros.casa)
 
@@ -112,6 +127,8 @@ export async function listarApuestas(filtros: { estado?: string; casa?: string; 
       resultado_economico: num(a.resultado_economico),
       casa: casa?.nombre ?? null,
       deporte: a.deporte ?? null,
+      en_directo: a.en_directo === true,
+      precipitada: a.precipitada === true,
       n_selecciones: sels.length,
       primer_evento: sels[0]?.evento ?? sels[0]?.pronostico ?? null,
     }
@@ -125,7 +142,7 @@ export async function obtenerApuesta(id: string): Promise<DetalleApuesta | null>
   const { data, error } = await supabase
     .from('apuestas')
     .select(
-      'id, casa_id, estrategia_id, tipo, fecha, importe, divisa, cuota_total, ganancia_potencial, estado, resultado_economico, notas, imagen_origen, selecciones(evento, liga, deporte, mercado, pronostico, cuota, estado, evento_fecha, evento_hora, orden)',
+      'id, casa_id, estrategia_id, tipo, fecha, importe, divisa, cuota_total, ganancia_potencial, estado, resultado_economico, notas, imagen_origen, en_directo, viendo_partido, precipitada, recuperar_perdidas, selecciones(evento, liga, deporte, mercado, pronostico, cuota, estado, evento_fecha, evento_hora, orden)',
     )
     .eq('id', id)
     .maybeSingle()
