@@ -52,6 +52,28 @@ insert into resultado
   select 1, 'A ve su propia apuesta (control)', '1', count(*)::text, count(*) = 1
   from apuestas where id in (select v from ids);
 
+-- Ajustes Fase 1: tipo "mismo partido" con selecciones sin cuota (control)
+do $$
+declare v uuid;
+begin
+  v := public.guardar_apuesta(null,
+    '{"importe": 500, "tipo": "mismo_partido", "cuota_total": 4.5, "notas": "PRUEBA-RLS"}'::jsonb,
+    '[{"evento": "PRUEBA-RLS", "mercado": "1X2", "evento_fecha": "2026-11-08", "evento_hora": "21:00"},
+      {"evento": "PRUEBA-RLS", "mercado": "Ambos marcan"}]'::jsonb);
+  insert into ids values ('apuesta_mp', v);
+  insert into resultado values (19, 'A guarda una apuesta «mismo partido» sin cuotas por selección (control)', 'guardada', 'guardada', true);
+exception when others then
+  insert into resultado values (19, 'A guarda una apuesta «mismo partido» sin cuotas por selección (control)', 'guardada', 'ERROR: ' || sqlerrm, false);
+end $$;
+
+do $$
+begin
+  update transcripciones set coste_usd = 0 where id in (select v from ids);
+  insert into resultado values (20, 'A cambia el coste registrado de su propia lectura', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (20, 'A cambia el coste registrado de su propia lectura', 'rechazado', 'rechazado', true);
+end $$;
+
 reset role;
 
 -- ---------- 2. Como B: intentar acceder a lo de A ----------
@@ -121,6 +143,24 @@ end $$;
 insert into resultado
   select 13, 'B ve la transcripción (coste IA) de A', '0', count(*)::text, count(*) = 0
   from transcripciones where id in (select v from ids);
+
+with x as (update transcripciones set descartadas = '{0}', imagen = null where id in (select v from ids) returning 1)
+  insert into resultado select 21, 'B marca como descartada una lectura de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+
+do $$
+begin
+  perform public.guardar_apuesta(null,
+    jsonb_build_object('importe', 100, 'transcripcion_id', (select v from ids where k = 'transcripcion'), 'transcripcion_indice', 0),
+    '[{"evento": "intruso"}]'::jsonb);
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (22, 'B enlaza su apuesta a una lectura de A', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+
+insert into resultado
+  select 23, 'B ve las selecciones «mismo partido» de A', '0', count(*)::text, count(*) = 0
+  from selecciones where apuesta_id in (select v from ids where k = 'apuesta_mp');
 insert into resultado
   select 14, 'B ve las capturas de A en el bucket', '0', count(*)::text, count(*) = 0
   from storage.objects where bucket_id = 'capturas'

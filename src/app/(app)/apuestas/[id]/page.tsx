@@ -59,6 +59,8 @@ async function Detalle({ params }: { params: PageProps<'/apuestas/[id]'>['params
       pronostico: s.pronostico ?? '',
       cuota: cuotaATexto(s.cuota),
       estado: s.estado,
+      evento_fecha: s.evento_fecha ? String(s.evento_fecha).slice(0, 10) : '',
+      evento_hora: s.evento_hora ? s.evento_hora.slice(0, 5) : '',
     })),
   }
 

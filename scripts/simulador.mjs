@@ -48,7 +48,8 @@ function leerToken(req) {
 
 // ---------- base de datos ----------
 
-const db = new PGlite()
+// Fechas (date) y horas (time) como texto, igual que las devuelve Supabase.
+const db = new PGlite({ parsers: { 1082: (v) => v, 1083: (v) => v } })
 await db.exec(readFileSync(join(ROOT, 'tests/supabase-stub.sql'), 'utf8'))
 for (const f of readdirSync(join(ROOT, 'supabase/migrations')).filter((f) => f.endsWith('.sql')).sort()) {
   await db.exec(readFileSync(join(ROOT, 'supabase/migrations', f), 'utf8'))
@@ -110,7 +111,12 @@ function condiciones(params, valores) {
     if (op === 'eq') where.push(`${col} = $${valores.push(val)}`)
     else if (op === 'gte') where.push(`${col} >= $${valores.push(val)}`)
     else if (op === 'ilike') where.push(`${col} ilike $${valores.push(val.replace(/\*/g, '%'))}`)
+    else if (op === 'gt') where.push(`${col} > $${valores.push(val)}`)
     else if (op === 'is' && val === 'null') where.push(`${col} is null`)
+    else if (op === 'in') {
+      const lista = val.replace(/^\(|\)$/g, '').split(',').map((x) => x.replace(/^"|"$/g, '')).filter(Boolean)
+      where.push(lista.length ? `${col}::text = any($${valores.push(lista)})` : 'false')
+    }
     else throw Object.assign(new Error(`filtro no soportado: ${k}=${v}`), { code: 'PGRST100' })
   }
   return where.length ? `where ${where.join(' and ')}` : ''
@@ -128,6 +134,12 @@ async function embeber(tx, tabla, filas, embebidos) {
       f[e.tabla] = rel.tipo === 'uno' ? (rows[0] ?? null) : rows
     }
   }
+}
+
+// Objetos → JSON (columnas jsonb); listas de números → arrays de Postgres.
+function aParametro(v) {
+  if (v !== null && typeof v === 'object' && !(Array.isArray(v) && v.every((x) => typeof x === 'number'))) return JSON.stringify(v)
+  return v
 }
 
 async function rest(req, res, url, cuerpo) {
@@ -188,11 +200,20 @@ async function rest(req, res, url, cuerpo) {
         const ks = Object.keys(fila)
         const { rows } = await tx.query(
           `insert into public.${tabla} (${ks.map(ident).join(', ')}) values (${ks.map((_, i) => `$${i + 1}`).join(', ')}) returning ${cols}`,
-          ks.map((k) => fila[k]),
+          ks.map((k) => aParametro(fila[k])),
         )
         salida.push(...rows)
       }
       return { cuerpo: prefer.includes('return=representation') ? salida : null }
+    }
+
+    if (req.method === 'PATCH') {
+      const datos = JSON.parse(cuerpo)
+      const ks = Object.keys(datos)
+      const sets = ks.map((k) => `${ident(k)} = $${valores.push(aParametro(datos[k]))}`).join(', ')
+      const where = condiciones(url.searchParams, valores)
+      const { rows } = await tx.query(`update public.${tabla} set ${sets} ${where} returning ${cols}`, valores)
+      return { cuerpo: prefer.includes('return=representation') ? rows : null }
     }
 
     if (req.method === 'DELETE') {
@@ -305,32 +326,50 @@ createServer(async (req, res) => {
 // ---------- servidor Claude (simulado) ----------
 
 const sel = (evento, pronostico, cuota, extra = {}) => ({
-  evento, liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico, cuota, estado: null, ...extra,
+  evento, liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico, cuota, estado: null,
+  evento_fecha: '2026-11-08', evento_hora: '21:00', ...extra,
 })
-const RESPUESTAS = {
-  simple: {
-    es_apuesta: true, motivo: null, casa: 'Bet365', tipo: 'simple', fecha: '2026-10-31T20:45', importe: 10,
-    cuota_total: '1.85', ganancia_potencial: 18.5, estado: null, importe_cobrado: null,
-    selecciones: [sel('Real Betis - Sevilla FC', 'Real Betis', '1.85')], dudosos: [],
-  },
-  combinada: {
-    es_apuesta: true, motivo: null, casa: 'Codere', tipo: 'combinada', fecha: '2026-11-01T16:00', importe: 5,
-    cuota_total: '+450', ganancia_potencial: 27.5, estado: null, importe_cobrado: null,
+const apuesta = (extra) => ({
+  casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
+  estado: null, importe_cobrado: null, selecciones: [], dudosos: [], ...extra,
+})
+const con = (...apuestas) => ({ hay_apuestas: true, motivo: null, apuestas })
+const APUESTAS = {
+  simple: apuesta({
+    fecha: '2026-10-31T20:45',
+    selecciones: [sel('Real Betis - Sevilla FC', 'Real Betis', '1.85')],
+  }),
+  combinada: apuesta({
+    casa: 'Codere', tipo: 'combinada', fecha: '2026-11-01T16:00', importe: 5, cuota_total: '+450', ganancia_potencial: 27.5,
     selecciones: [
-      sel('Valencia - Villarreal', 'Empate', '6/4'),
-      sel('Athletic - Osasuna', 'Athletic', '2.00', { mercado: null }),
+      sel('Valencia - Villarreal', 'Empate', '6/4', { evento_hora: null }),
+      sel('Athletic - Osasuna', 'Athletic', '2.00', { mercado: null, liga: 'LaLiga' }),
     ],
-    dudosos: ['selecciones.1.mercado', 'ganancia_potencial'],
-  },
-  resuelta: {
-    es_apuesta: true, motivo: null, casa: 'Bet365', tipo: 'simple', fecha: '2026-10-25T18:30', importe: 20,
-    cuota_total: '2.10', ganancia_potencial: 42, estado: 'ganada', importe_cobrado: 42,
-    selecciones: [sel('Getafe - Girona', 'Girona', '2.10', { estado: 'ganada' })], dudosos: [],
-  },
-  no_apuesta: {
-    es_apuesta: false, motivo: 'Es una foto de un perro, no un resguardo de apuesta.', casa: null, tipo: null, fecha: null,
-    importe: null, cuota_total: null, ganancia_potencial: null, estado: null, importe_cobrado: null, selecciones: [], dudosos: [],
-  },
+    dudosos: [
+      { campo: 'selecciones.1.mercado', motivo: 'no_visible' },
+      { campo: 'selecciones.1.liga', motivo: 'deducido' },
+    ],
+  }),
+  resuelta: apuesta({
+    fecha: '2026-10-25T18:30', importe: 20, cuota_total: '2.10', ganancia_potencial: 42, estado: 'ganada', importe_cobrado: 42,
+    selecciones: [sel('Getafe - Girona', 'Girona', '2.10', { estado: 'ganada', evento_fecha: '2026-10-25', evento_hora: '18:30' })],
+  }),
+  mismo_partido: apuesta({
+    tipo: 'mismo_partido', importe: 10, cuota_total: '5.50', ganancia_potencial: 55,
+    selecciones: [
+      sel('Real Madrid - FC Barcelona', null, null, { mercado: 'Resultado final', pronostico: 'Real Madrid' }),
+      sel('Real Madrid - FC Barcelona', null, null, { mercado: 'Ambos equipos marcan', pronostico: 'Sí' }),
+      sel('Real Madrid - FC Barcelona', null, null, { mercado: 'Tarjetas', pronostico: 'Más de 4.5' }),
+    ],
+  }),
+}
+const RESPUESTAS = {
+  simple: con(APUESTAS.simple),
+  combinada: con(APUESTAS.combinada),
+  resuelta: con(APUESTAS.resuelta),
+  mismo_partido: con(APUESTAS.mismo_partido),
+  dos_apuestas: con(APUESTAS.simple, apuesta({ ...APUESTAS.resuelta, casa: 'Bet365' })),
+  no_apuesta: { hay_apuestas: false, motivo: 'Es una foto de un perro, no un resguardo de apuesta.', apuestas: [] },
 }
 let cola = []
 export const llamadasIA = []
@@ -342,6 +381,10 @@ createServer(async (req, res) => {
     cola = JSON.parse(cuerpo)
     return res.writeHead(204).end()
   }
+  if (url.pathname === '/__archivos') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify([...archivos.keys()]))
+  }
   if (url.pathname === '/__llamadas') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify(llamadasIA))
@@ -352,20 +395,20 @@ createServer(async (req, res) => {
     llamadasIA.push({
       model: b.model, beta: req.headers['anthropic-beta'] ?? null, fallbacks: b.fallbacks ?? null, effort: b.output_config?.effort,
       formato: b.output_config?.format?.type, bytesImagen: img ? Buffer.from(img.source.data, 'base64').length : 0,
-      clave: req.headers['x-api-key'] ? 'presente' : 'falta',
+      clave: req.headers['x-api-key'] ? 'presente' : 'falta', maxTokens: b.max_tokens,
     })
     const modo = cola.shift() ?? 'simple'
     if (modo === 'error500') {
       res.writeHead(529, { 'Content-Type': 'application/json' })
       return res.end(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }))
     }
-    const texto = modo === 'json_malo' ? '{"es_apuesta": "quizá"' : JSON.stringify(RESPUESTAS[modo])
+    const texto = modo === 'json_malo' ? '{"hay_apuestas": "quizá"' : JSON.stringify(RESPUESTAS[modo])
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(
       JSON.stringify({
         id: `msg_${Date.now()}`, type: 'message', role: 'assistant', model: b.model,
         content: [{ type: 'text', text: texto }], stop_reason: 'end_turn', stop_sequence: null,
-        usage: { input_tokens: 2350, output_tokens: 480, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        usage: { input_tokens: 2350, output_tokens: modo === 'dos_apuestas' ? 950 : 480, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
       }),
     )
   }

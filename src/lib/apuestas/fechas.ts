@@ -54,3 +54,34 @@ export function formatoFecha(iso: string, { conHora = true } = {}): string {
     ...(conHora ? { hour: '2-digit', minute: '2-digit' } : {}),
   }).format(new Date(iso))
 }
+
+// Día del evento "YYYY-MM-DD". '' → null · no válido → undefined.
+export function validarDia(t: string): string | null | undefined {
+  const v = t.trim()
+  if (v === '') return null
+  const r = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v)
+  if (!r) return undefined
+  const [y, m, d] = [Number(r[1]), Number(r[2]), Number(r[3])]
+  const f = new Date(Date.UTC(y, m - 1, d))
+  if (y < 2000 || y > 2100 || f.getUTCMonth() !== m - 1 || f.getUTCDate() !== d) return undefined
+  return v
+}
+
+// Hora del evento "HH:MM" (también acepta "HH:MM:SS" de la base de datos). '' → null.
+export function validarHora(t: string): string | null | undefined {
+  const v = t.trim()
+  if (v === '') return null
+  const r = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(v)
+  if (!r || Number(r[1]) > 23 || Number(r[2]) > 59) return undefined
+  return `${r[1].padStart(2, '0')}:${r[2]}`
+}
+
+// "2026-11-02" + "21:00" → "2 nov, 21:00" (sin hora: "2 nov").
+export function formatoEvento(dia: string | null, hora: string | null): string {
+  if (!dia) return ''
+  const [y, m, d] = dia.split('-').map(Number)
+  const txt = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(y, m - 1, d)),
+  )
+  return hora ? `${txt}, ${hora.slice(0, 5)}` : txt
+}

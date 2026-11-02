@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { PageHeader } from '@/components/page-header'
-import { listarCasas, listarEstrategias } from '@/lib/server/datos'
+import { listarCasas, listarEstrategias, listarPendientes } from '@/lib/server/datos'
 import { RegistroCapturas } from '@/components/apuestas/registro-capturas'
 import { NuevaManual } from '@/components/apuestas/editar-apuesta'
 
@@ -28,11 +28,14 @@ export default function Page({ searchParams }: PageProps<'/apuestas/nueva'>) {
 }
 
 async function Contenido({ searchParams }: { searchParams: PageProps<'/apuestas/nueva'>['searchParams'] }) {
-  const manual = (await searchParams).manual === '1'
-  const [casas, estrategias] = await Promise.all([listarCasas(), listarEstrategias()])
-  return manual ? (
-    <NuevaManual casas={casas} estrategias={estrategias} />
-  ) : (
-    <RegistroCapturas casas={casas} estrategias={estrategias} />
-  )
+  const sp = await searchParams
+  const manual = sp.manual === '1'
+  const retomar = sp.pendientes === '1'
+  const [casas, estrategias, pendientes] = await Promise.all([
+    listarCasas(),
+    listarEstrategias(),
+    retomar ? listarPendientes() : Promise.resolve([]),
+  ])
+  if (manual) return <NuevaManual casas={casas} estrategias={estrategias} />
+  return <RegistroCapturas casas={casas} estrategias={estrategias} pendientes={pendientes} />
 }

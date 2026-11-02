@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { descartarCaptura } from '@/app/(app)/apuestas/actions'
 import { valoresVacios, type Opcion } from '@/lib/apuestas/formulario'
-import type { Revision } from '@/lib/apuestas/propuesta'
+import type { ApuestaPendiente, Revision } from '@/lib/apuestas/propuesta'
 import { ErrorImagen, reducirImagen } from '@/lib/navegador/reducir-imagen'
 import { FormularioApuesta } from './formulario-apuesta'
 import { VisorCaptura } from './visor-captura'
@@ -14,12 +14,17 @@ export const MAX_LOTE = 5
 
 type Paso = 'esperando' | 'reduciendo' | 'subiendo' | 'leyendo' | 'lista' | 'error' | 'manual'
 
+// Cada elemento de la cola es una captura (mientras se lee) o una apuesta a revisar.
+// Una captura con varias apuestas se convierte en varios elementos, uno por apuesta.
 type Item = {
   clave: string
-  archivo: File
+  archivo?: File
   paso: Paso
-  ruta?: string
+  ruta?: string | null
   revision?: Revision
+  transcripcionId?: string | null
+  indice?: number // posición de la apuesta dentro de la captura (0, 1…)
+  total?: number // cuántas apuestas trae la captura
   error?: string
 }
 
@@ -32,14 +37,32 @@ const TEXTO_PASO: Partial<Record<Paso, string>> = {
 
 // Flujo: elegir 1–5 capturas → se preparan, suben y leen una detrás de otra
 // (mientras revisas la primera, se van leyendo las siguientes) → revisar → guardar.
-export function RegistroCapturas({ casas, estrategias }: { casas: Opcion[]; estrategias: Opcion[] }) {
+export function RegistroCapturas({
+  casas,
+  estrategias,
+  pendientes = [],
+}: {
+  casas: Opcion[]
+  estrategias: Opcion[]
+  pendientes?: ApuestaPendiente[] // para retomar una revisión a medias
+}) {
   const router = useRouter()
-  const [items, setItems] = useState<Item[]>([])
+  const [items, setItems] = useState<Item[]>(() =>
+    pendientes.map((p) => ({
+      clave: `pendiente-${p.transcripcionId}-${p.indice}`,
+      paso: 'lista' as const,
+      ruta: p.ruta,
+      revision: p.revision,
+      transcripcionId: p.transcripcionId,
+      indice: p.indice,
+      total: p.total,
+    })),
+  )
   const [actual, setActual] = useState(0)
   const [aviso, setAviso] = useState<string | null>(null)
   const [opcionesCasas, setOpcionesCasas] = useState(casas)
   const [opcionesEstrategias, setOpcionesEstrategias] = useState(estrategias)
-  const itemsRef = useRef<Item[]>([])
+  const itemsRef = useRef<Item[]>(items)
   const enMarcha = useRef(false)
 
   function actualizar(clave: string, cambios: Partial<Item>) {
@@ -61,6 +84,7 @@ export function RegistroCapturas({ casas, estrategias }: { casas: Opcion[]; estr
     try {
       if (!ruta) {
         actualizar(item.clave, { paso: 'reduciendo', error: undefined })
+        if (!item.archivo) throw new Error('Falta la imagen. Vuelve a elegirla.')
         const reducida = await reducirImagen(item.archivo)
         actualizar(item.clave, { paso: 'subiendo' })
         const datos = new FormData()
@@ -78,8 +102,20 @@ export function RegistroCapturas({ casas, estrategias }: { casas: Opcion[]; estr
         body: JSON.stringify({ ruta }),
       })
       const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j.revision) throw new Error(j.error ?? 'No se ha podido leer la captura.')
-      actualizar(item.clave, { paso: 'lista', revision: j.revision })
+      const revisiones = j.revisiones as Revision[] | undefined
+      if (!r.ok || !revisiones?.length) throw new Error(j.error ?? 'No se ha podido leer la captura.')
+      // Una entrada en la cola por cada apuesta encontrada, todas con la misma imagen.
+      const nuevos: Item[] = revisiones.map((revision, indice) => ({
+        clave: `${item.clave}-${indice}`,
+        paso: 'lista',
+        ruta,
+        revision,
+        transcripcionId: j.transcripcionId ?? null,
+        indice,
+        total: revisiones.length,
+      }))
+      itemsRef.current = itemsRef.current.flatMap((it) => (it.clave === item.clave ? nuevos : [it]))
+      setItems(itemsRef.current)
     } catch (e) {
       const mensaje =
         e instanceof ErrorImagen || e instanceof Error
@@ -137,7 +173,15 @@ export function RegistroCapturas({ casas, estrategias }: { casas: Opcion[]; estr
   }
 
   async function descartar(item: Item) {
-    if (item.ruta) await descartarCaptura(item.ruta)
+    // Si otras apuestas de esta captura siguen en la cola, la imagen no se borra
+    // (el servidor lo comprueba: solo se borra cuando ya no la usa nadie).
+    if (item.ruta || item.transcripcionId) {
+      await descartarCaptura({
+        ruta: item.ruta ?? null,
+        transcripcionId: item.transcripcionId ?? null,
+        indice: item.indice ?? null,
+      })
+    }
     siguiente()
   }
 
@@ -162,7 +206,9 @@ export function RegistroCapturas({ casas, estrategias }: { casas: Opcion[]; estr
 
   const item = items[actual]
   if (!item) return null
-  const progreso = items.length > 1 ? `Captura ${actual + 1} de ${items.length}` : null
+  // El total puede crecer: una captura con varias apuestas se convierte en varias.
+  const progreso = items.length > 1 ? `Apuesta ${actual + 1} de ${items.length}` : null
+  const variasEnCaptura = (item.total ?? 1) > 1
 
   return (
     <div className="space-y-3">
@@ -178,6 +224,11 @@ export function RegistroCapturas({ casas, estrategias }: { casas: Opcion[]; estr
         {aviso && actual === 0 && (
           <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">{aviso}</p>
         )}
+        {variasEnCaptura && item.paso === 'lista' && (
+          <p role="status" className="rounded-xl bg-sky-500/10 px-3 py-2 text-sm text-sky-800 dark:text-sky-300">
+            He encontrado <strong>{item.total} apuestas</strong> en esta captura. Esta es la {(item.indice ?? 0) + 1}.ª.
+          </p>
+        )}
       </div>
 
       {(item.paso === 'lista' || item.paso === 'manual') && (
@@ -189,6 +240,8 @@ export function RegistroCapturas({ casas, estrategias }: { casas: Opcion[]; estr
           casas={opcionesCasas}
           estrategias={opcionesEstrategias}
           imagen={item.ruta}
+          transcripcionId={item.transcripcionId}
+          indice={item.indice}
           textoGuardar={items.length > 1 && actual + 1 < items.length ? 'Guardar y seguir' : 'Guardar'}
           onGuardada={siguiente}
           onOpcionCreada={(tipo, o) => {
@@ -203,7 +256,7 @@ export function RegistroCapturas({ casas, estrategias }: { casas: Opcion[]; estr
               onClick={() => descartar(item)}
               className="h-11 w-full rounded-xl text-sm font-medium text-muted"
             >
-              Descartar esta captura
+              {variasEnCaptura ? 'Descartar esta apuesta' : 'Descartar esta captura'}
             </button>
           }
         />

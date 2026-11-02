@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { validarFormulario } from '@/lib/apuestas/formulario'
-import { BUCKET, esRutaPropia, registrarError, usuarioActual } from '@/lib/server/capturas'
+import { esRutaPropia, registrarError, usuarioActual } from '@/lib/server/capturas'
+import { limpiarImagenSiNoSeUsa } from '@/lib/server/pendientes'
 import type { Opcion } from '@/lib/apuestas/formulario'
 
 // Acciones de servidor: TODO lo que llega del navegador se vuelve a validar aquí.
@@ -20,6 +21,9 @@ export async function guardarApuesta(entrada: {
   id?: string | null
   valores: unknown
   imagen?: string | null
+  // De qué lectura de la IA y qué apuesta de la captura viene (si viene de una).
+  transcripcionId?: string | null
+  indice?: number | null
 }): Promise<ResultadoGuardar> {
   try {
     const supabase = await createClient()
@@ -30,6 +34,12 @@ export async function guardarApuesta(entrada: {
     if (id !== null && (typeof id !== 'string' || !UUID.test(id))) return { ok: false, error: 'Apuesta no válida.' }
     const imagen = entrada?.imagen ?? null
     if (imagen !== null && !esRutaPropia(imagen, userId)) return { ok: false, error: 'Captura no válida.' }
+    const transcripcionId = entrada?.transcripcionId ?? null
+    const indice = entrada?.indice ?? null
+    if (transcripcionId !== null && (typeof transcripcionId !== 'string' || !UUID.test(transcripcionId)))
+      return { ok: false, error: 'Lectura no válida.' }
+    if (transcripcionId !== null && !(Number.isInteger(indice) && (indice as number) >= 0 && (indice as number) < 50))
+      return { ok: false, error: 'Lectura no válida.' }
 
     const v = validarFormulario(entrada?.valores)
     if (!v.ok) return { ok: false, error: 'Revisa los campos marcados.', errores: v.errores }
@@ -37,13 +47,19 @@ export async function guardarApuesta(entrada: {
     const { selecciones, ...apuesta } = v.datos
     const { data, error } = await supabase.rpc('guardar_apuesta', {
       p_id: id,
-      p_apuesta: { ...apuesta, imagen_origen: id ? null : imagen },
+      p_apuesta: {
+        ...apuesta,
+        imagen_origen: id ? null : imagen,
+        transcripcion_id: id ? null : transcripcionId,
+        transcripcion_indice: id || transcripcionId === null ? null : indice,
+      },
       p_selecciones: selecciones,
     })
     if (error) {
       registrarError('apuestas:guardar', error)
       if (error.code === 'P0002') return { ok: false, error: 'Esa apuesta ya no existe.' }
       if (error.code === '23503') return { ok: false, error: 'La casa o la estrategia elegida ya no existe. Elige otra.' }
+      if (error.code === '23505') return { ok: false, error: 'Esta apuesta ya estaba guardada.' }
       return { ok: false, error: FALLO }
     }
     revalidatePath('/apuestas')
@@ -61,17 +77,22 @@ export async function borrarApuesta(id: string): Promise<{ ok: boolean; error?: 
     const userId = await usuarioActual(supabase)
     if (!userId) return { ok: false, error: SIN_SESION }
 
-    const { data, error } = await supabase.from('apuestas').delete().eq('id', id).select('imagen_origen')
+    const { data, error } = await supabase
+      .from('apuestas')
+      .delete()
+      .eq('id', id)
+      .select('imagen_origen, transcripcion_id, transcripcion_indice')
     if (error) {
       registrarError('apuestas:borrar', error)
       return { ok: false, error: 'No se ha podido borrar. Inténtalo de nuevo.' }
     }
     if (!data?.length) return { ok: false, error: 'Esa apuesta ya no existe.' }
+    // Si venía de una lectura de la IA, no debe volver a ofrecerse como "sin revisar".
+    const { transcripcion_id, transcripcion_indice } = data[0]
+    if (transcripcion_id && transcripcion_indice != null) await marcarDescartada(supabase, transcripcion_id, transcripcion_indice)
+    // La captura solo se borra si ninguna otra apuesta la usa ni queda otra por revisar.
     const imagen = data[0].imagen_origen
-    if (esRutaPropia(imagen, userId)) {
-      const { error: e2 } = await supabase.storage.from(BUCKET).remove([imagen])
-      if (e2) registrarError('capturas:borrar', e2)
-    }
+    if (esRutaPropia(imagen, userId)) await limpiarImagenSiNoSeUsa(supabase, imagen)
     revalidatePath('/apuestas')
     return { ok: true }
   } catch (e) {
@@ -80,24 +101,49 @@ export async function borrarApuesta(id: string): Promise<{ ok: boolean; error?: 
   }
 }
 
-// Borra una captura subida que al final no se guarda (solo si ninguna apuesta la usa).
-export async function descartarCaptura(ruta: string): Promise<{ ok: boolean }> {
+// Descarta una apuesta de la cola de revisión (o una captura que no se pudo leer).
+// Si viene de una lectura de la IA, se apunta como descartada para no volver a ofrecerla.
+// La imagen se borra solo si ya no la usa nadie (ver limpiarImagenSiNoSeUsa).
+export async function descartarCaptura(entrada: {
+  ruta?: string | null
+  transcripcionId?: string | null
+  indice?: number | null
+}): Promise<{ ok: boolean }> {
   try {
     const supabase = await createClient()
     const userId = await usuarioActual(supabase)
-    if (!userId || !esRutaPropia(ruta, userId)) return { ok: false }
-    const { count } = await supabase
-      .from('apuestas')
-      .select('id', { count: 'exact', head: true })
-      .eq('imagen_origen', ruta)
-    if ((count ?? 0) > 0) return { ok: true }
-    const { error } = await supabase.storage.from(BUCKET).remove([ruta])
-    if (error) registrarError('capturas:descartar', error)
-    return { ok: !error }
+    if (!userId) return { ok: false }
+    const { ruta, transcripcionId, indice } = entrada ?? {}
+
+    if (transcripcionId != null) {
+      if (typeof transcripcionId !== 'string' || !UUID.test(transcripcionId)) return { ok: false }
+      if (!(Number.isInteger(indice) && (indice as number) >= 0 && (indice as number) < 50)) return { ok: false }
+      if (!(await marcarDescartada(supabase, transcripcionId, indice as number))) return { ok: false }
+    }
+    if (ruta != null) {
+      if (!esRutaPropia(ruta, userId)) return { ok: false }
+      await limpiarImagenSiNoSeUsa(supabase, ruta)
+    }
+    revalidatePath('/apuestas')
+    return { ok: true }
   } catch (e) {
     registrarError('capturas:descartar', e)
     return { ok: false }
   }
+}
+
+// Apunta en la lectura de la IA que esa apuesta de la captura no se va a guardar.
+async function marcarDescartada(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  transcripcionId: string,
+  indice: number,
+): Promise<boolean> {
+  const { data, error } = await supabase.from('transcripciones').select('descartadas').eq('id', transcripcionId).maybeSingle()
+  if (error || !data) return false
+  const descartadas = [...new Set([...(data.descartadas ?? []), indice])].sort((a, b) => a - b)
+  const { error: e2 } = await supabase.from('transcripciones').update({ descartadas }).eq('id', transcripcionId)
+  if (e2) registrarError('transcripciones:descartar', e2)
+  return !e2
 }
 
 async function crearOpcion(tabla: 'casas_apuestas' | 'estrategias', nombre: unknown) {

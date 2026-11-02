@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { connection } from 'next/server'
-import { listarApuestas, listarCasas, POR_PAGINA } from '@/lib/server/datos'
+import { listarApuestas, listarCasas, listarPendientes, POR_PAGINA } from '@/lib/server/datos'
 import { COLOR_ESTADO, NOMBRE_ESTADO, NOMBRE_TIPO, esEstadoApuesta } from '@/lib/apuestas/estados'
 import { formatoImporte } from '@/lib/apuestas/dinero'
 import { cuotaATexto } from '@/lib/apuestas/cuotas'
@@ -20,8 +20,15 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
 
   let datos: Awaited<ReturnType<typeof listarApuestas>>
   let casas: Awaited<ReturnType<typeof listarCasas>>
+  let nPendientes = 0
   try {
-    ;[datos, casas] = await Promise.all([listarApuestas({ estado, casa, pagina }), listarCasas()])
+    let pendientes: Awaited<ReturnType<typeof listarPendientes>>
+    ;[datos, casas, pendientes] = await Promise.all([
+      listarApuestas({ estado, casa, pagina }),
+      listarCasas(),
+      listarPendientes().catch(() => []),
+    ])
+    nPendientes = pendientes.length
   } catch (e) {
     console.error('[apuestas:listar]', { message: String((e as Error)?.message ?? e).slice(0, 200) })
     return (
@@ -44,6 +51,17 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
 
   return (
     <div className="space-y-3 px-4 pt-1">
+      {nPendientes > 0 && (
+        <Link
+          href="/apuestas/nueva?pendientes=1"
+          className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm"
+        >
+          <span>
+            Tienes <strong>{nPendientes}</strong> {nPendientes === 1 ? 'apuesta leída' : 'apuestas leídas'} sin revisar.
+          </span>
+          <span className="shrink-0 font-semibold text-brand">Revisar →</span>
+        </Link>
+      )}
       <FiltrosApuestas estado={estado} casa={casa} casas={casas} />
 
       {filas.length === 0 ? (

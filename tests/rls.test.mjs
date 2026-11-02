@@ -209,3 +209,77 @@ test('guardar_apuesta: si una selección es inválida no se guarda nada', async 
     assert.equal(await cuantas(tx, 'apuestas'), antes)
   })
 })
+
+// ---------- Fase 1 (ajustes): varias apuestas por captura, mismo partido, retomar ----------
+
+test('mismo_partido se acepta y guarda selecciones sin cuota con fecha y hora del evento', async () => {
+  await como(ANA, async (tx) => {
+    await tx.query('savepoint s')
+    const { rows } = await tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb) as id`, [
+      JSON.stringify({ importe: 1000, tipo: 'mismo_partido', cuota_total: 4.5 }),
+      JSON.stringify([
+        { evento: 'A - B', mercado: 'Resultado', pronostico: 'A', evento_fecha: '2026-11-08', evento_hora: '21:00' },
+        { evento: 'A - B', mercado: 'Ambos marcan', pronostico: 'Sí', evento_fecha: '2026-11-08' },
+      ]),
+    ])
+    const s = await tx.query(
+      `select cuota, evento_fecha::text f, evento_hora::text h from selecciones where apuesta_id = $1 order by orden`,
+      [rows[0].id],
+    )
+    assert.deepEqual(s.rows.map((r) => [r.cuota, r.f, r.h]), [[null, '2026-11-08', '21:00:00'], [null, '2026-11-08', null]])
+    await tx.query('rollback to savepoint s')
+  })
+})
+
+test('Una selección no puede tener hora del evento sin día', async () => {
+  await assert.rejects(
+    como(ANA, (tx) => tx.query(`insert into selecciones (apuesta_id, evento_hora) values ($1, '20:00')`, [ids.apuesta])),
+    /check/,
+  )
+})
+
+test('Transcripciones: Beto no puede tocar las de Ana; nadie puede cambiar el coste', async () => {
+  let idT
+  await como(ANA, async (tx) => {
+    idT = (await tx.query(`select id from transcripciones limit 1`)).rows[0].id
+    // Ana puede marcar descartadas y soltar la imagen…
+    const ok = await tx.query(`update transcripciones set descartadas = '{1}' where id = $1`, [idT])
+    assert.equal(ok.affectedRows, 1)
+  })
+  // …pero no cambiar el coste ni los tokens (aunque sea suya).
+  await assert.rejects(
+    como(ANA, (tx) => tx.query(`update transcripciones set coste_usd = 0 where id = $1`, [idT])),
+    /permission denied/,
+  )
+  await como(BETO, async (tx) => {
+    const r = await tx.query(`update transcripciones set descartadas = '{0}', imagen = null where id = $1`, [idT])
+    assert.equal(r.affectedRows, 0, 'Beto no modifica la de Ana')
+  })
+  await como(ANA, async (tx) => {
+    const { rows } = await tx.query(`select descartadas, imagen from transcripciones where id = $1`, [idT])
+    assert.deepEqual(rows[0].descartadas, [1])
+    assert.equal(rows[0].imagen, `${ANA}/ticket.png`)
+  })
+})
+
+test('Beto NO puede enlazar su apuesta a una lectura (transcripción) de Ana', async () => {
+  const idT = await como(ANA, async (tx) => (await tx.query(`select id from transcripciones limit 1`)).rows[0].id)
+  await assert.rejects(
+    como(BETO, (tx) =>
+      tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x"}]'::jsonb)`, [
+        JSON.stringify({ importe: 100, transcripcion_id: idT, transcripcion_indice: 0 }),
+      ]),
+    ),
+  )
+})
+
+test('La misma apuesta de una lectura no se puede guardar dos veces', async () => {
+  await como(ANA, async (tx) => {
+    const idT = (await tx.query(`select id from transcripciones limit 1`)).rows[0].id
+    const datosT = JSON.stringify({ importe: 100, transcripcion_id: idT, transcripcion_indice: 0 })
+    await tx.query('savepoint s')
+    await tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x"}]'::jsonb)`, [datosT])
+    await assert.rejects(tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x"}]'::jsonb)`, [datosT]), /unique|duplicate/)
+    await tx.query('rollback to savepoint s')
+  })
+})

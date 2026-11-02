@@ -28,12 +28,20 @@ archivo o panel ponerlas).
 - **Móvil primero**, pensado para usarse con una mano (navegación inferior, botones de ≥ 44 px).
 - **Datos en la nube con login.** Nada importante vive solo en el móvil.
 - **La IA propone y el usuario decide.** Lo transcrito siempre se revisa antes de guardarse.
-- **Apuesta y selecciones separadas.** Una apuesta (simple, combinada o sistema) tiene una o
-  varias selecciones, cada una con su propia cuota y estado.
+- **Apuesta y selecciones separadas.** Una apuesta (simple, combinada, mismo partido o sistema)
+  tiene una o varias selecciones, cada una con su estado (y su cuota, salvo en "mismo partido").
+- **Tipos:** `simple` (1 selección; su cuota es la cuota total) · `combinada` (≥ 2 eventos
+  distintos, cada uno con cuota; la total se compara con el producto solo como aviso) ·
+  `mismo_partido` ("Crear apuesta"/Bet Builder: ≥ 2 condiciones de UN partido, sin cuota por
+  condición; solo cuenta la cuota total, nunca se multiplican: están correlacionadas) ·
+  `sistema` (≥ 3 selecciones).
 - **Estados de apuesta:** `pendiente`, `ganada`, `perdida`, `anulada`, `cash_out`,
   `media_ganada`, `media_perdida`. Las selecciones usan los mismos menos `cash_out`.
 - **Métricas solo con apuestas resueltas**; las `pendiente` no cuentan y las `anulada`
   quedan fuera de las métricas.
+- **Fase 2: las métricas por liga, deporte y casa cuentan APUESTAS, no selecciones.** Una
+  combinada de 3 partidos de LaLiga es 1 apuesta de LaLiga; un "mismo partido" con 4 condiciones
+  es 1 apuesta (en la BD cada condición repite evento/liga/fecha: no sumarlas como si fueran 4).
 - **La app registra y analiza; no recomienda apuestas.**
 - Importes en **céntimos** (enteros). Cuotas **siempre en decimal** en la base de datos; el
   formato de cuota del perfil (decimal / fraccional / americana) es solo para mostrar.
@@ -91,8 +99,10 @@ public/               sw.js e iconos
 ## Base de datos
 
 Tablas (todas con `user_id`): `perfiles`, `casas_apuestas`, `estrategias`, `apuestas`,
-`selecciones`, `movimientos_bankroll`, `transcripciones` (una fila por lectura de la IA: modelo,
-tokens, coste aprox. en USD, resultado). Bucket privado de Storage: `capturas`, con rutas
+`selecciones`, `movimientos_bankroll`, `transcripciones` (una fila por lectura de la IA = por
+captura: modelo, tokens, coste aprox. en USD, resultado, `n_apuestas`, `propuesta` = lo que
+propuso la IA con los campos dudosos y su motivo, `descartadas` = índices de apuestas de la
+captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 `<user_id>/<archivo>`.
 
 - RLS activado en **todas** las tablas y en el bucket: cada usuario solo ve y modifica lo suyo.
@@ -107,6 +117,18 @@ tokens, coste aprox. en USD, resultado). Bucket privado de Storage: `capturas`, 
   (todo o nada). Corre con los permisos del usuario (RLS aplica). Al editar sustituye las selecciones.
 - `selecciones.orden`: orden en el resguardo. `apuestas.imagen_origen` solo puede apuntar a la
   carpeta del propio usuario (CHECK).
+- `selecciones.evento_fecha` (`date`) y `evento_hora` (`time`): día y hora de inicio del evento en
+  hora de España. Hora vacía = solo se conoce el día. No puede haber hora sin día (CHECK).
+  Es distinta de `apuestas.fecha` (cuándo se hizo la apuesta).
+- Una captura puede tener varias apuestas: todas comparten `imagen_origen` y se enlazan a su
+  lectura con `apuestas.transcripcion_id` + `transcripcion_indice` (único: no se guarda dos veces).
+- **Apuestas sin revisar** = las de la `propuesta` de una transcripción que no están guardadas ni
+  en `descartadas` (`lib/server/pendientes.ts`). La lista muestra "Tienes N sin revisar" y se
+  retoman sin volver a llamar a la IA. Borrar una apuesta guardada la marca como descartada.
+- **La imagen se borra del bucket** solo si ninguna apuesta guardada la usa y no queda ninguna
+  apuesta de esa captura sin revisar. La transcripción se conserva (coste) con `imagen` vacía.
+- En `transcripciones` el usuario solo puede cambiar `descartadas` e `imagen` (permiso por
+  columna): el modelo, los tokens y el coste no se pueden modificar.
 - `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
   `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
@@ -136,9 +158,18 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
 - Flujo: el móvil reduce la imagen → `POST /api/capturas` (comprueba tipo real y ≤ 4 MB, sube a
   `capturas/<user_id>/<uuid>.jpg`) → `POST /api/capturas/transcribir` (IA) → formulario de revisión
   → `guardarApuesta` (vuelve a validar todo en el servidor).
-- La IA devuelve JSON con esquema estricto (`lib/apuestas/propuesta.ts`), copia las cuotas tal cual
-  y el código las pasa a decimal. Lo dudoso va en `dudosos` (resaltado en ámbar). El texto de la
-  imagen se trata como datos, nunca como instrucciones.
+- La IA devuelve JSON con esquema estricto (`lib/apuestas/propuesta.ts`): una **lista de
+  apuestas** (de 1 a 10 por captura), cada una con sus selecciones y sus `dudosos`
+  (`{campo, motivo}`, motivo = `no_visible` · `borroso` · `deducido`). Solo se marca lo que no se
+  ve, está borroso o se ha deducido; nunca lo que se lee bien. Copia las cuotas tal cual y el
+  código las pasa a decimal. El texto de la imagen se trata como datos, nunca como instrucciones.
+- Fecha/hora del evento: solo si aparecen en la captura (nunca de memoria); si no, vacías y en
+  ámbar. Liga: leída o deducida por equipos/jugadores (marcada "deducido").
+- Clasificación: varios partidos distintos = combinada; un partido con varias condiciones sin
+  cuotas individuales (Crear apuesta, Bet Builder, Same Game Multi) = mismo_partido; un solo
+  mercado = simple. La IA propone; el formulario deja cambiar el tipo y pregunta qué conservar si
+  hay datos que no encajan (nunca borra sin confirmar).
+- `max_tokens` 16000 (varias apuestas por captura). Una captura = una transcripción = un coste.
 - Errores de la IA: mensajes en español en `lib/server/ia/transcribir.ts`; en Vercel → Logs,
   buscar `[ia:transcribir]`. La imagen nunca se pierde: reintentar o rellenar a mano.
 - Topes: 5 capturas por tanda, 60 lecturas por hora y usuario.
@@ -230,3 +261,14 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-01 | Función `guardar_apuesta` en la BD (todo o nada) | Nunca queda una apuesta sin sus selecciones |
 | 2026-11-01 | Fechas del formulario en hora de España (`Europe/Madrid`) | Zona del perfil por defecto; revisar si se usa otra zona |
 | 2026-11-01 | Simulador local (PGlite + migraciones reales + Claude falso) y prueba Playwright | El entorno de desarrollo en la nube no llega a Vercel ni a Supabase reales |
+| 2026-11-02 | Tipo `mismo_partido` (Crear apuesta / Bet Builder): una cuota total, condiciones sin cuota | Las cuotas dentro de un partido están correlacionadas: no se multiplican ni comparan |
+| 2026-11-02 | Formulario según el tipo (mínimos: simple 1, combinada 2, mismo partido 2, sistema 3) y diálogo al cambiar de tipo | La IA propone y el usuario decide; nada se borra sin confirmación |
+| 2026-11-02 | En mismo partido, partido/liga/deporte/fecha/hora se escriben una vez y se copian a cada condición | Formulario más corto; en la BD cada selección sigue completa |
+| 2026-11-02 | Ganada → selecciones en verde (las anuladas no cambian); perdida → el usuario marca las falladas (aviso si ninguna) | Igual en combinadas, sistemas y mismo partido. Cambiar el estado siempre recalcula el resultado |
+| 2026-11-02 | Aviso (sin bloquear) si hay una selección anulada en combinada o sistema | La casa recalcula la cuota sin ella: revisar el resultado económico |
+| 2026-11-02 | La IA devuelve una lista de apuestas por captura; cada una entra en la cola ("Apuesta 1 de 2") | Capturas con varios resguardos; una sola lectura y un solo coste |
+| 2026-11-02 | Campos dudosos con motivo (`no_visible` · `borroso` · `deducido`) | Menos ámbar falso y diagnóstico de la IA |
+| 2026-11-02 | `evento_fecha date` + `evento_hora time` (en vez de un `timestamptz`) | Permite "solo el día" sin inventar una hora ni cambiar de día por la zona horaria |
+| 2026-11-02 | Propuesta de la IA guardada en `transcripciones` para retomar la revisión | Si se cierra la app a mitad, no se vuelve a pagar otra lectura |
+| 2026-11-02 | Imagen borrada solo cuando ya no la usa ninguna apuesta ni queda nada por revisar | Varias apuestas comparten captura; el registro de coste se conserva |
+| 2026-11-02 | Migración `20261102000001` solo aditiva | No rompe la app publicada en `main` |

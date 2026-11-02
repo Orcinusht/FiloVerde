@@ -6,6 +6,8 @@ import { avisosCoherencia, resultadoPropuesto } from './calculos.ts'
 import { cuotaADecimal } from './cuotas.ts'
 import { textoACentimos } from './dinero.ts'
 import {
+  MIN_SELECCIONES,
+  NOMBRE_TIPO,
   esEstadoApuesta,
   esEstadoSeleccion,
   esTipoApuesta,
@@ -13,7 +15,7 @@ import {
   type EstadoSeleccion,
   type TipoApuesta,
 } from './estados.ts'
-import { localAIso } from './fechas.ts'
+import { localAIso, validarDia, validarHora } from './fechas.ts'
 
 export type Opcion = { id: string; nombre: string }
 
@@ -29,6 +31,8 @@ export type ValoresSeleccion = {
   pronostico: string
   cuota: string
   estado: string
+  evento_fecha: string // "2026-11-02" (día del evento, hora de España) o ''
+  evento_hora: string // "21:00" o '' (= solo se conoce el día)
 }
 
 export type ValoresFormulario = {
@@ -54,6 +58,8 @@ export type DatosSeleccion = {
   pronostico: string | null
   cuota: number | null
   estado: EstadoSeleccion
+  evento_fecha: string | null // "YYYY-MM-DD"
+  evento_hora: string | null // "HH:MM"
 }
 
 export type DatosApuesta = {
@@ -75,7 +81,44 @@ export type ResultadoValidacion =
   | { ok: false; errores: Record<string, string>; avisos: string[] }
 
 export function seleccionVacia(): ValoresSeleccion {
-  return { evento: '', liga: '', deporte: '', mercado: '', pronostico: '', cuota: '', estado: 'pendiente' }
+  return {
+    evento: '', liga: '', deporte: '', mercado: '', pronostico: '', cuota: '', estado: 'pendiente',
+    evento_fecha: '', evento_hora: '',
+  }
+}
+
+// Campos que en "mismo partido" se escriben una vez y valen para todas las selecciones.
+export const CAMPOS_COMUNES = ['evento', 'liga', 'deporte', 'evento_fecha', 'evento_hora'] as const
+
+// Ajusta los valores a cómo se guarda cada tipo (sin perder nada que se vea):
+//  · simple: la cuota de su selección ES la cuota total.
+//  · mismo partido: partido, liga, deporte, fecha y hora de la 1.ª selección valen
+//    para todas; las selecciones no llevan cuota propia.
+export function ajustarPorTipo(v: ValoresFormulario): ValoresFormulario {
+  if (v.tipo === 'simple' && v.selecciones.length === 1) {
+    const cuota = v.cuota_total.trim() || v.selecciones[0].cuota
+    return {
+      ...v,
+      cuota_total: cuota,
+      selecciones: v.selecciones.map((s, i) => (i === 0 ? { ...s, cuota } : s)),
+    }
+  }
+  if (v.tipo === 'mismo_partido' && v.selecciones.length >= 1) {
+    const base = v.selecciones[0]
+    return {
+      ...v,
+      selecciones: v.selecciones.map((s) => ({
+        ...s,
+        evento: base.evento,
+        liga: base.liga,
+        deporte: base.deporte,
+        evento_fecha: base.evento_fecha,
+        evento_hora: base.evento_hora,
+        cuota: '',
+      })),
+    }
+  }
+  return v
 }
 
 export function valoresVacios(): ValoresFormulario {
@@ -105,8 +148,21 @@ const opcional = (v: string): string | null => {
 
 // Acepta cualquier cosa (viene del navegador): lo que no sea válido da error.
 export function validarFormulario(entrada: unknown): ResultadoValidacion {
-  const e = (entrada && typeof entrada === 'object' ? entrada : {}) as Record<string, unknown>
+  const bruto = (entrada && typeof entrada === 'object' ? entrada : {}) as Record<string, unknown>
   const errores: Record<string, string> = {}
+  const listaBruta = Array.isArray(bruto.selecciones) ? bruto.selecciones : []
+  // Se normaliza por tipo ANTES de validar (lo mismo que ve el formulario).
+  const e = ajustarPorTipo({
+    ...(bruto as unknown as ValoresFormulario),
+    tipo: texto(bruto.tipo),
+    cuota_total: texto(bruto.cuota_total),
+    selecciones: listaBruta.slice(0, MAX_SELECCIONES + 1).map((s) => {
+      const o = (s && typeof s === 'object' ? s : {}) as Record<string, unknown>
+      const sel = seleccionVacia()
+      for (const k of Object.keys(sel) as (keyof ValoresSeleccion)[]) sel[k] = texto(o[k])
+      return sel
+    }),
+  }) as unknown as Record<string, unknown>
 
   const casa = texto(e.casa_id).trim()
   if (casa && !UUID.test(casa)) errores.casa_id = 'Casa no válida.'
@@ -142,7 +198,7 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
   if (notas.length > MAX_NOTAS) errores.notas = `Máximo ${MAX_NOTAS} caracteres.`
 
   // Selecciones
-  const lista = Array.isArray(e.selecciones) ? e.selecciones : []
+  const lista = e.selecciones as ValoresSeleccion[]
   if (lista.length === 0) errores.selecciones = 'Añade al menos una selección.'
   if (lista.length > MAX_SELECCIONES) errores.selecciones = `Máximo ${MAX_SELECCIONES} selecciones.`
   const selecciones: DatosSeleccion[] = lista.slice(0, MAX_SELECCIONES).map((s, i) => {
@@ -158,9 +214,16 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
     if (cuota === undefined) errores[`selecciones.${i}.cuota`] = 'Cuota no válida.'
     const est = texto(o.estado) || 'pendiente'
     if (!esEstadoSeleccion(est)) errores[`selecciones.${i}.estado`] = 'Estado no válido.'
-    if (!out.evento && !out.pronostico && !out.mercado) {
+    if (tipo === 'mismo_partido') {
+      if (!out.pronostico && !out.mercado) errores[`selecciones.${i}.pronostico`] = 'Escribe el mercado o el pronóstico.'
+    } else if (!out.evento && !out.pronostico && !out.mercado) {
       errores[`selecciones.${i}.evento`] = 'Escribe al menos el evento o el pronóstico.'
     }
+    const dia = validarDia(texto(o.evento_fecha))
+    if (dia === undefined) errores[`selecciones.${i}.evento_fecha`] = 'Día no válido.'
+    const hora = validarHora(texto(o.evento_hora))
+    if (hora === undefined) errores[`selecciones.${i}.evento_hora`] = 'Hora no válida.'
+    else if (hora && !dia) errores[`selecciones.${i}.evento_hora`] = 'Pon también el día del evento.'
     return {
       evento: out.evento,
       liga: out.liga,
@@ -169,16 +232,21 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
       pronostico: out.pronostico,
       cuota: cuota ?? null,
       estado: (esEstadoSeleccion(est) ? est : 'pendiente') as EstadoSeleccion,
+      evento_fecha: dia ?? null,
+      evento_hora: hora ?? null,
     }
   })
 
-  if (tipo === 'simple' && selecciones.length > 1) {
-    errores.tipo = 'Una simple tiene una sola selección. Cambia el tipo a combinada o sistema.'
+  if (esTipoApuesta(tipo) && lista.length > 0) {
+    const min = MIN_SELECCIONES[tipo]
+    if (tipo === 'simple' && selecciones.length > 1) {
+      errores.selecciones = 'Una simple tiene una sola selección. Cambia el tipo o quita las demás.'
+    } else if (selecciones.length < min) {
+      errores.selecciones = `Una apuesta «${NOMBRE_TIPO[tipo]}» necesita al menos ${min} selecciones. Añade más o cambia el tipo.`
+    }
   }
 
-  // En una simple sin cuota total, vale la de su selección.
-  let cuotaFinal = cuotaTotal ?? null
-  if (cuotaFinal == null && tipo === 'simple' && selecciones.length === 1) cuotaFinal = selecciones[0].cuota
+  const cuotaFinal = cuotaTotal ?? null
 
   // Resultado: si está resuelta y no se ha escrito, se calcula.
   if (esEstadoApuesta(estado)) {
@@ -202,10 +270,12 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
 
   const avisos = avisosCoherencia({
     tipo,
+    estado,
     importe: importe ?? null,
     cuotaTotal: cuotaFinal,
     gananciaPotencial: ganancia ?? null,
     cuotasSelecciones: selecciones.map((s) => s.cuota),
+    estadosSelecciones: selecciones.map((s) => s.estado),
   })
 
   if (Object.keys(errores).length > 0) return { ok: false, errores, avisos }

@@ -1,6 +1,7 @@
 import 'server-only'
 import { connection } from 'next/server'
 import { createClient as crearClienteSupabase } from '@/lib/supabase/server'
+import { apuestasPendientes, type ApuestaPendiente } from './pendientes'
 import type { EstadoApuesta, EstadoSeleccion, TipoApuesta } from '@/lib/apuestas/estados'
 
 // Lecturas de la base de datos (siempre con la sesión del usuario: RLS aplica).
@@ -44,6 +45,8 @@ export type DetalleApuesta = {
     pronostico: string | null
     cuota: number | null
     estado: EstadoSeleccion
+    evento_fecha: string | null
+    evento_hora: string | null
   }[]
 }
 
@@ -117,7 +120,7 @@ export async function obtenerApuesta(id: string): Promise<DetalleApuesta | null>
   const { data, error } = await supabase
     .from('apuestas')
     .select(
-      'id, casa_id, estrategia_id, tipo, fecha, importe, divisa, cuota_total, ganancia_potencial, estado, resultado_economico, notas, imagen_origen, selecciones(evento, liga, deporte, mercado, pronostico, cuota, estado, orden)',
+      'id, casa_id, estrategia_id, tipo, fecha, importe, divisa, cuota_total, ganancia_potencial, estado, resultado_economico, notas, imagen_origen, selecciones(evento, liga, deporte, mercado, pronostico, cuota, estado, evento_fecha, evento_hora, orden)',
     )
     .eq('id', id)
     .maybeSingle()
@@ -170,4 +173,10 @@ export async function resumenCosteIA(): Promise<ResumenCosteIA> {
     fallidas: filas.filter((f) => f.resultado === 'error').length,
     modelos: [...new Set(filas.slice(0, 50).map((f) => f.modelo))],
   }
+}
+
+// Apuestas leídas por la IA que quedaron sin revisar (p. ej. se cerró la app a mitad).
+export async function listarPendientes(): Promise<ApuestaPendiente[]> {
+  const supabase = await createClient()
+  return apuestasPendientes(supabase)
 }

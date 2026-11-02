@@ -18,7 +18,7 @@ export const ESTADOS_SELECCION = ESTADOS_APUESTA.filter((e) => e !== 'cash_out')
 >[]
 export type EstadoSeleccion = Exclude<EstadoApuesta, 'cash_out'>
 
-export const TIPOS_APUESTA = ['simple', 'combinada', 'sistema'] as const
+export const TIPOS_APUESTA = ['simple', 'combinada', 'mismo_partido', 'sistema'] as const
 export type TipoApuesta = (typeof TIPOS_APUESTA)[number]
 
 export const NOMBRE_ESTADO: Record<EstadoApuesta, string> = {
@@ -34,7 +34,34 @@ export const NOMBRE_ESTADO: Record<EstadoApuesta, string> = {
 export const NOMBRE_TIPO: Record<TipoApuesta, string> = {
   simple: 'Simple',
   combinada: 'Combinada',
+  mismo_partido: 'Mismo partido',
   sistema: 'Sistema',
+}
+
+// Nombre largo (formulario): "Crear apuesta" es como lo llaman muchas casas.
+export const NOMBRE_TIPO_LARGO: Record<TipoApuesta, string> = {
+  ...NOMBRE_TIPO,
+  mismo_partido: 'Crear apuesta / Mismo partido',
+}
+
+// Mínimo de selecciones de cada tipo (y máximo en la simple).
+export const MIN_SELECCIONES: Record<TipoApuesta, number> = {
+  simple: 1,
+  combinada: 2,
+  mismo_partido: 2,
+  sistema: 3,
+}
+
+// Tipos con varias selecciones con cuota propia (en "mismo partido" no la tienen).
+export const TIPOS_CON_CUOTA_POR_SELECCION: readonly TipoApuesta[] = ['combinada', 'sistema']
+
+// Por qué un dato se marca "a revisar".
+export const MOTIVOS_DUDA = ['no_visible', 'borroso', 'deducido'] as const
+export type MotivoDuda = (typeof MOTIVOS_DUDA)[number]
+export const NOMBRE_MOTIVO: Record<MotivoDuda, string> = {
+  no_visible: 'no visible',
+  borroso: 'borroso',
+  deducido: 'deducido',
 }
 
 // Clases de color para la etiqueta de estado.

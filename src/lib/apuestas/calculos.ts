@@ -43,43 +43,53 @@ export function productoCuotas(cuotas: (number | null)[]): number | null {
 // Avisos (no bloquean el guardado) si los números no cuadran entre sí.
 export function avisosCoherencia(args: {
   tipo: string
+  estado?: string
   importe: number | null
   cuotaTotal: number | null
   gananciaPotencial: number | null
   cuotasSelecciones: (number | null)[]
+  estadosSelecciones?: string[]
 }): string[] {
-  const { tipo, importe, cuotaTotal, gananciaPotencial, cuotasSelecciones } = args
+  const { tipo, estado, importe, cuotaTotal, gananciaPotencial, cuotasSelecciones } = args
+  const estados = args.estadosSelecciones ?? []
   const avisos: string[] = []
+  const euros = (c: number) => (c / 100).toFixed(2).replace('.', ',')
 
+  // Importe × cuota TOTAL frente a la ganancia potencial (en todos los tipos).
   if (importe != null && cuotaTotal != null && gananciaPotencial != null) {
     const esperado = importe * cuotaTotal
     const dif = Math.abs(esperado - gananciaPotencial)
     // Tolerancia: 1 % o 5 céntimos (redondeos de la casa).
     if (dif > Math.max(5, esperado * 0.01)) {
       avisos.push(
-        `La ganancia potencial no cuadra con importe × cuota (saldría ${(esperado / 100)
-          .toFixed(2)
-          .replace('.', ',')} €). Puede ser un bono o una cuota mejorada; revísalo.`,
+        `La ganancia potencial no cuadra con importe × cuota total (saldría ${euros(esperado)} €). Puede ser un bono o una cuota mejorada; revísalo.`,
       )
     }
   }
 
+  // Solo en combinadas: la cuota total suele ser el producto de las selecciones.
+  // (En "mismo partido" las cuotas están relacionadas y no se multiplican.)
   if (tipo === 'combinada' && cuotaTotal != null) {
     const producto = productoCuotas(cuotasSelecciones)
     if (producto != null && Math.abs(producto - cuotaTotal) > Math.max(0.02, producto * 0.01)) {
       avisos.push(
         `La cuota total no coincide con el producto de las selecciones (${producto
           .toFixed(2)
-          .replace('.', ',')}). Puede ser una cuota mejorada; revísalo.`,
+          .replace('.', ',')}). Puede ser un redondeo o una cuota mejorada; revísalo.`,
       )
     }
   }
 
-  if (tipo === 'simple' && cuotaTotal != null && cuotasSelecciones.length === 1) {
-    const c = cuotasSelecciones[0]
-    if (c != null && Math.abs(c - cuotaTotal) > 0.005) {
-      avisos.push('En una simple, la cuota de la selección suele ser la cuota total; revísalo.')
-    }
+  // Selección anulada en combinada o sistema: la cuota efectiva baja.
+  if ((tipo === 'combinada' || tipo === 'sistema') && estados.includes('anulada')) {
+    avisos.push(
+      'Hay una selección anulada: la casa recalcula la cuota sin ella. Revisa el resultado económico.',
+    )
+  }
+
+  // Perdida con varias selecciones, pero ninguna marcada como fallada.
+  if (estado === 'perdida' && estados.length > 1 && !estados.some((e) => e === 'perdida' || e === 'media_perdida')) {
+    avisos.push('La apuesta está perdida pero ninguna selección está marcada como fallada.')
   }
 
   return avisos
