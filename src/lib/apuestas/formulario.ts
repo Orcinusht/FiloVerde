@@ -16,6 +16,7 @@ import {
   type TipoApuesta,
 } from './estados.ts'
 import { localAIso, validarDia, validarHora } from './fechas.ts'
+import { esMixto } from './catalogo.ts'
 
 export type Opcion = { id: string; nombre: string }
 
@@ -214,6 +215,8 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
     if (cuota === undefined) errores[`selecciones.${i}.cuota`] = 'Cuota no válida.'
     const est = texto(o.estado) || 'pendiente'
     if (!esEstadoSeleccion(est)) errores[`selecciones.${i}.estado`] = 'Estado no válido.'
+    if (!out.deporte) errores[`selecciones.${i}.deporte`] = 'Elige el deporte.'
+    else if (esMixto(out.deporte)) errores[`selecciones.${i}.deporte`] = '«Mixto» no es un deporte: elige el de esta selección.'
     if (tipo === 'mismo_partido') {
       if (!out.pronostico && !out.mercado) errores[`selecciones.${i}.pronostico`] = 'Escribe el mercado o el pronóstico.'
     } else if (!out.evento && !out.pronostico && !out.mercado) {

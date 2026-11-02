@@ -221,3 +221,80 @@ test('la IA devuelve algo que no cumple el esquema → se rechaza', () => {
     false,
   )
 })
+
+// ---------- Catálogo de deportes y ligas ----------
+import { catalogoParaIA, deporteResumen, normalizar, type Catalogo } from '../src/lib/apuestas/catalogo.ts'
+
+const CAT: Catalogo = {
+  deportes: [
+    { id: 'f', nombre: 'Fútbol' },
+    { id: 't', nombre: 'Tenis' },
+  ],
+  ligas: [
+    { id: 'l1', nombre: 'LaLiga', deporte_id: 'f' },
+    { id: 'l2', nombre: 'ATP', deporte_id: 't' },
+    { id: 'l3', nombre: 'WTA', deporte_id: 't' },
+  ],
+}
+
+test('normalizar: sin mayúsculas, tildes ni espacios de más', () => {
+  assert.equal(normalizar('  FÚTBOL  americano '), 'futbol americano')
+  assert.equal(normalizar('Fútbol'), normalizar('futbol'))
+})
+
+test('deporte resumen: uno, varios = Mixto, ninguno', () => {
+  assert.equal(deporteResumen(['Tenis', 'tenis', 'Tenis', 'TENIS', 'Tenis']), 'Tenis')
+  assert.equal(deporteResumen(['Tenis', 'Fútbol']), 'Mixto')
+  assert.equal(deporteResumen(['', null]), '')
+})
+
+test('el formulario pide el deporte de cada selección y no acepta «Mixto»', () => {
+  const base = { ...valoresVacios(), importe: '5', cuota_total: '2' }
+  const sinDeporte = validarFormulario({ ...base, selecciones: [sel({ deporte: '' })] })
+  assert.ok(!sinDeporte.ok && sinDeporte.errores['selecciones.0.deporte'])
+  const mixto = validarFormulario({ ...base, selecciones: [sel({ deporte: 'mixto' })] })
+  assert.ok(!mixto.ok && mixto.errores['selecciones.0.deporte'])
+})
+
+test('IA + catálogo: nombre del catálogo, "nueva", "no visible" y "deducido"', () => {
+  const p = esquemaPropuestaIA.parse({
+    hay_apuestas: true,
+    motivo: null,
+    apuestas: [
+      apuestaIA({
+        tipo: 'combinada', cuota_total: '3.00',
+        selecciones: [
+          { evento: 'Alcaraz - Sinner', liga: 'atp', deporte: 'tenis', mercado: 'Ganador', pronostico: 'Alcaraz', cuota: '1.5', estado: null, evento_fecha: '2026-11-08', evento_hora: '15:00' },
+          { evento: 'Betis - Sevilla', liga: 'Liga Portugal', deporte: 'Fútbol', mercado: '1X2', pronostico: 'Betis', cuota: '2', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' },
+          { evento: 'A - B', liga: null, deporte: 'Pádel', mercado: 'Ganador', pronostico: 'A', cuota: '1', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' },
+          { evento: 'C - D', liga: 'WTA', deporte: null, mercado: 'Ganador', pronostico: 'C', cuota: '1', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' },
+        ],
+        dudosos: [{ campo: 'selecciones.0.deporte', motivo: 'deducido' }],
+      }),
+    ],
+  })
+  const [r] = propuestaARevisiones(p, CAT)
+  const s = r.valores.selecciones
+  assert.equal(s[0].deporte, 'Tenis', 'con la escritura del catálogo')
+  assert.equal(s[0].liga, 'ATP')
+  assert.equal(r.dudosos['selecciones.0.deporte'], 'deducido', 'se mantiene el motivo de la IA si está en el catálogo')
+  assert.equal(r.dudosos['selecciones.0.liga'], undefined, 'liga leída y en el catálogo: sin ámbar')
+  assert.equal(r.dudosos['selecciones.1.liga'], 'nueva', 'liga que no está en el catálogo')
+  assert.equal(r.dudosos['selecciones.1.deporte'], undefined)
+  assert.equal(r.dudosos['selecciones.2.deporte'], 'nueva', 'deporte que no está en el catálogo')
+  assert.equal(r.dudosos['selecciones.2.liga'], 'no_visible')
+  assert.equal(r.dudosos['selecciones.3.deporte'], 'no_visible', 'sin deporte: vacío y en ámbar')
+  assert.equal(r.dudosos['selecciones.3.liga'], 'nueva', 'una liga de otro deporte no vale para un deporte vacío')
+  assert.equal(deporteResumen(s.map((x) => x.deporte)), 'Mixto')
+})
+
+test('catálogo para la IA: compacto y con tope de tamaño', () => {
+  assert.equal(catalogoParaIA(CAT), '{"Fútbol":["LaLiga"],"Tenis":["ATP","WTA"]}')
+  const grande: Catalogo = {
+    deportes: [{ id: 'f', nombre: 'Fútbol' }],
+    ligas: Array.from({ length: 2000 }, (_, i) => ({ id: `l${i}`, nombre: `Liga número ${i}`, deporte_id: 'f' })),
+  }
+  const txt = catalogoParaIA(grande)
+  assert.ok(txt.length <= 4000, `${txt.length} caracteres`)
+  assert.ok(JSON.parse(txt).Fútbol.length > 0)
+})

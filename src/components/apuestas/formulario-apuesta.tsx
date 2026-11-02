@@ -16,7 +16,7 @@ import {
   TIPOS_APUESTA,
   esEstadoApuesta,
   esTipoApuesta,
-  type MotivoDuda,
+  type MotivoRevision,
   type TipoApuesta,
 } from '@/lib/apuestas/estados'
 import {
@@ -28,13 +28,22 @@ import {
   type ValoresFormulario,
   type ValoresSeleccion,
 } from '@/lib/apuestas/formulario'
+import {
+  buscarLiga,
+  deporteResumen,
+  ligasDe,
+  DEPORTE_MIXTO,
+  type Catalogo,
+} from '@/lib/apuestas/catalogo'
+import { crearDeporte, crearLiga } from '@/app/(app)/apuestas/actions'
 import { IdCampo, useIdCampo } from './id-campo'
+import { SelectorCatalogo } from './selector-catalogo'
 import { SelectorOpcion } from './selector-opcion'
 import { VisorCaptura } from './visor-captura'
 
 type Props = {
   inicial: ValoresFormulario
-  dudosos?: Record<string, MotivoDuda>
+  dudosos?: Record<string, MotivoRevision>
   casaDetectada?: string | null
   casas: Opcion[]
   estrategias: Opcion[]
@@ -46,6 +55,8 @@ type Props = {
   textoGuardar?: string
   onGuardada: (id: string) => void
   onOpcionCreada?: (tipo: 'casa' | 'estrategia', o: Opcion) => void
+  catalogo: Catalogo
+  onCatalogoCambiado?: (c: Catalogo) => void
   extra?: ReactNode
 }
 
@@ -70,11 +81,14 @@ export function FormularioApuesta(props: Props) {
     }
     return v
   })
-  const [dudosos, setDudosos] = useState<Record<string, MotivoDuda>>(() => ({ ...(props.dudosos ?? {}) }))
+  const [dudosos, setDudosos] = useState<Record<string, MotivoRevision>>(() => ({ ...(props.dudosos ?? {}) }))
   const [resultadoManual, setResultadoManual] = useState(props.resultadoManual ?? false)
   const [errores, setErrores] = useState<Record<string, string>>({})
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null)
   const [cambioTipo, setCambioTipo] = useState<CambioTipo | null>(null)
+  const [catalogo, setCatalogo] = useState<Catalogo>(props.catalogo)
+  // Aviso por selección cuando al cambiar de deporte se vacía la liga.
+  const [avisosLiga, setAvisosLiga] = useState<Record<number, string>>({})
   const [guardando, iniciar] = useTransition()
 
   const tipo: TipoApuesta = esTipoApuesta(valores.tipo) ? valores.tipo : 'simple'
@@ -119,6 +133,85 @@ export function FormularioApuesta(props: Props) {
   function cambiarComun(clave: (typeof CAMPOS_COMUNES)[number], valor: string) {
     quitarMarca(...valores.selecciones.map((_, i) => `selecciones.${i}.${clave}`))
     setValores((v) => ({ ...v, selecciones: v.selecciones.map((s) => ({ ...s, [clave]: valor })) }))
+  }
+
+  // ---------- deporte y liga ----------
+
+  // Cambia el deporte de una selección (o de todas, en "mismo partido"). Si la liga elegida
+  // no es de ese deporte, se vacía y se avisa.
+  function cambiarDeporte(indices: number[], deporte: string) {
+    const avisos: Record<number, string> = {}
+    setValores((v) => ({
+      ...v,
+      selecciones: v.selecciones.map((s, j) => {
+        if (!indices.includes(j)) return s
+        if (s.liga.trim() && !buscarLiga(catalogo, deporte, s.liga)) {
+          avisos[j] = `Se ha vaciado la liga «${s.liga.trim()}» porque no es de ${deporte || 'ese deporte'}.`
+          return { ...s, deporte, liga: '' }
+        }
+        return { ...s, deporte }
+      }),
+    }))
+    quitarMarca(...indices.flatMap((j) => [`selecciones.${j}.deporte`]))
+    setAvisosLiga((a) => {
+      const n = { ...a }
+      for (const j of indices) delete n[j]
+      return { ...n, ...avisos }
+    })
+  }
+
+  function cambiarLiga(indices: number[], liga: string) {
+    setValores((v) => ({
+      ...v,
+      selecciones: v.selecciones.map((s, j) => (indices.includes(j) ? { ...s, liga } : s)),
+    }))
+    quitarMarca(...indices.map((j) => `selecciones.${j}.liga`))
+    setAvisosLiga((a) => {
+      const n = { ...a }
+      for (const j of indices) delete n[j]
+      return n
+    })
+  }
+
+  function actualizarCatalogo(c: Catalogo) {
+    setCatalogo(c)
+    props.onCatalogoCambiado?.(c)
+  }
+
+  async function nuevoDeporte(nombre: string) {
+    const r = await crearDeporte(nombre)
+    if (!r.ok) return r
+    if (!catalogo.deportes.some((d) => d.id === r.item.id)) {
+      actualizarCatalogo({ ...catalogo, deportes: [...catalogo.deportes, r.item].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')) })
+    }
+    return { ok: true as const, nombre: r.item.nombre, aviso: r.aviso }
+  }
+
+  async function nuevaLiga(deporte: string, nombre: string) {
+    const r = await crearLiga(deporte, nombre)
+    if (!r.ok) return r
+    if (!catalogo.ligas.some((l) => l.id === r.item.id)) {
+      actualizarCatalogo({ ...catalogo, ligas: [...catalogo.ligas, r.item].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')) })
+    }
+    return { ok: true as const, nombre: r.item.nombre, aviso: r.aviso }
+  }
+
+  const camposDeporteLiga = (indices: number[], i0: number, pD: { motivo?: MotivoRevision; error?: string }, pL: { motivo?: MotivoRevision; error?: string }) => {
+    const s = valores.selecciones[i0]
+    return (
+      <CamposDeporteLiga
+        deporte={s?.deporte ?? ''}
+        liga={s?.liga ?? ''}
+        catalogo={catalogo}
+        pDeporte={pD}
+        pLiga={pL}
+        aviso={avisosLiga[i0]}
+        onDeporte={(d) => cambiarDeporte(indices, d)}
+        onLiga={(l) => cambiarLiga(indices, l)}
+        crearDeporte={nuevoDeporte}
+        crearLiga={(n) => nuevaLiga(s?.deporte ?? '', n)}
+      />
+    )
   }
 
   // Al cambiar el estado de la apuesta, se proponen los de las selecciones.
@@ -207,7 +300,7 @@ export function FormularioApuesta(props: Props) {
     if (conservar != null) {
       // Las marcas "a revisar" de la selección conservada pasan a la posición 0.
       setDudosos((d) => {
-        const n: Record<string, MotivoDuda> = {}
+        const n: Record<string, MotivoRevision> = {}
         for (const [k, m] of Object.entries(d)) {
           const r = /^selecciones\.(\d+)\.(.+)$/.exec(k)
           if (!r) n[k] = m
@@ -235,7 +328,7 @@ export function FormularioApuesta(props: Props) {
     setValores((v) => ({ ...v, selecciones: v.selecciones.filter((_, j) => j !== i) }))
     // Las marcas de las selecciones siguientes se desplazan una posición.
     setDudosos((d) => {
-      const n: Record<string, MotivoDuda> = {}
+      const n: Record<string, MotivoRevision> = {}
       for (const [k, m] of Object.entries(d)) {
         const r = /^selecciones\.(\d+)\.(.+)$/.exec(k)
         if (!r) n[k] = m
@@ -288,6 +381,7 @@ export function FormularioApuesta(props: Props) {
       ? props.casaDetectada
       : null
   const varias = valores.selecciones.length > 1
+  const deporteDeLaApuesta = deporteResumen(valores.selecciones.map((x) => x.deporte))
   const minimo = MIN_SELECCIONES[tipo]
 
   return (
@@ -351,6 +445,16 @@ export function FormularioApuesta(props: Props) {
             onConfirmar={() => aplicarTipo(cambioTipo.nuevo)}
             onCancelar={() => setCambioTipo(null)}
           />
+        )}
+
+        {deporteDeLaApuesta && (
+          <p className="text-sm">
+            <span className="text-muted">Deporte de la apuesta: </span>
+            <span className={`font-semibold ${deporteDeLaApuesta === DEPORTE_MIXTO ? 'rounded-full bg-violet-500/15 px-2 py-0.5 text-violet-700 dark:text-violet-300' : ''}`}>
+              {deporteDeLaApuesta}
+            </span>
+            {deporteDeLaApuesta === DEPORTE_MIXTO && <span className="text-muted"> (selecciones de varios deportes)</span>}
+          </p>
         )}
 
         <div className="grid grid-cols-2 gap-3">
@@ -462,15 +566,13 @@ export function FormularioApuesta(props: Props) {
           <Campo etiqueta="Evento" {...pComun('evento')}>
             <Entrada value={valores.selecciones[0]?.evento ?? ''} placeholder="Equipo A - Equipo B" onChange={(v) => cambiarComun('evento', v)} marca={pComun('evento').motivo} />
           </Campo>
+          {camposDeporteLiga(
+            valores.selecciones.map((_, j) => j),
+            0,
+            pComun('deporte'),
+            pComun('liga'),
+          )}
           <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="Liga" {...pComun('liga')}>
-              <Entrada value={valores.selecciones[0]?.liga ?? ''} onChange={(v) => cambiarComun('liga', v)} marca={pComun('liga').motivo} />
-            </Campo>
-            <Campo etiqueta="Deporte" {...pComun('deporte')}>
-              <Entrada value={valores.selecciones[0]?.deporte ?? ''} placeholder="Fútbol" onChange={(v) => cambiarComun('deporte', v)} marca={pComun('deporte').motivo} />
-            </Campo>
-          </div>
-          <div className="grid grid-cols-[1fr_7rem] gap-3">
             <Campo etiqueta="Día del partido" {...pComun('evento_fecha')}>
               <Entrada type="date" value={valores.selecciones[0]?.evento_fecha ?? ''} onChange={(v) => cambiarComun('evento_fecha', v)} marca={pComun('evento_fecha').motivo} conError={!!errores['selecciones.0.evento_fecha']} />
             </Campo>
@@ -496,6 +598,7 @@ export function FormularioApuesta(props: Props) {
               errores={errores}
               onCambio={(c, v) => cambiarSeleccion(i, c, v)}
               onQuitar={() => quitarSeleccion(i)}
+              deporteLiga={camposDeporteLiga([i], i, p(`selecciones.${i}.deporte`), p(`selecciones.${i}.liga`))}
             />
           ))}
         </ol>
@@ -571,12 +674,14 @@ function TarjetaSeleccion({
   errores,
   onCambio,
   onQuitar,
+  deporteLiga,
 }: {
+  deporteLiga: ReactNode
   i: number
   s: ValoresSeleccion
   tipo: TipoApuesta
   puedeQuitar: boolean
-  dudosos: Record<string, MotivoDuda>
+  dudosos: Record<string, MotivoRevision>
   errores: Record<string, string>
   onCambio: (c: keyof ValoresSeleccion, v: string) => void
   onQuitar: () => void
@@ -620,15 +725,8 @@ function TarjetaSeleccion({
       </Campo>
       {partidoPropio && (
         <>
+          {deporteLiga}
           <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="Liga" {...ps('liga')}>
-              {ent('liga')}
-            </Campo>
-            <Campo etiqueta="Deporte" {...ps('deporte')}>
-              {ent('deporte', { placeholder: 'Fútbol' })}
-            </Campo>
-          </div>
-          <div className="grid grid-cols-[1fr_7rem] gap-3">
             <Campo etiqueta="Día del evento" {...ps('evento_fecha')}>
               {ent('evento_fecha', { type: 'date' })}
             </Campo>
@@ -642,6 +740,74 @@ function TarjetaSeleccion({
         <Desplegable value={s.estado} onChange={(v) => onCambio('estado', v)} marca={dudosos[k('estado')]} opciones={ESTADOS_SELECCION.map((e) => [e, NOMBRE_ESTADO[e]])} />
       </Campo>
     </li>
+  )
+}
+
+// ---------- deporte y liga ----------
+
+function CamposDeporteLiga({
+  deporte,
+  liga,
+  catalogo,
+  pDeporte,
+  pLiga,
+  aviso,
+  onDeporte,
+  onLiga,
+  crearDeporte,
+  crearLiga,
+}: {
+  deporte: string
+  liga: string
+  catalogo: Catalogo
+  pDeporte: { motivo?: MotivoRevision; error?: string }
+  pLiga: { motivo?: MotivoRevision; error?: string }
+  aviso?: string
+  onDeporte: (d: string) => void
+  onLiga: (l: string) => void
+  crearDeporte: (n: string) => Promise<{ ok: true; nombre: string; aviso?: string } | { ok: false; error: string }>
+  crearLiga: (n: string) => Promise<{ ok: true; nombre: string; aviso?: string } | { ok: false; error: string }>
+}) {
+  const ligas = ligasDe(catalogo, deporte).map((l) => l.nombre)
+  const deporteEnCatalogo = catalogo.deportes.some((d) => d.nombre === deporte)
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-3">
+        <Campo etiqueta="Deporte" {...pDeporte}>
+          <SelectorCatalogo
+            valor={deporte}
+            opciones={catalogo.deportes.map((d) => d.nombre)}
+            vacio="Elige…"
+            textoNuevo="+ Nuevo deporte…"
+            marcado={!!pDeporte.motivo}
+            conError={!!pDeporte.error}
+            esNueva={pDeporte.motivo === 'nueva'}
+            crear={crearDeporte}
+            onCambio={onDeporte}
+          />
+        </Campo>
+        <Campo etiqueta="Liga" {...pLiga}>
+          <SelectorCatalogo
+            valor={liga}
+            opciones={ligas}
+            vacio="Sin liga"
+            textoNuevo="+ Nueva liga…"
+            marcado={!!pLiga.motivo}
+            conError={!!pLiga.error}
+            esNueva={pLiga.motivo === 'nueva'}
+            deshabilitado={!deporteEnCatalogo}
+            ayudaDeshabilitado={deporte ? 'Crea antes el deporte' : 'Elige antes el deporte'}
+            crear={crearLiga}
+            onCambio={onLiga}
+          />
+        </Campo>
+      </div>
+      {aviso && (
+        <p role="status" className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          {aviso}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -759,7 +925,7 @@ function sugerirGanancia(v: ValoresFormulario): string {
 
 function Grupo({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
-    <fieldset className="space-y-3 rounded-2xl border border-border bg-surface p-4">
+    <fieldset className="min-w-0 space-y-3 rounded-2xl border border-border bg-surface p-4">
       <legend className="px-1 text-sm font-semibold uppercase tracking-wide text-muted">{titulo}</legend>
       {children}
     </fieldset>
@@ -775,14 +941,14 @@ function Campo({
 }: {
   etiqueta: string
   ayuda?: string
-  motivo?: MotivoDuda
+  motivo?: MotivoRevision
   error?: string
   children: ReactNode
 }) {
   const id = useId()
   const descripcion = `${id}-d`
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-1 flex items-center gap-2">
         <label htmlFor={id} className="text-sm font-medium">
           {etiqueta}
@@ -823,7 +989,7 @@ function Entrada({
 }: {
   value: string
   onChange: (v: string) => void
-  marca?: MotivoDuda
+  marca?: MotivoRevision
   conError?: boolean
   type?: string
   inputMode?: 'decimal' | 'text'
@@ -855,7 +1021,7 @@ function Desplegable({
   value: string
   onChange: (v: string) => void
   opciones: [string, string][]
-  marca?: MotivoDuda
+  marca?: MotivoRevision
 }) {
   const { id, descripcion } = useIdCampo()
   return (

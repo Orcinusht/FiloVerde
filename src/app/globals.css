@@ -47,3 +47,36 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }
+
+/* Campos de fecha y hora: en iPhone (Safari) tienen un ancho mínimo propio y se salen
+   de su columna. Se quita el aspecto nativo y se fuerzan al ancho de su hueco. */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  display: block;
+  line-height: normal;
+  padding-inline: 0.5rem; /* algo menos de margen: en pantallas de 320 px caben enteros */
+}
+input[type='date']::-webkit-date-and-time-value,
+input[type='time']::-webkit-date-and-time-value,
+input[type='datetime-local']::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='time']::-webkit-calendar-picker-indicator,
+input[type='datetime-local']::-webkit-calendar-picker-indicator {
+  margin: 0;
+  padding: 0;
+}
+/* Los desplegables tampoco deben empujar su columna. */
+select {
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}

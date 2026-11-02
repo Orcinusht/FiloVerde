@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { connection } from 'next/server'
-import { listarApuestas, listarCasas, listarPendientes, POR_PAGINA } from '@/lib/server/datos'
+import { listarApuestas, listarCasas, listarPendientes, obtenerCatalogo, POR_PAGINA } from '@/lib/server/datos'
+import { DEPORTE_MIXTO } from '@/lib/apuestas/catalogo'
 import { COLOR_ESTADO, NOMBRE_ESTADO, NOMBRE_TIPO, esEstadoApuesta } from '@/lib/apuestas/estados'
 import { formatoImporte } from '@/lib/apuestas/dinero'
 import { cuotaATexto } from '@/lib/apuestas/cuotas'
@@ -16,19 +17,25 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
   await connection() // datos del momento: nunca se prerenderizan (y fuera del try)
   const estado = esEstadoApuesta(uno(sp.estado)) ? uno(sp.estado) : ''
   const casa = /^([0-9a-f-]{36}|sin)$/i.test(uno(sp.casa)) ? uno(sp.casa) : ''
+  // El deporte es texto: se acepta cualquier nombre razonable (solo sirve para filtrar).
+  const deporte = uno(sp.deporte).trim().slice(0, 60)
   const pagina = Math.max(0, Math.min(1000, Number.parseInt(uno(sp.pagina) || '0', 10) || 0))
 
   let datos: Awaited<ReturnType<typeof listarApuestas>>
   let casas: Awaited<ReturnType<typeof listarCasas>>
   let nPendientes = 0
+  let deportes: string[] = []
   try {
     let pendientes: Awaited<ReturnType<typeof listarPendientes>>
-    ;[datos, casas, pendientes] = await Promise.all([
-      listarApuestas({ estado, casa, pagina }),
+    let catalogo: Awaited<ReturnType<typeof obtenerCatalogo>>
+    ;[datos, casas, catalogo, pendientes] = await Promise.all([
+      listarApuestas({ estado, casa, deporte, pagina }),
       listarCasas(),
+      obtenerCatalogo(),
       listarPendientes().catch(() => []),
     ])
     nPendientes = pendientes.length
+    deportes = catalogo.deportes.map((d) => d.nombre)
   } catch (e) {
     console.error('[apuestas:listar]', { message: String((e as Error)?.message ?? e).slice(0, 200) })
     return (
@@ -39,11 +46,12 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
   }
 
   const { filas, total } = datos
-  const hayFiltro = Boolean(estado || casa)
+  const hayFiltro = Boolean(estado || casa || deporte)
   const enlace = (p: number) => {
     const q = new URLSearchParams()
     if (estado) q.set('estado', estado)
     if (casa) q.set('casa', casa)
+    if (deporte) q.set('deporte', deporte)
     if (p > 0) q.set('pagina', String(p))
     const s = q.toString()
     return s ? `/apuestas?${s}` : '/apuestas'
@@ -62,7 +70,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
           <span className="shrink-0 font-semibold text-brand">Revisar →</span>
         </Link>
       )}
-      <FiltrosApuestas estado={estado} casa={casa} casas={casas} />
+      <FiltrosApuestas estado={estado} casa={casa} deporte={deporte} casas={casas} deportes={[...deportes, DEPORTE_MIXTO]} />
 
       {filas.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-surface p-8 text-center">
@@ -88,6 +96,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
                     {a.casa ?? 'Sin casa'} · {NOMBRE_TIPO[a.tipo]}
                     {a.n_selecciones > 1 ? ` (${a.n_selecciones})` : ''}
                   </p>
+                  {a.deporte && <p className="truncate text-xs font-medium text-muted">{a.deporte}</p>}
                   <p className="truncate text-sm text-muted">{a.primer_evento ?? '—'}</p>
                   <p className="mt-1 text-xs text-muted">{formatoFecha(a.fecha)}</p>
                 </div>

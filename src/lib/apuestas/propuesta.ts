@@ -5,7 +5,14 @@
 import { z } from 'zod'
 import { cuotaADecimal, cuotaATexto } from './cuotas.ts'
 import { centimosATexto, eurosACentimos } from './dinero.ts'
-import { ESTADOS_APUESTA, ESTADOS_SELECCION, MOTIVOS_DUDA, TIPOS_APUESTA, type MotivoDuda } from './estados.ts'
+import {
+  ESTADOS_APUESTA,
+  ESTADOS_SELECCION,
+  MOTIVOS_DUDA,
+  TIPOS_APUESTA,
+  type MotivoRevision,
+} from './estados.ts'
+import { buscarDeporte, buscarLiga, esMixto, type Catalogo } from './catalogo.ts'
 import { isoALocal, localAIso, validarDia, validarHora } from './fechas.ts'
 import {
   ajustarPorTipo,
@@ -21,8 +28,8 @@ const textoONulo = z.string().nullable()
 
 export const esquemaSeleccionIA = z.object({
   evento: textoONulo.describe('Partido o evento, p. ej. "Real Madrid - Barcelona"'),
-  liga: textoONulo.describe('Competición, p. ej. "LaLiga"'),
-  deporte: textoONulo.describe('Deporte en español, p. ej. "Fútbol", "Tenis", "Baloncesto"'),
+  liga: textoONulo.describe('Competición de ESTA selección; preferiblemente una del catálogo para su deporte'),
+  deporte: textoONulo.describe('Deporte de ESTA selección; preferiblemente uno del catálogo'),
   mercado: textoONulo.describe('Mercado, p. ej. "1X2", "Más/menos goles 2.5", "Ambos marcan"'),
   pronostico: textoONulo.describe('Lo elegido, p. ej. "Real Madrid", "Más de 2.5"'),
   cuota: textoONulo.describe('Cuota de ESTA selección EXACTAMENTE como aparece ("1.85", "6/4", "+150"); null si no tiene cuota propia'),
@@ -60,7 +67,7 @@ export type ApuestaIA = z.infer<typeof esquemaApuestaIA>
 
 export type Revision = {
   valores: ValoresFormulario
-  dudosos: Record<string, MotivoDuda> // clave de campo del formulario → motivo
+  dudosos: Record<string, MotivoRevision> // clave de campo del formulario → motivo
   casaDetectada: string | null // nombre que leyó la IA (para elegir o crear la casa)
 }
 
@@ -95,10 +102,10 @@ function normalizarDudoso(clave: string): string | null {
   return null
 }
 
-export function apuestaARevision(p: ApuestaIA): Revision {
+export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo): Revision {
   const valores = valoresVacios()
-  const dudosos: Record<string, MotivoDuda> = {}
-  const marcar = (campo: string, motivo: MotivoDuda) => {
+  const dudosos: Record<string, MotivoRevision> = {}
+  const marcar = (campo: string, motivo: MotivoRevision) => {
     if (!dudosos[campo]) dudosos[campo] = motivo
   }
   for (const d of p.dudosos ?? []) {
@@ -151,6 +158,26 @@ export function apuestaARevision(p: ApuestaIA): Revision {
       })
     : [seleccionVacia()]
 
+  // Deporte y liga de cada selección, contra el catálogo del usuario:
+  //  · está en el catálogo → se usa tal como está escrito allí;
+  //  · no está → se deja lo leído, en ámbar como "nueva" (con "Crear y usar");
+  //  · vacío → en ámbar como "no visible".
+  if (catalogo) {
+    valores.selecciones.forEach((s, i) => {
+      const kd = `selecciones.${i}.deporte`
+      const kl = `selecciones.${i}.liga`
+      if (esMixto(s.deporte)) s.deporte = ''
+      const d = buscarDeporte(catalogo, s.deporte)
+      if (d) s.deporte = d.nombre
+      else if (s.deporte) dudosos[kd] = 'nueva'
+      else marcar(kd, 'no_visible')
+      const l = buscarLiga(catalogo, s.deporte, s.liga)
+      if (l) s.liga = l.nombre
+      else if (s.liga) dudosos[kl] = 'nueva'
+      else marcar(kl, 'no_visible')
+    })
+  }
+
   // En una simple, si no se leyó la cuota total, vale la de su selección.
   if (valores.tipo === 'simple' && !valores.cuota_total && valores.selecciones[0].cuota) {
     valores.cuota_total = valores.selecciones[0].cuota
@@ -173,7 +200,7 @@ export function apuestaARevision(p: ApuestaIA): Revision {
   return { valores: ajustarPorTipo(valores), dudosos, casaDetectada: recortar(p.casa) || null }
 }
 
-export function propuestaARevisiones(p: PropuestaIA): Revision[] {
+export function propuestaARevisiones(p: PropuestaIA, catalogo?: Catalogo): Revision[] {
   if (!p.hay_apuestas) return []
-  return p.apuestas.slice(0, MAX_APUESTAS_POR_CAPTURA).map(apuestaARevision)
+  return p.apuestas.slice(0, MAX_APUESTAS_POR_CAPTURA).map((a) => apuestaARevision(a, catalogo))
 }

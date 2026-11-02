@@ -16,6 +16,8 @@ const ROOT = join(import.meta.dirname, '..')
 const ANA = '00000000-0000-0000-0000-00000000000a'
 const BETO = '00000000-0000-0000-0000-00000000000b'
 const TABLAS = ['casas_apuestas', 'estrategias', 'apuestas', 'selecciones', 'movimientos_bankroll', 'transcripciones']
+// El catálogo de deportes y ligas: cada usuario recibe una lista inicial propia al registrarse.
+const CATALOGO = ['deportes', 'ligas']
 
 let db
 const ids = {}
@@ -152,8 +154,8 @@ test('El bucket de capturas es privado', async () => {
 
 const datos = (extra = {}) => JSON.stringify({ importe: 500, tipo: 'combinada', estado: 'pendiente', ...extra })
 const sels = JSON.stringify([
-  { evento: 'A - B', cuota: 1.5 },
-  { evento: 'C - D', cuota: 2, estado: 'ganada' },
+  { evento: 'A - B', cuota: 1.5, deporte: 'Fútbol' },
+  { evento: 'C - D', cuota: 2, estado: 'ganada', deporte: 'Fútbol' },
 ])
 
 test('guardar_apuesta crea apuesta + selecciones en orden para quien la llama', async () => {
@@ -203,7 +205,7 @@ test('guardar_apuesta: si una selección es inválida no se guarda nada', async 
     const antes = await cuantas(tx, 'apuestas')
     await tx.query('savepoint s')
     await assert.rejects(
-      tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb)`, [datos(), JSON.stringify([{ cuota: 0.5 }])]),
+      tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb)`, [datos(), JSON.stringify([{ cuota: 0.5, deporte: 'Fútbol' }])]),
     )
     await tx.query('rollback to savepoint s')
     assert.equal(await cuantas(tx, 'apuestas'), antes)
@@ -218,8 +220,8 @@ test('mismo_partido se acepta y guarda selecciones sin cuota con fecha y hora de
     const { rows } = await tx.query(`select public.guardar_apuesta(null, $1::jsonb, $2::jsonb) as id`, [
       JSON.stringify({ importe: 1000, tipo: 'mismo_partido', cuota_total: 4.5 }),
       JSON.stringify([
-        { evento: 'A - B', mercado: 'Resultado', pronostico: 'A', evento_fecha: '2026-11-08', evento_hora: '21:00' },
-        { evento: 'A - B', mercado: 'Ambos marcan', pronostico: 'Sí', evento_fecha: '2026-11-08' },
+        { evento: 'A - B', deporte: 'Fútbol', mercado: 'Resultado', pronostico: 'A', evento_fecha: '2026-11-08', evento_hora: '21:00' },
+        { evento: 'A - B', deporte: 'Fútbol', mercado: 'Ambos marcan', pronostico: 'Sí', evento_fecha: '2026-11-08' },
       ]),
     ])
     const s = await tx.query(
@@ -266,7 +268,7 @@ test('Beto NO puede enlazar su apuesta a una lectura (transcripción) de Ana', a
   const idT = await como(ANA, async (tx) => (await tx.query(`select id from transcripciones limit 1`)).rows[0].id)
   await assert.rejects(
     como(BETO, (tx) =>
-      tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x"}]'::jsonb)`, [
+      tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x","deporte":"Tenis"}]'::jsonb)`, [
         JSON.stringify({ importe: 100, transcripcion_id: idT, transcripcion_indice: 0 }),
       ]),
     ),
@@ -278,8 +280,105 @@ test('La misma apuesta de una lectura no se puede guardar dos veces', async () =
     const idT = (await tx.query(`select id from transcripciones limit 1`)).rows[0].id
     const datosT = JSON.stringify({ importe: 100, transcripcion_id: idT, transcripcion_indice: 0 })
     await tx.query('savepoint s')
-    await tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x"}]'::jsonb)`, [datosT])
-    await assert.rejects(tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x"}]'::jsonb)`, [datosT]), /unique|duplicate/)
+    await tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x","deporte":"Tenis"}]'::jsonb)`, [datosT])
+    await assert.rejects(tx.query(`select public.guardar_apuesta(null, $1::jsonb, '[{"evento":"x","deporte":"Tenis"}]'::jsonb)`, [datosT]), /unique|duplicate/)
     await tx.query('rollback to savepoint s')
   })
+})
+
+// ---------- Fase 1: catálogo de deportes y ligas ----------
+
+test('Cada cuenta nueva recibe su propia lista inicial de deportes y ligas', async () => {
+  for (const u of [ANA, BETO]) {
+    await como(u, async (tx) => {
+      const d = await tx.query(`select nombre from deportes order by nombre`)
+      assert.ok(d.rows.length >= 12, 'deportes iniciales')
+      assert.ok(d.rows.some((r) => r.nombre === 'Tenis'))
+      const tenis = await tx.query(
+        `select l.nombre from ligas l join deportes d on d.id = l.deporte_id where d.nombre = 'Tenis' order by 1`,
+      )
+      assert.deepEqual(tenis.rows.map((r) => r.nombre), ['ATP', 'Challenger', 'Grand Slam', 'ITF', 'WTA'])
+    })
+  }
+})
+
+test('Beto NO ve, cambia ni borra el catálogo de Ana, ni cuelga ligas de sus deportes', async () => {
+  let deporteAna, ligaAna
+  await como(ANA, async (tx) => {
+    deporteAna = (await tx.query(`insert into deportes (nombre) values ('Pádel') returning id`)).rows[0].id
+    ligaAna = (await tx.query(`insert into ligas (deporte_id, nombre) values ($1, 'Premier Padel') returning id`, [deporteAna])).rows[0].id
+  })
+  await como(BETO, async (tx) => {
+    for (const t of CATALOGO) {
+      const n = (await tx.query(`select count(*)::int n from ${t} where user_id = $1`, [ANA])).rows[0].n
+      assert.equal(n, 0, `ve ${t} de Ana`)
+    }
+    assert.equal((await tx.query(`update deportes set nombre = 'x' where id = $1`, [deporteAna])).affectedRows, 0)
+    assert.equal((await tx.query(`delete from ligas where id = $1`, [ligaAna])).affectedRows, 0)
+    assert.equal((await tx.query(`delete from deportes where user_id = $1`, [ANA])).affectedRows, 0)
+  })
+  await assert.rejects(
+    como(BETO, (tx) => tx.query(`insert into ligas (deporte_id, nombre) values ($1, 'Intrusa')`, [deporteAna])),
+    'liga colgada del deporte de Ana',
+  )
+  await assert.rejects(
+    como(BETO, (tx) => tx.query(`insert into deportes (user_id, nombre) values ($1, 'Intruso')`, [ANA])),
+    'deporte a nombre de Ana',
+  )
+  await como(ANA, async (tx) => {
+    const { rows } = await tx.query(`select nombre from deportes where id = $1`, [deporteAna])
+    assert.equal(rows[0].nombre, 'Pádel', 'sigue intacto')
+  })
+  for (const t of CATALOGO) {
+    await assert.rejects(como(null, (tx) => tx.query(`select count(*) from ${t}`)), /permission denied/, t)
+  }
+})
+
+test('Nombres únicos sin mayúsculas ni tildes, y "Mixto" reservado', async () => {
+  for (const nombre of ['futbol', 'FÚTBOL', '  Fútbol  ', 'Mixto', 'mixto']) {
+    await assert.rejects(como(ANA, (tx) => tx.query(`insert into deportes (nombre) values ($1)`, [nombre])), nombre)
+  }
+  // Beto puede tener su propio "Pádel": la unicidad es por usuario.
+  await como(BETO, async (tx) => {
+    await tx.query('savepoint s')
+    await tx.query(`insert into deportes (nombre) values ('Padel')`)
+    await tx.query('rollback to savepoint s')
+  })
+})
+
+test('El deporte resumen lo calcula SIEMPRE la base de datos (Tenis, Mixto, al editar y al cambiar de tipo)', async () => {
+  await como(ANA, async (tx) => {
+    await tx.query('savepoint s')
+    const guardar = async (id, tipo, deportes, extra = {}) =>
+      (
+        await tx.query(`select public.guardar_apuesta($1, $2::jsonb, $3::jsonb) as id`, [
+          id,
+          JSON.stringify({ importe: 500, tipo, deporte: 'Trampa', ...extra }),
+          JSON.stringify(deportes.map((d, i) => ({ evento: `E${i}`, deporte: d }))),
+        ])
+      ).rows[0].id
+    const resumen = async (id) => (await tx.query(`select deporte from apuestas where id = $1`, [id])).rows[0].deporte
+
+    const id = await guardar(null, 'combinada', ['Tenis', 'tenis', 'Tenis'])
+    assert.equal(await resumen(id), 'Tenis', 'cinco de tenis = Tenis (y no se fía del navegador)')
+    await guardar(id, 'combinada', ['Tenis', 'Fútbol'])
+    assert.equal(await resumen(id), 'Mixto', 'al editar: tenis + fútbol = Mixto')
+    await guardar(id, 'simple', ['Fútbol'])
+    assert.equal(await resumen(id), 'Fútbol', 'al cambiar de tipo a simple')
+    await tx.query('savepoint e1')
+    await assert.rejects(guardar(null, 'simple', ['']), /deporte/, 'selección sin deporte')
+    await tx.query('rollback to savepoint e1')
+    await assert.rejects(guardar(null, 'simple', ['Mixto']), /Mixto/, '"Mixto" como deporte de selección')
+    await tx.query('rollback to savepoint s')
+  })
+})
+
+test('Si falla la lista inicial, la cuenta nueva se crea igualmente', async () => {
+  await db.query('begin')
+  await db.query(`alter table public.deportes rename to deportes_roto`) // simula un fallo
+  const nuevo = '00000000-0000-0000-0000-0000000000cc'
+  await db.query(`insert into auth.users (id, email) values ($1, 'nuevo@test')`, [nuevo])
+  const { rows } = await db.query(`select count(*)::int n from auth.users where id = $1`, [nuevo])
+  assert.equal(rows[0].n, 1)
+  await db.query('rollback')
 })

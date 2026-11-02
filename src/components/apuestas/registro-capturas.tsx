@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { descartarCaptura } from '@/app/(app)/apuestas/actions'
 import { valoresVacios, type Opcion } from '@/lib/apuestas/formulario'
 import type { ApuestaPendiente, Revision } from '@/lib/apuestas/propuesta'
+import type { Catalogo } from '@/lib/apuestas/catalogo'
 import { ErrorImagen, reducirImagen } from '@/lib/navegador/reducir-imagen'
 import { FormularioApuesta } from './formulario-apuesta'
 import { VisorCaptura } from './visor-captura'
@@ -41,9 +42,11 @@ export function RegistroCapturas({
   casas,
   estrategias,
   pendientes = [],
+  catalogo: catalogoInicial,
 }: {
   casas: Opcion[]
   estrategias: Opcion[]
+  catalogo: Catalogo
   pendientes?: ApuestaPendiente[] // para retomar una revisión a medias
 }) {
   const router = useRouter()
@@ -62,6 +65,8 @@ export function RegistroCapturas({
   const [aviso, setAviso] = useState<string | null>(null)
   const [opcionesCasas, setOpcionesCasas] = useState(casas)
   const [opcionesEstrategias, setOpcionesEstrategias] = useState(estrategias)
+  // Lo creado en una apuesta (deporte, liga) sirve también para las siguientes.
+  const [catalogo, setCatalogo] = useState(catalogoInicial)
   const itemsRef = useRef<Item[]>(items)
   const enMarcha = useRef(false)
 
@@ -239,6 +244,8 @@ export function RegistroCapturas({
           casaDetectada={item.revision?.casaDetectada}
           casas={opcionesCasas}
           estrategias={opcionesEstrategias}
+          catalogo={catalogo}
+          onCatalogoCambiado={setCatalogo}
           imagen={item.ruta}
           transcripcionId={item.transcripcionId}
           indice={item.indice}

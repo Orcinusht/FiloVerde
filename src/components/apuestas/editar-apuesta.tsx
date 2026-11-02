@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { borrarApuesta } from '@/app/(app)/apuestas/actions'
 import { valoresVacios, type Opcion, type ValoresFormulario } from '@/lib/apuestas/formulario'
+import type { Catalogo } from '@/lib/apuestas/catalogo'
 import { FormularioApuesta } from './formulario-apuesta'
 
 // Detalle de una apuesta guardada: editar cualquier campo (incluido el estado) y borrar.
@@ -14,7 +15,9 @@ export function EditarApuesta({
   resultadoGuardado,
   casas,
   estrategias,
+  catalogo,
 }: {
+  catalogo: Catalogo
   id: string
   valores: ValoresFormulario
   imagen: string | null
@@ -52,6 +55,7 @@ export function EditarApuesta({
         inicial={valores}
         casas={casas}
         estrategias={estrategias}
+        catalogo={catalogo}
         imagen={imagen}
         apuestaId={id}
         resultadoManual={resultadoGuardado}
@@ -96,13 +100,22 @@ export function EditarApuesta({
 }
 
 // Registro a mano, sin captura.
-export function NuevaManual({ casas, estrategias }: { casas: Opcion[]; estrategias: Opcion[] }) {
+export function NuevaManual({
+  casas,
+  estrategias,
+  catalogo,
+}: {
+  casas: Opcion[]
+  estrategias: Opcion[]
+  catalogo: Catalogo
+}) {
   const router = useRouter()
   return (
     <FormularioApuesta
       inicial={valoresVacios()}
       casas={casas}
       estrategias={estrategias}
+      catalogo={catalogo}
       onGuardada={() => {
         router.push('/apuestas')
         router.refresh()

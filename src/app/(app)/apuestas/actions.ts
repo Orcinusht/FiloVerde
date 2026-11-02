@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { validarFormulario } from '@/lib/apuestas/formulario'
 import { esRutaPropia, registrarError, usuarioActual } from '@/lib/server/capturas'
 import { limpiarImagenSiNoSeUsa } from '@/lib/server/pendientes'
+import * as catalogo from '@/lib/server/acciones-catalogo'
 import type { Opcion } from '@/lib/apuestas/formulario'
 
 // Acciones de servidor: TODO lo que llega del navegador se vuelve a validar aquí.
@@ -60,6 +61,8 @@ export async function guardarApuesta(entrada: {
       if (error.code === 'P0002') return { ok: false, error: 'Esa apuesta ya no existe.' }
       if (error.code === '23503') return { ok: false, error: 'La casa o la estrategia elegida ya no existe. Elige otra.' }
       if (error.code === '23505') return { ok: false, error: 'Esta apuesta ya estaba guardada.' }
+      if (error.code === '22023' && error.hint === 'deporte')
+        return { ok: false, error: 'Cada selección necesita su deporte (y «Mixto» no vale como deporte).' }
       return { ok: false, error: FALLO }
     }
     revalidatePath('/apuestas')
@@ -176,4 +179,14 @@ export async function crearCasa(nombre: string) {
 
 export async function crearEstrategia(nombre: string) {
   return crearOpcion('estrategias', nombre)
+}
+
+// ---------- Catálogo de deportes y ligas (desde el formulario) ----------
+
+export async function crearDeporte(nombre: string) {
+  return catalogo.crearDeporte(nombre)
+}
+
+export async function crearLiga(deporte: string, nombre: string) {
+  return catalogo.crearLiga(deporte, nombre)
 }

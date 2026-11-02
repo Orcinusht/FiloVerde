@@ -5,13 +5,26 @@ import { ESTADOS_APUESTA, NOMBRE_ESTADO } from '@/lib/apuestas/estados'
 import type { Opcion } from '@/lib/apuestas/formulario'
 
 // Filtros básicos de la lista: por estado y por casa (se guardan en la dirección).
-export function FiltrosApuestas({ estado, casa, casas }: { estado: string; casa: string; casas: Opcion[] }) {
+export function FiltrosApuestas({
+  estado,
+  casa,
+  deporte,
+  casas,
+  deportes,
+}: {
+  estado: string
+  casa: string
+  deporte: string
+  casas: Opcion[]
+  deportes: string[]
+}) {
   const router = useRouter()
 
-  function ir(nuevoEstado: string, nuevaCasa: string) {
+  function ir(nuevoEstado: string, nuevaCasa: string, nuevoDeporte = deporte) {
     const q = new URLSearchParams()
     if (nuevoEstado) q.set('estado', nuevoEstado)
     if (nuevaCasa) q.set('casa', nuevaCasa)
+    if (nuevoDeporte) q.set('deporte', nuevoDeporte)
     const s = q.toString()
     router.replace(s ? `/apuestas?${s}` : '/apuestas', { scroll: false })
   }
@@ -35,6 +48,20 @@ export function FiltrosApuestas({ estado, casa, casas }: { estado: string; casa:
           </option>
         ))}
         <option value="sin">Sin casa</option>
+      </select>
+      <select
+        aria-label="Filtrar por deporte"
+        value={deporte}
+        onChange={(e) => ir(estado, casa, e.target.value)}
+        className={`${clase} col-span-2`}
+      >
+        <option value="">Todos los deportes</option>
+        {deporte && !deportes.includes(deporte) && <option value={deporte}>{deporte}</option>}
+        {deportes.map((d) => (
+          <option key={d} value={d}>
+            {d}
+          </option>
+        ))}
       </select>
     </div>
   )

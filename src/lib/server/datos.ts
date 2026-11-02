@@ -2,6 +2,8 @@ import 'server-only'
 import { connection } from 'next/server'
 import { createClient as crearClienteSupabase } from '@/lib/supabase/server'
 import { apuestasPendientes, type ApuestaPendiente } from './pendientes'
+import { leerCatalogo } from './catalogo'
+import type { Catalogo } from '@/lib/apuestas/catalogo'
 import type { EstadoApuesta, EstadoSeleccion, TipoApuesta } from '@/lib/apuestas/estados'
 
 // Lecturas de la base de datos (siempre con la sesión del usuario: RLS aplica).
@@ -19,6 +21,7 @@ export type FilaApuesta = {
   estado: EstadoApuesta
   resultado_economico: number | null
   casa: string | null
+  deporte: string | null // deporte resumen (o "Mixto")
   n_selecciones: number
   primer_evento: string | null
 }
@@ -74,19 +77,20 @@ export async function listarEstrategias(): Promise<Opcion[]> {
 
 export const POR_PAGINA = 50
 
-export async function listarApuestas(filtros: { estado?: string; casa?: string; pagina?: number }) {
+export async function listarApuestas(filtros: { estado?: string; casa?: string; deporte?: string; pagina?: number }) {
   const supabase = await createClient()
   const pagina = Math.max(0, filtros.pagina ?? 0)
   let q = supabase
     .from('apuestas')
     .select(
-      'id, fecha, tipo, importe, divisa, cuota_total, estado, resultado_economico, casas_apuestas(nombre), selecciones(evento, pronostico, orden)',
+      'id, fecha, tipo, importe, divisa, cuota_total, estado, resultado_economico, deporte, casas_apuestas(nombre), selecciones(evento, pronostico, orden)',
       { count: 'exact' },
     )
     .order('fecha', { ascending: false })
     .order('created_at', { ascending: false })
     .range(pagina * POR_PAGINA, pagina * POR_PAGINA + POR_PAGINA - 1)
   if (filtros.estado) q = q.eq('estado', filtros.estado)
+  if (filtros.deporte) q = q.eq('deporte', filtros.deporte)
   if (filtros.casa === 'sin') q = q.is('casa_id', null)
   else if (filtros.casa) q = q.eq('casa_id', filtros.casa)
 
@@ -107,6 +111,7 @@ export async function listarApuestas(filtros: { estado?: string; casa?: string; 
       estado: a.estado,
       resultado_economico: num(a.resultado_economico),
       casa: casa?.nombre ?? null,
+      deporte: a.deporte ?? null,
       n_selecciones: sels.length,
       primer_evento: sels[0]?.evento ?? sels[0]?.pronostico ?? null,
     }
@@ -147,13 +152,15 @@ export type ResumenCosteIA = {
   medioUsd: number | null
   fallidas: number
   modelos: string[]
+  // Coste medio por versión de las instrucciones (1 = antes del catálogo de deportes).
+  porVersion: { version: number; lecturas: number; medioUsd: number | null }[]
 }
 
 export async function resumenCosteIA(): Promise<ResumenCosteIA> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('transcripciones')
-    .select('modelo, resultado, coste_usd, created_at')
+    .select('modelo, resultado, coste_usd, created_at, version_instrucciones')
     .order('created_at', { ascending: false })
     .limit(5000)
   if (error) throw error
@@ -172,6 +179,17 @@ export async function resumenCosteIA(): Promise<ResumenCosteIA> {
     medioUsd: conCoste.length ? conCoste.reduce((s, f) => s + coste(f), 0) / conCoste.length : null,
     fallidas: filas.filter((f) => f.resultado === 'error').length,
     modelos: [...new Set(filas.slice(0, 50).map((f) => f.modelo))],
+    porVersion: [...new Set(filas.map((f) => f.version_instrucciones ?? 1))]
+      .sort((a, b) => a - b)
+      .map((version) => {
+        const de = filas.filter((f) => (f.version_instrucciones ?? 1) === version)
+        const con = de.filter((f) => f.coste_usd != null)
+        return {
+          version,
+          lecturas: de.length,
+          medioUsd: con.length ? con.reduce((x, f) => x + coste(f), 0) / con.length : null,
+        }
+      }),
   }
 }
 
@@ -179,4 +197,9 @@ export async function resumenCosteIA(): Promise<ResumenCosteIA> {
 export async function listarPendientes(): Promise<ApuestaPendiente[]> {
   const supabase = await createClient()
   return apuestasPendientes(supabase)
+}
+
+// Catálogo de deportes y ligas del usuario.
+export async function obtenerCatalogo(): Promise<Catalogo> {
+  return leerCatalogo(await createClient())
 }

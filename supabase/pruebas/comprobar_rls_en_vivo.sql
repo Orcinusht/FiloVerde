@@ -58,12 +58,50 @@ declare v uuid;
 begin
   v := public.guardar_apuesta(null,
     '{"importe": 500, "tipo": "mismo_partido", "cuota_total": 4.5, "notas": "PRUEBA-RLS"}'::jsonb,
-    '[{"evento": "PRUEBA-RLS", "mercado": "1X2", "evento_fecha": "2026-11-08", "evento_hora": "21:00"},
-      {"evento": "PRUEBA-RLS", "mercado": "Ambos marcan"}]'::jsonb);
+    '[{"evento": "PRUEBA-RLS", "deporte": "Fútbol", "mercado": "1X2", "evento_fecha": "2026-11-08", "evento_hora": "21:00"},
+      {"evento": "PRUEBA-RLS", "deporte": "Fútbol", "mercado": "Ambos marcan"}]'::jsonb);
   insert into ids values ('apuesta_mp', v);
   insert into resultado values (19, 'A guarda una apuesta «mismo partido» sin cuotas por selección (control)', 'guardada', 'guardada', true);
 exception when others then
   insert into resultado values (19, 'A guarda una apuesta «mismo partido» sin cuotas por selección (control)', 'guardada', 'ERROR: ' || sqlerrm, false);
+end $$;
+
+-- Catálogo de deportes y ligas
+with x as (insert into deportes (nombre) values ('PRUEBA-RLS') returning id)
+  insert into ids select 'deporte', id from x;
+with x as (insert into ligas (deporte_id, nombre) select v, 'PRUEBA-RLS' from ids where k = 'deporte' returning id)
+  insert into ids select 'liga', id from x;
+
+do $$
+declare v uuid;
+begin
+  v := public.guardar_apuesta(null,
+    '{"importe": 500, "tipo": "combinada", "notas": "PRUEBA-RLS", "deporte": "Trampa"}'::jsonb,
+    '[{"evento": "PRUEBA-RLS 1", "deporte": "Tenis"}, {"evento": "PRUEBA-RLS 2", "deporte": "Fútbol"}]'::jsonb);
+  insert into ids values ('apuesta_mixta', v);
+  insert into resultado
+    select 24, 'Deporte resumen calculado por la BD (tenis + fútbol)', 'Mixto', coalesce(deporte, 'vacío'), deporte = 'Mixto'
+    from apuestas where id = v;
+exception when others then
+  insert into resultado values (24, 'Deporte resumen calculado por la BD (tenis + fútbol)', 'Mixto', 'ERROR: ' || sqlerrm, false);
+end $$;
+
+do $$
+begin
+  insert into deportes (nombre) values ('Mixto');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (25, 'A crea un deporte llamado «Mixto»', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+
+do $$
+begin
+  insert into deportes (nombre) values ('PRUEBA-rls');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (26, 'A crea un deporte repetido con otras mayúsculas', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
 end $$;
 
 do $$
@@ -119,7 +157,7 @@ begin
   -- Fase 1
   begin
     perform public.guardar_apuesta((select v from ids where k = 'apuesta'),
-      '{"importe": 1, "tipo": "simple", "estado": "pendiente"}'::jsonb, '[{"evento": "intruso"}]'::jsonb);
+      '{"importe": 1, "tipo": "simple", "estado": "pendiente"}'::jsonb, '[{"evento": "intruso", "deporte": "Tenis"}]'::jsonb);
     insert into resultado values (15, 'B edita la apuesta de A con guardar_apuesta', 'rechazado', 'PERMITIDO', false);
   exception when others then
     insert into resultado values (15, 'B edita la apuesta de A con guardar_apuesta', 'rechazado', 'rechazado', true);
@@ -151,7 +189,7 @@ do $$
 begin
   perform public.guardar_apuesta(null,
     jsonb_build_object('importe', 100, 'transcripcion_id', (select v from ids where k = 'transcripcion'), 'transcripcion_indice', 0),
-    '[{"evento": "intruso"}]'::jsonb);
+    '[{"evento": "intruso", "deporte": "Tenis"}]'::jsonb);
   raise exception 'PERMITIDO';
 exception when others then
   insert into resultado values (22, 'B enlaza su apuesta a una lectura de A', 'rechazado',
@@ -161,6 +199,26 @@ end $$;
 insert into resultado
   select 23, 'B ve las selecciones «mismo partido» de A', '0', count(*)::text, count(*) = 0
   from selecciones where apuesta_id in (select v from ids where k = 'apuesta_mp');
+
+insert into resultado
+  select 27, 'B ve los deportes de A', '0', count(*)::text, count(*) = 0
+  from deportes where user_id = (select a from params);
+insert into resultado
+  select 28, 'B ve las ligas de A', '0', count(*)::text, count(*) = 0
+  from ligas where user_id = (select a from params);
+with x as (update deportes set nombre = 'intruso' where id in (select v from ids) returning 1)
+  insert into resultado select 29, 'B renombra un deporte de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+with x as (delete from ligas where id in (select v from ids) returning 1)
+  insert into resultado select 30, 'B borra una liga de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+
+do $$
+begin
+  insert into ligas (deporte_id, nombre) select v, 'intrusa' from ids where k = 'deporte';
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (31, 'B añade una liga a un deporte de A', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
 insert into resultado
   select 14, 'B ve las capturas de A en el bucket', '0', count(*)::text, count(*) = 0
   from storage.objects where bucket_id = 'capturas'
@@ -194,6 +252,7 @@ delete from apuestas where id in (select v from ids);             -- borra tambi
 delete from casas_apuestas where id in (select v from ids);
 delete from movimientos_bankroll where id in (select v from ids);
 delete from transcripciones where id in (select v from ids);
+delete from deportes where id in (select v from ids);            -- borra también su liga
 
 select
   n as "#",

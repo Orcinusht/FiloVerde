@@ -2,6 +2,8 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { esquemaPropuestaIA, propuestaARevisiones, type ApuestaPendiente } from '@/lib/apuestas/propuesta'
 import { BUCKET, registrarError } from './capturas'
+import { leerCatalogo } from './catalogo'
+import { catalogoVacio } from '@/lib/apuestas/catalogo'
 
 // Apuestas que la IA propuso y que aún no se han guardado ni descartado.
 // Permite retomar la revisión (sin volver a llamar a la IA) si se cerró la app a mitad.
@@ -42,13 +44,14 @@ export async function apuestasPendientes(
       filas.map((f) => f.id),
     )
   if (e2) throw e2
+  const catalogo = await leerCatalogo(supabase).catch(() => catalogoVacio())
   const hechas = new Set((guardadas ?? []).map((g) => `${g.transcripcion_id}:${g.transcripcion_indice}`))
 
   const pendientes: ApuestaPendiente[] = []
   for (const f of filas) {
     const propuesta = esquemaPropuestaIA.safeParse(f.propuesta)
     if (!propuesta.success) continue
-    const revisiones = propuestaARevisiones(propuesta.data)
+    const revisiones = propuestaARevisiones(propuesta.data, catalogo)
     const descartadas = new Set(f.descartadas ?? [])
     revisiones.forEach((revision, indice) => {
       if (!descartadas.has(indice) && !hechas.has(`${f.id}:${indice}`)) {

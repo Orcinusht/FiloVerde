@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { BUCKET, detectarTipo, esRutaPropia, registrarError, usuarioActual } from '@/lib/server/capturas'
-import { transcribirCaptura } from '@/lib/server/ia/transcribir'
+import { transcribirCaptura, VERSION_INSTRUCCIONES } from '@/lib/server/ia/transcribir'
+import { leerCatalogo } from '@/lib/server/catalogo'
+import { catalogoParaIA, catalogoVacio } from '@/lib/apuestas/catalogo'
 import { MAX_APUESTAS_POR_CAPTURA, propuestaARevisiones } from '@/lib/apuestas/propuesta'
 
 // La IA puede tardar: margen de 2 minutos.
@@ -42,10 +44,15 @@ export async function POST(request: NextRequest) {
   const tipo = detectarTipo(bytes)
   if (!tipo) return responder(415, { error: 'Formato de imagen no admitido.' })
 
-  const r = await transcribirCaptura(bytes, tipo)
+  // Catálogo del usuario (si fallara, se lee igualmente sin él).
+  const catalogo = await leerCatalogo(supabase).catch((e) => {
+    registrarError('catalogo:leer', e)
+    return catalogoVacio()
+  })
+  const r = await transcribirCaptura(bytes, tipo, catalogoParaIA(catalogo))
 
   // Una captura = una transcripción = un coste, aunque traiga varias apuestas.
-  const revisiones = r.ok ? propuestaARevisiones(r.propuesta) : []
+  const revisiones = r.ok ? propuestaARevisiones(r.propuesta, catalogo) : []
   const noEsApuesta = r.ok && revisiones.length === 0
   let transcripcionId: string | null = null
   if (r.uso) {
@@ -64,6 +71,7 @@ export async function POST(request: NextRequest) {
         coste_usd: r.uso.costeUsd,
         duracion_ms: r.uso.duracionMs,
         n_apuestas: r.ok ? revisiones.length : null,
+        version_instrucciones: VERSION_INSTRUCCIONES,
         // Lo que propuso la IA (con los campos dudosos y su motivo): para diagnosticar
         // y para retomar la revisión sin volver a pagar otra lectura.
         propuesta,

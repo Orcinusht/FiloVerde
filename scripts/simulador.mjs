@@ -363,7 +363,28 @@ const APUESTAS = {
     ],
   }),
 }
+APUESTAS.deducido = apuesta({
+  casa: 'Bet365', importe: 10, cuota_total: '1.60', ganancia_potencial: 16,
+  selecciones: [sel('Alcaraz - Sinner', 'Alcaraz', '1.60', { deporte: 'Tenis', liga: 'ATP', mercado: 'Ganador del partido' })],
+  dudosos: [
+    { campo: 'selecciones.0.deporte', motivo: 'deducido' },
+    { campo: 'selecciones.0.liga', motivo: 'deducido' },
+  ],
+})
+APUESTAS.dos_deportes = apuesta({
+  tipo: 'combinada', importe: 5, cuota_total: '3.00', ganancia_potencial: 15,
+  selecciones: [
+    sel('Alcaraz - Sinner', 'Alcaraz', '1.50', { deporte: 'Tenis', liga: 'ATP', mercado: 'Ganador del partido' }),
+    sel('Real Betis - Sevilla FC', 'Real Betis', '2.00'),
+  ],
+})
+APUESTAS.liga_nueva = apuesta({
+  selecciones: [sel('Benfica - Oporto', 'Benfica', '1.85', { liga: 'Liga Portugal' })],
+})
 const RESPUESTAS = {
+  deducido: con(APUESTAS.deducido),
+  dos_deportes: con(APUESTAS.dos_deportes),
+  liga_nueva: con(APUESTAS.liga_nueva),
   simple: con(APUESTAS.simple),
   combinada: con(APUESTAS.combinada),
   resuelta: con(APUESTAS.resuelta),
@@ -396,6 +417,7 @@ createServer(async (req, res) => {
       model: b.model, beta: req.headers['anthropic-beta'] ?? null, fallbacks: b.fallbacks ?? null, effort: b.output_config?.effort,
       formato: b.output_config?.format?.type, bytesImagen: img ? Buffer.from(img.source.data, 'base64').length : 0,
       clave: req.headers['x-api-key'] ? 'presente' : 'falta', maxTokens: b.max_tokens,
+      catalogo: (b.messages?.[0]?.content?.find((c) => c.type === 'text' && c.text.startsWith('<catalogo>'))?.text ?? ''),
     })
     const modo = cola.shift() ?? 'simple'
     if (modo === 'error500') {

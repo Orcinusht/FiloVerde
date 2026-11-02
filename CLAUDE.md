@@ -39,6 +39,9 @@ archivo o panel ponerlas).
   `media_ganada`, `media_perdida`. Las selecciones usan los mismos menos `cash_out`.
 - **Métricas solo con apuestas resueltas**; las `pendiente` no cuentan y las `anulada`
   quedan fuera de las métricas.
+- **Fase 2: las métricas por liga agrupan por DEPORTE + LIGA** (la "Superliga" de voleibol no es
+  la de otro deporte), y **las de deporte usan `apuestas.deporte`, con "Mixto" como categoría
+  propia** (no se reparte entre los deportes de sus selecciones).
 - **Fase 2: las métricas por liga, deporte y casa cuentan APUESTAS, no selecciones.** Una
   combinada de 3 partidos de LaLiga es 1 apuesta de LaLiga; un "mismo partido" con 4 condiciones
   es 1 apuesta (en la BD cada condición repite evento/liga/fecha: no sumarlas como si fueran 4).
@@ -71,7 +74,7 @@ src/
     (app)/            pantallas con sesión + barra inferior
       apuestas/         lista (filtros) · nueva/ (capturas o ?manual=1) · [id]/ (detalle y edición)
         actions.ts      guardar, borrar, crear casa/estrategia, descartar captura (Server Actions)
-      ajustes/          tema, coste de la IA (coste-ia.tsx), cuenta
+      ajustes/          tema, coste de la IA (coste-ia.tsx), deportes/ (catálogo: renombrar y borrar), cuenta
       graficas/ bankroll/
     api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada)
     login/            pantalla de entrada (providers.ts = proveedores, actions.ts = login en servidor)
@@ -87,7 +90,8 @@ src/
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
-                      capturas.ts (bucket), datos.ts (lecturas de la BD)
+                      capturas.ts (bucket), datos.ts (lecturas de la BD), catalogo.ts y
+                      acciones-catalogo.ts (deportes y ligas), pendientes.ts (sin revisar)
   proxy.ts            renueva sesión y protege rutas
 supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
@@ -99,7 +103,8 @@ public/               sw.js e iconos
 ## Base de datos
 
 Tablas (todas con `user_id`): `perfiles`, `casas_apuestas`, `estrategias`, `apuestas`,
-`selecciones`, `movimientos_bankroll`, `transcripciones` (una fila por lectura de la IA = por
+`selecciones`, `movimientos_bankroll`, `deportes`, `ligas` (catálogo del usuario; cada liga es de
+un deporte), `transcripciones` (una fila por lectura de la IA = por
 captura: modelo, tokens, coste aprox. en USD, resultado, `n_apuestas`, `propuesta` = lo que
 propuso la IA con los campos dudosos y su motivo, `descartadas` = índices de apuestas de la
 captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
@@ -129,6 +134,18 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   apuesta de esa captura sin revisar. La transcripción se conserva (coste) con `imagen` vacía.
 - En `transcripciones` el usuario solo puede cambiar `descartadas` e `imagen` (permiso por
   columna): el modelo, los tokens y el coste no se pueden modificar.
+- **Catálogo de deportes y ligas** (`deportes`, `ligas`): nombres únicos por usuario sin
+  distinguir mayúsculas ni tildes (`public.normalizar_nombre`; en JS `lib/apuestas/catalogo.ts`
+  hace lo mismo). "Mixto" está reservado. Lista inicial (12 deportes y unas pocas ligas) creada
+  por `sembrar_catalogo()` al registrarse (trigger en `auth.users`; si falla, el registro sigue).
+  Borrar un deporte del catálogo borra sus ligas del catálogo. **Las selecciones guardan deporte y
+  liga como TEXTO**: renombrar o borrar en el catálogo no cambia las apuestas guardadas.
+- `selecciones.deporte` es obligatorio al guardar (y no puede ser "Mixto").
+  **`apuestas.deporte`** = deporte resumen: si todas las selecciones son del mismo deporte, ese;
+  si hay varios, "Mixto". Lo calcula SIEMPRE `guardar_apuesta` (`deporte_resumen()`), al crear y
+  al editar; lo que mande el navegador se ignora.
+- `transcripciones.version_instrucciones`: versión de las instrucciones de la IA (vacía = 1, sin
+  catálogo; 2 = con catálogo). Ajustes compara el coste medio por versión.
 - `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
   `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
@@ -164,7 +181,13 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
   ve, está borroso o se ha deducido; nunca lo que se lee bien. Copia las cuotas tal cual y el
   código las pasa a decimal. El texto de la imagen se trata como datos, nunca como instrucciones.
 - Fecha/hora del evento: solo si aparecen en la captura (nunca de memoria); si no, vacías y en
-  ámbar. Liga: leída o deducida por equipos/jugadores (marcada "deducido").
+  ámbar.
+- Deporte y liga de CADA selección: leídos o deducidos por equipos/jugadores/competición
+  ("deducido"); si no se pueden, vacíos y "no visible". La IA recibe el catálogo del usuario
+  como DATOS (bloque `<catalogo>` en el mensaje, JSON compacto, tope 4.000 caracteres) y elige
+  de ahí. El servidor lo comprueba: lo que no esté en el catálogo (o una liga de otro deporte)
+  sale en ámbar como **"nueva"** con "Crear y usar". Coste extra medido: ~200 tokens de catálogo
+  + ~150 de instrucciones ≈ +0,0007 $ por captura con Sonnet 5.5 (≈ +6 %).
 - Clasificación: varios partidos distintos = combinada; un partido con varias condiciones sin
   cuotas individuales (Crear apuesta, Bet Builder, Same Game Multi) = mismo_partido; un solo
   mercado = simple. La IA propone; el formulario deja cambiar el tipo y pregunta qué conservar si
@@ -272,3 +295,11 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-02 | Propuesta de la IA guardada en `transcripciones` para retomar la revisión | Si se cierra la app a mitad, no se vuelve a pagar otra lectura |
 | 2026-11-02 | Imagen borrada solo cuando ya no la usa ninguna apuesta ni queda nada por revisar | Varias apuestas comparten captura; el registro de coste se conserva |
 | 2026-11-02 | Migración `20261102000001` solo aditiva | No rompe la app publicada en `main` |
+| 2026-11-03 | Catálogo de deportes y ligas por usuario (tablas `deportes`, `ligas`) con desplegables y "+ Nuevo…" | Datos uniformes para las métricas; la IA elige de tu lista |
+| 2026-11-03 | Selecciones enlazadas al catálogo por TEXTO, no por id | Borrar o renombrar en el catálogo no toca las apuestas guardadas |
+| 2026-11-03 | `apuestas.deporte` (deporte resumen, "Mixto" si hay varios) calculado por la BD al guardar | Filtro y métricas simples; nunca se fía del navegador |
+| 2026-11-03 | Unicidad sin mayúsculas ni tildes; "Mixto" reservado | Evita duplicados como Futbol/Fútbol |
+| 2026-11-03 | Catálogo enviado a la IA como datos, compacto y con tope de 4.000 caracteres | ≈ +6 % de coste por captura; sin riesgo de instrucciones ocultas |
+| 2026-11-03 | `transcripciones.version_instrucciones` | Medir el coste real antes/después de cambiar las instrucciones |
+| 2026-11-03 | Campos de fecha/hora sin aspecto nativo, rejilla de 2 columnas con `min-width: 0` (también en `fieldset`) | En iPhone se salían de la tarjeta; revisado a 320/375/390/430 px |
+| 2026-11-03 | Migración `20261103000001` solo aditiva y repetible (se puede ejecutar dos veces) | No rompe `main`; segura si se pega de nuevo por error |

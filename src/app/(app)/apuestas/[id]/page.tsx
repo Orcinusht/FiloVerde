@@ -2,7 +2,7 @@ import { Suspense } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { PageHeader } from '@/components/page-header'
-import { listarCasas, listarEstrategias, obtenerApuesta } from '@/lib/server/datos'
+import { listarCasas, listarEstrategias, obtenerApuesta, obtenerCatalogo } from '@/lib/server/datos'
 import { EditarApuesta } from '@/components/apuestas/editar-apuesta'
 import { centimosATexto } from '@/lib/apuestas/dinero'
 import { cuotaATexto } from '@/lib/apuestas/cuotas'
@@ -32,7 +32,12 @@ export default function Page({ params }: PageProps<'/apuestas/[id]'>) {
 
 async function Detalle({ params }: { params: PageProps<'/apuestas/[id]'>['params'] }) {
   const { id } = await params
-  const [apuesta, casas, estrategias] = await Promise.all([obtenerApuesta(id), listarCasas(), listarEstrategias()])
+  const [apuesta, casas, estrategias, catalogo] = await Promise.all([
+    obtenerApuesta(id),
+    listarCasas(),
+    listarEstrategias(),
+    obtenerCatalogo(),
+  ])
   if (!apuesta) notFound()
 
   const valores: ValoresFormulario = {
@@ -72,6 +77,7 @@ async function Detalle({ params }: { params: PageProps<'/apuestas/[id]'>['params
       resultadoGuardado={apuesta.resultado_economico != null}
       casas={casas}
       estrategias={estrategias}
+      catalogo={catalogo}
     />
   )
 }

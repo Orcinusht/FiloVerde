@@ -21,6 +21,7 @@ export async function CosteIA() {
         <Fila nombre="Coste medio por captura" valor={r.medioUsd == null ? '—' : usd(r.medioUsd)} />
         <Fila nombre="Total desde el principio" valor={`${usd(r.totalUsd)} · ${r.totalLecturas}`} />
         {r.fallidas > 0 && <Fila nombre="Lecturas fallidas" valor={String(r.fallidas)} />}
+        {r.porVersion.length > 1 && <ComparativaVersiones porVersion={r.porVersion} usd={usd} />}
         <Fila nombre="Modelo actual" valor={getAnthropicModel()} />
         {r.modelos.length > 0 && <Fila nombre="Modelos usados" valor={r.modelos.join(', ')} />}
       </dl>
@@ -50,6 +51,41 @@ function Fila({ nombre, valor }: { nombre: string; valor: string }) {
     <div className="flex items-center justify-between gap-3 px-4 py-3">
       <dt className="text-muted">{nombre}</dt>
       <dd className="text-right font-medium">{valor}</dd>
+    </div>
+  )
+}
+
+// Coste medio antes y después de cambiar las instrucciones de la IA (p. ej. con el catálogo).
+function ComparativaVersiones({
+  porVersion,
+  usd,
+}: {
+  porVersion: { version: number; lecturas: number; medioUsd: number | null }[]
+  usd: (n: number) => string
+}) {
+  const [antes, despues] = porVersion.slice(-2)
+  const sube =
+    antes.medioUsd && despues.medioUsd ? Math.round(((despues.medioUsd - antes.medioUsd) / antes.medioUsd) * 100) : null
+  return (
+    <div className="px-4 py-3 text-sm">
+      <p className="text-muted">Coste medio por versión de las instrucciones</p>
+      <ul className="mt-1 space-y-0.5">
+        {porVersion.map((v) => (
+          <li key={v.version} className="flex justify-between gap-3">
+            <span>
+              v{v.version}
+              {v.version === 1 ? ' (antes del catálogo)' : v.version === 2 ? ' (con catálogo)' : ''} · {v.lecturas}
+            </span>
+            <span className="font-medium">{v.medioUsd == null ? '—' : usd(v.medioUsd)}</span>
+          </li>
+        ))}
+      </ul>
+      {sube != null && (
+        <p className="mt-1 font-medium">
+          Cambio: {sube > 0 ? '+' : ''}
+          {sube} % por captura
+        </p>
+      )}
     </div>
   )
 }
