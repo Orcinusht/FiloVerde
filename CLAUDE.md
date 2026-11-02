@@ -17,11 +17,20 @@ archivo o panel ponerlas).
 
 ### Fases
 0. **Cimientos** (hecha): PWA vacía, login, base de datos con RLS, despliegue.
-1. **Registrar apuestas** (en verificación en el móvil): capturas → transcripción con IA (API de
-   Claude, solo desde servidor) → revisión → guardado; lista, detalle, edición, borrado, registro
-   manual y coste de la IA en Ajustes.
+1. **Registrar apuestas** (**CERRADA el 2026-11-02**, verificada en el móvil y RLS en vivo 37/37):
+   capturas → transcripción con IA (API de Claude, solo desde servidor) → revisión → guardado;
+   lista, detalle, edición, borrado, registro manual, coste de la IA en Ajustes, varias apuestas
+   por captura, tipo "mismo partido", catálogo de deportes y ligas, en directo y precipitada.
 2. Gráficas y métricas.
 3. Pendiente de definir.
+
+### Pendiente (sin fase asignada salvo indicación)
+- **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
+  app a más gente.
+- **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
+- **API-Football** u otra fuente de datos deportivos (Fase 2 o 3).
+- **Análisis del coste y del modelo de IA**: revisar en Ajustes el coste medio real por captura
+  (por versión de instrucciones) y decidir si se mantiene `claude-sonnet-5-5` o se cambia.
 
 ## Principios
 
@@ -312,17 +321,19 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-02 | Propuesta de la IA guardada en `transcripciones` para retomar la revisión | Si se cierra la app a mitad, no se vuelve a pagar otra lectura |
 | 2026-11-02 | Imagen borrada solo cuando ya no la usa ninguna apuesta ni queda nada por revisar | Varias apuestas comparten captura; el registro de coste se conserva |
 | 2026-11-02 | Migración `20261102000001` solo aditiva | No rompe la app publicada en `main` |
-| 2026-11-03 | Catálogo de deportes y ligas por usuario (tablas `deportes`, `ligas`) con desplegables y "+ Nuevo…" | Datos uniformes para las métricas; la IA elige de tu lista |
-| 2026-11-03 | Selecciones enlazadas al catálogo por TEXTO, no por id | Borrar o renombrar en el catálogo no toca las apuestas guardadas |
-| 2026-11-03 | `apuestas.deporte` (deporte resumen, "Mixto" si hay varios) calculado por la BD al guardar | Filtro y métricas simples; nunca se fía del navegador |
-| 2026-11-03 | Unicidad sin mayúsculas ni tildes; "Mixto" reservado | Evita duplicados como Futbol/Fútbol |
-| 2026-11-03 | Catálogo enviado a la IA como datos, compacto y con tope de 4.000 caracteres | ≈ +6 % de coste por captura; sin riesgo de instrucciones ocultas |
-| 2026-11-03 | `transcripciones.version_instrucciones` | Medir el coste real antes/después de cambiar las instrucciones |
-| 2026-11-03 | Campos de fecha/hora sin aspecto nativo, rejilla de 2 columnas con `min-width: 0` (también en `fieldset`) | En iPhone se salían de la tarjeta; revisado a 320/375/390/430 px |
-| 2026-11-03 | Migración `20261103000001` solo aditiva y repetible (se puede ejecutar dos veces) | No rompe `main`; segura si se pega de nuevo por error |
-| 2026-11-04 | Casillas "En directo" (+ "Veía el partido") y "Precipitada" (+ "Para recuperar pérdidas"), siempre del usuario | Datos de conducta para la Fase 2 sin pasos extra al registrar ni al resolver |
-| 2026-11-04 | Cuatro booleanos en vez de una columna "conducta" con varios valores | Métricas más simples; la BD impide combinaciones imposibles (CHECK) |
-| 2026-11-04 | `precipitada_momento` calculado por un disparador de la tabla | Vale para cualquier camino de escritura; se conserva al reabrir; nunca se fía del navegador |
-| 2026-11-04 | La IA ignora señales de directo (instrucciones v3) sin tocar su esquema | La captura refleja el momento de la captura, no el de la apuesta |
-| 2026-11-04 | Filtros "En directo" y "Precipitadas" y marcas LIVE / ⚡ en la lista | Encontrarlas rápido sin abrir cada apuesta |
-| 2026-11-04 | Migración `20261104000001` solo aditiva y repetible, después de la de deportes | No rompe `main` |
+| 2026-11-02 | Catálogo de deportes y ligas por usuario (tablas `deportes`, `ligas`) con desplegables y "+ Nuevo…" | Datos uniformes para las métricas; la IA elige de tu lista |
+| 2026-11-02 | Selecciones enlazadas al catálogo por TEXTO, no por id | Borrar o renombrar en el catálogo no toca las apuestas guardadas |
+| 2026-11-02 | `apuestas.deporte` (deporte resumen, "Mixto" si hay varios) calculado por la BD al guardar | Filtro y métricas simples; nunca se fía del navegador |
+| 2026-11-02 | Unicidad sin mayúsculas ni tildes; "Mixto" reservado | Evita duplicados como Futbol/Fútbol |
+| 2026-11-02 | Catálogo enviado a la IA como datos, compacto y con tope de 4.000 caracteres | ≈ +6 % de coste por captura; sin riesgo de instrucciones ocultas |
+| 2026-11-02 | `transcripciones.version_instrucciones` | Medir el coste real antes/después de cambiar las instrucciones |
+| 2026-11-02 | Campos de fecha/hora sin aspecto nativo, rejilla de 2 columnas con `min-width: 0` (también en `fieldset`) | En iPhone se salían de la tarjeta; revisado a 320/375/390/430 px |
+| 2026-11-02 | Migración `20261103000001` solo aditiva y repetible (se puede ejecutar dos veces) | No rompe `main`; segura si se pega de nuevo por error |
+| 2026-11-02 | Casillas "En directo" (+ "Veía el partido") y "Precipitada" (+ "Para recuperar pérdidas"), siempre del usuario | Datos de conducta para la Fase 2 sin pasos extra al registrar ni al resolver |
+| 2026-11-02 | Cuatro booleanos en vez de una columna "conducta" con varios valores | Métricas más simples; la BD impide combinaciones imposibles (CHECK) |
+| 2026-11-02 | `precipitada_momento` calculado por un disparador de la tabla | Vale para cualquier camino de escritura; se conserva al reabrir; nunca se fía del navegador |
+| 2026-11-02 | La IA ignora señales de directo (instrucciones v3) sin tocar su esquema | La captura refleja el momento de la captura, no el de la apuesta |
+| 2026-11-02 | Filtros "En directo" y "Precipitadas" y marcas LIVE / ⚡ en la lista | Encontrarlas rápido sin abrir cada apuesta |
+| 2026-11-02 | Migración `20261104000001` solo aditiva y repetible, después de la de deportes | No rompe `main` |
+| 2026-11-02 | Los nombres `20261103…` y `20261104…` de las migraciones no son fechas reales (se hicieron el 2026-11-02) | Solo marcan el orden; ya están aplicadas y no se renombran |
+| 2026-11-02 | **Fase 1 cerrada** y fusionada en `main` | Verificada en el móvil; RLS en vivo 37/37; pruebas de GitHub Actions en verde |
