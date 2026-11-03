@@ -1,7 +1,10 @@
 'use client'
 
-import { useId, useMemo, useState, useTransition, type Dispatch, type ReactNode, type SetStateAction } from 'react'
-import { guardarApuesta } from '@/app/(app)/apuestas/actions'
+import { useEffect, useId, useMemo, useRef, useState, useTransition, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { buscarDuplicadas, guardarApuesta, type ResultadoDuplicadas } from '@/app/(app)/apuestas/actions'
+import { formatoImporte } from '@/lib/apuestas/dinero'
+import { cuotaATexto } from '@/lib/apuestas/cuotas'
+import { formatoFecha } from '@/lib/apuestas/fechas'
 import { resultadoPropuesto } from '@/lib/apuestas/calculos'
 import { cuotaADecimal } from '@/lib/apuestas/cuotas'
 import { centimosATexto, textoACentimos } from '@/lib/apuestas/dinero'
@@ -64,7 +67,11 @@ type Props = {
   modo?: 'revision' | 'panel' | 'edicion'
   // En el detalle, el panel y "Editar apuesta" comparten los mismos datos.
   compartido?: [ValoresFormulario, Dispatch<SetStateAction<ValoresFormulario>>]
+  // Aviso de duplicada: "Descartar" (en la cola de capturas o en el registro a mano).
+  onDescartar?: () => void
 }
+
+type Duplicada = Extract<ResultadoDuplicadas, { ok: true }>
 
 // ¿El resultado guardado no es el que saldría al calcularlo? Entonces se escribió a mano.
 export function resultadoEscritoAMano(v: ValoresFormulario): boolean {
@@ -108,12 +115,37 @@ export function FormularioApuesta(props: Props) {
   const [estadoPorConfirmar, setEstadoPorConfirmar] = useState<string | null>(null)
   // En "Editar apuesta" de una apuesta resuelta: el resultado que saldría con los datos nuevos.
   const [recalculoPropuesto, setRecalculoPropuesto] = useState<string | null>(null)
+  // Aviso de apuesta duplicada (solo en apuestas nuevas: revisión de captura y registro a mano).
+  const comprobarDuplicadas = modo === 'revision' && !apuestaId
+  const [duplicada, setDuplicada] = useState<Duplicada | null>(null)
+  const [aceptada, setAceptada] = useState<string | null>(null) // huella para la que se pulsó "Incluir de nuevo"
+  const [pedirEleccion, setPedirEleccion] = useState(false) // se pulsó Guardar con el aviso sin resolver
+  const consulta = useRef(0) // solo vale la respuesta de la última comprobación
+  const refAviso = useRef<HTMLDivElement>(null)
   const [guardando, iniciar] = useTransition()
 
   const tipo: TipoApuesta = esTipoApuesta(valores.tipo) ? valores.tipo : 'simple'
   const estado = esEstadoApuesta(valores.estado) ? valores.estado : 'pendiente'
   const avisos = useMemo(() => validarFormulario(valores).avisos, [valores])
   const nDudosos = Object.keys(dudosos).length
+
+  // Comprobación al abrir y ~0,6 s después de cada cambio. Las respuestas antiguas se ignoran.
+  const casaPendiente =
+    !valores.casa_id && !!props.casaDetectada && !casas.some((c) => normalizar(c.nombre) === normalizar(props.casaDetectada!))
+  useEffect(() => {
+    if (!comprobarDuplicadas) return
+    const id = ++consulta.current
+    const t = setTimeout(async () => {
+      const aComprobar = ajustarPorTipo(valores)
+      const r = validarFormulario(aComprobar).ok
+        ? await buscarDuplicadas({ valores: aComprobar, casaPendiente }).catch(() => ({ ok: false }) as const)
+        : null
+      if (id !== consulta.current) return
+      setDuplicada(r && r.ok && r.total > 0 ? r : null)
+      if (!r || !r.ok || r.total === 0) setPedirEleccion(false)
+    }, 600)
+    return () => clearTimeout(t)
+  }, [comprobarDuplicadas, valores, casaPendiente])
 
   // ---------- cambios ----------
 
@@ -384,7 +416,7 @@ export function FormularioApuesta(props: Props) {
 
   // ---------- guardar ----------
 
-  function guardar() {
+  function guardar(saltarComprobacion = false) {
     setErrorGeneral(null)
     const aGuardar = ajustarPorTipo(valores)
     const local = validarFormulario(aGuardar)
@@ -394,6 +426,17 @@ export function FormularioApuesta(props: Props) {
       return
     }
     iniciar(async () => {
+      // Última comprobación con los valores finales (y la casa ya resuelta). Si falla, se guarda igual.
+      if (comprobarDuplicadas && !saltarComprobacion) {
+        const id = ++consulta.current
+        const d = await buscarDuplicadas({ valores: aGuardar, casaPendiente: false }).catch(() => ({ ok: false }) as const)
+        if (d.ok && d.total > 0 && d.clave !== aceptada) {
+          if (id === consulta.current) setDuplicada(d)
+          setPedirEleccion(true)
+          requestAnimationFrame(() => refAviso.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+          return
+        }
+      }
       const r = await guardarApuesta({
         id: apuestaId ?? null,
         valores: aGuardar,
@@ -436,6 +479,23 @@ export function FormularioApuesta(props: Props) {
       noValidate
     >
       {modo === 'revision' && imagen && <VisorCaptura ruta={imagen} />}
+
+      {duplicada && duplicada.clave !== aceptada && (
+        <AvisoDuplicada
+          ref={refAviso}
+          duplicada={duplicada}
+          pedirEleccion={pedirEleccion}
+          ocupado={guardando}
+          onDescartar={props.onDescartar}
+          onIncluir={() => {
+            setAceptada(duplicada.clave)
+            if (pedirEleccion) {
+              setPedirEleccion(false)
+              guardar(true)
+            }
+          }}
+        />
+      )}
 
       {modo === 'revision' && nDudosos > 0 && (
         <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
@@ -892,6 +952,72 @@ function TarjetaSeleccion({
         <Desplegable value={s.estado} onChange={(v) => onCambio('estado', v)} marca={dudosos[k('estado')]} opciones={ESTADOS_SELECCION.map((e) => [e, NOMBRE_ESTADO[e]])} />
       </Campo>
     </li>
+  )
+}
+
+// ---------- aviso de apuesta duplicada ----------
+
+function AvisoDuplicada({
+  ref,
+  duplicada,
+  pedirEleccion,
+  ocupado,
+  onDescartar,
+  onIncluir,
+}: {
+  ref: React.Ref<HTMLDivElement>
+  duplicada: Duplicada
+  pedirEleccion: boolean
+  ocupado: boolean
+  onDescartar?: () => void
+  onIncluir: () => void
+}) {
+  const r = duplicada.reciente
+  return (
+    <div
+      ref={ref}
+      role="alertdialog"
+      aria-label="Apuesta duplicada"
+      className="min-w-0 space-y-3 rounded-2xl border-2 border-amber-500 bg-amber-500/10 p-4"
+    >
+      <p className="font-semibold">Parece que esta apuesta ya está registrada</p>
+      {r && (
+        <p className="text-sm">
+          {formatoFecha(r.fecha)} · {NOMBRE_ESTADO[r.estado as keyof typeof NOMBRE_ESTADO] ?? r.estado} ·{' '}
+          {r.casa ?? 'Sin casa'} · {formatoImporte(r.importe, r.divisa)} · @ {cuotaATexto(r.cuota) || '—'}
+        </p>
+      )}
+      {duplicada.total > 1 && (
+        <p className="text-sm text-muted">
+          Hay {duplicada.total} apuestas iguales; esta es la más reciente.
+        </p>
+      )}
+      {pedirEleccion && (
+        <p role="status" className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+          Elige Descartar o Incluir de nuevo.
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        {onDescartar && (
+          <button
+            type="button"
+            disabled={ocupado}
+            onClick={onDescartar}
+            className="min-h-12 rounded-xl border border-border bg-background px-2 text-sm font-semibold disabled:opacity-60"
+          >
+            Descartar
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={ocupado}
+          onClick={onIncluir}
+          className={`min-h-12 rounded-xl bg-brand px-2 text-sm font-semibold text-brand-foreground disabled:opacity-60 ${onDescartar ? '' : 'col-span-2'}`}
+        >
+          Incluir de nuevo
+        </button>
+      </div>
+    </div>
   )
 }
 

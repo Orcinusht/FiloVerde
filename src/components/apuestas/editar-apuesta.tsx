@@ -147,6 +147,8 @@ export function NuevaManual({
       casas={casas}
       estrategias={estrategias}
       catalogo={catalogo}
+      // Aviso de duplicada → "Descartar": no se crea nada y se vuelve a la lista.
+      onDescartar={() => router.replace('/apuestas')}
       onGuardada={() => {
         router.push('/apuestas')
         router.refresh()

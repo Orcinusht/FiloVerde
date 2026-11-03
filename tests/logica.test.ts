@@ -344,3 +344,72 @@ test('emojis de deporte por nombre (sin mayúsculas ni tildes)', () => {
   assert.equal(emojiDeporte('Mixto'), '🔀')
   assert.equal(emojiDeporte(''), '')
 })
+
+// ---------- Apuestas duplicadas (copia calcada) ----------
+import { claveHuella, esCalcada, type HuellaApuesta } from '../src/lib/apuestas/duplicadas.ts'
+
+const huella = (extra: Partial<HuellaApuesta> = {}): HuellaApuesta => ({
+  casa_id: 'c1',
+  tipo: 'combinada',
+  importe: 1000,
+  cuota_total: 3,
+  ganancia_potencial: 3000,
+  selecciones: [
+    { evento: 'Real Betis - Sevilla', mercado: '1X2', pronostico: 'Betis', cuota: 1.5, evento_fecha: '2026-11-08' },
+    { evento: 'Getafe - Girona', mercado: '1X2', pronostico: 'Girona', cuota: 2, evento_fecha: null },
+  ],
+  ...extra,
+})
+
+test('duplicadas: idéntica, orden distinto y mayúsculas/tildes/espacios → calcada', () => {
+  assert.ok(esCalcada(huella(), huella()))
+  const h = huella()
+  assert.ok(esCalcada(h, { ...h, selecciones: [...h.selecciones].reverse() }), 'orden distinto')
+  const m = huella({
+    selecciones: [
+      { evento: '  REAL betis -  SEVILLA ', mercado: '1x2', pronostico: 'betis', cuota: 1.5, evento_fecha: '2026-11-08' },
+      { evento: 'getafe - gírona', mercado: '1X2', pronostico: 'GIRONA', cuota: 2.0, evento_fecha: null },
+    ],
+  })
+  assert.ok(esCalcada(huella(), m), 'mayúsculas, tildes y espacios')
+  assert.equal(claveHuella(huella()), claveHuella({ ...h, selecciones: [...h.selecciones].reverse() }))
+})
+
+test('duplicadas: cualquier cambio en lo comparado → NO calcada', () => {
+  const h = huella()
+  assert.ok(!esCalcada(h, huella({ importe: 1001 })), 'importe')
+  assert.ok(!esCalcada(h, huella({ cuota_total: 3.01 })), 'cuota total')
+  assert.ok(!esCalcada(h, huella({ casa_id: 'c2' })), 'casa')
+  assert.ok(!esCalcada(h, huella({ casa_id: null })), 'con casa vs sin casa')
+  assert.ok(!esCalcada(h, huella({ tipo: 'sistema' })), 'tipo')
+  assert.ok(!esCalcada(h, huella({ ganancia_potencial: 3100 })), 'ganancia distinta')
+  assert.ok(esCalcada(h, huella({ ganancia_potencial: null })), 'ganancia solo en una: no cuenta')
+  const otraSel = huella({ selecciones: [h.selecciones[0], { ...h.selecciones[1], pronostico: 'Getafe' }] })
+  assert.ok(!esCalcada(h, otraSel), 'una selección distinta')
+  const cuotaSel = huella({ selecciones: [h.selecciones[0], { ...h.selecciones[1], cuota: 2.05 }] })
+  assert.ok(!esCalcada(h, cuotaSel), 'cuota de una selección')
+  const extra = huella({ selecciones: [...h.selecciones, { ...h.selecciones[1], evento: 'Celta - Alavés' }] })
+  assert.ok(!esCalcada(h, extra), 'selección extra')
+  const fecha = huella({ selecciones: [{ ...h.selecciones[0], evento_fecha: '2026-11-09' }, h.selecciones[1]] })
+  assert.ok(!esCalcada(h, fecha), 'las dos tienen fecha del evento y no coincide')
+  const sinFecha = huella({ selecciones: [{ ...h.selecciones[0], evento_fecha: null }, h.selecciones[1]] })
+  assert.ok(esCalcada(h, sinFecha), 'fecha solo en una: no cuenta')
+})
+
+test('duplicadas: mismo partido con cuotas nulas', () => {
+  const mp = (extra: Partial<HuellaApuesta> = {}) =>
+    huella({
+      tipo: 'mismo_partido',
+      cuota_total: 5.5,
+      ganancia_potencial: 5500,
+      selecciones: [
+        { evento: 'Real Madrid - Barcelona', mercado: 'Resultado', pronostico: 'Real Madrid', cuota: null, evento_fecha: '2026-11-08' },
+        { evento: 'Real Madrid - Barcelona', mercado: 'Ambos marcan', pronostico: 'Sí', cuota: null, evento_fecha: '2026-11-08' },
+      ],
+      ...extra,
+    })
+  assert.ok(esCalcada(mp(), mp()))
+  const conCuota = mp()
+  conCuota.selecciones = [{ ...conCuota.selecciones[0], cuota: 1.9 }, conCuota.selecciones[1]]
+  assert.ok(!esCalcada(mp(), conCuota), 'nula frente a 1,90')
+})

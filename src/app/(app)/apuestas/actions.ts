@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { validarFormulario } from '@/lib/apuestas/formulario'
+import { claveHuella, esCalcada, type HuellaApuesta, type HuellaSeleccion } from '@/lib/apuestas/duplicadas'
 import { esRutaPropia, registrarError, usuarioActual } from '@/lib/server/capturas'
 import { limpiarImagenSiNoSeUsa } from '@/lib/server/pendientes'
 import * as catalogo from '@/lib/server/acciones-catalogo'
@@ -202,4 +203,94 @@ export async function crearDeporte(nombre: string) {
 
 export async function crearLiga(deporte: string, nombre: string) {
   return catalogo.crearLiga(deporte, nombre)
+}
+
+// ---------- Aviso de apuesta duplicada ----------
+// Busca entre MIS apuestas (con mi sesión: RLS; nunca con la clave de administrador) una copia
+// calcada de la que estoy a punto de guardar. Solo para apuestas nuevas, nunca al editar.
+
+export type ResultadoDuplicadas =
+  | {
+      ok: true
+      total: number
+      clave: string // huella de los datos comprobados (para "Incluir de nuevo")
+      reciente: { fecha: string; estado: string; casa: string | null; importe: number; cuota: number | null; divisa: string } | null
+    }
+  | { ok: false }
+
+export async function buscarDuplicadas(entrada: { valores: unknown; casaPendiente?: unknown }): Promise<ResultadoDuplicadas> {
+  try {
+    const v = validarFormulario(entrada?.valores)
+    if (!v.ok) return { ok: true, total: 0, clave: '', reciente: null } // incompleta: nada que comparar
+    const d = v.datos
+    const huella: HuellaApuesta = {
+      casa_id: d.casa_id,
+      tipo: d.tipo,
+      importe: d.importe,
+      cuota_total: d.cuota_total,
+      ganancia_potencial: d.ganancia_potencial,
+      selecciones: d.selecciones.map((s) => ({
+        evento: s.evento,
+        mercado: s.mercado,
+        pronostico: s.pronostico,
+        cuota: s.cuota,
+        evento_fecha: s.evento_fecha,
+      })),
+    }
+    const clave = claveHuella(huella)
+    // Una casa leída por la IA que aún no está en el catálogo no coincide con nada.
+    if (entrada?.casaPendiente === true) return { ok: true, total: 0, clave, reciente: null }
+
+    const supabase = await createClient()
+    const userId = await usuarioActual(supabase)
+    if (!userId) return { ok: false }
+
+    let q = supabase
+      .from('apuestas')
+      .select(
+        'id, fecha, estado, divisa, casa_id, tipo, importe, cuota_total, ganancia_potencial, casas_apuestas(nombre), selecciones(evento, mercado, pronostico, cuota, evento_fecha)',
+      )
+      .eq('importe', d.importe)
+      .eq('tipo', d.tipo)
+      .order('fecha', { ascending: false })
+      .limit(100)
+    q = d.casa_id ? q.eq('casa_id', d.casa_id) : q.is('casa_id', null)
+    q = d.cuota_total == null ? q.is('cuota_total', null) : q.eq('cuota_total', d.cuota_total)
+    const { data, error } = await q
+    if (error) throw error
+
+    const iguales = (data ?? []).filter((a) =>
+      esCalcada(huella, {
+        casa_id: a.casa_id,
+        tipo: a.tipo,
+        importe: Number(a.importe),
+        cuota_total: a.cuota_total == null ? null : Number(a.cuota_total),
+        ganancia_potencial: a.ganancia_potencial == null ? null : Number(a.ganancia_potencial),
+        selecciones: ((a.selecciones ?? []) as HuellaSeleccion[]).map((s) => ({
+          ...s,
+          cuota: s.cuota == null ? null : Number(s.cuota),
+        })),
+      }),
+    )
+    const r = iguales[0]
+    return {
+      ok: true,
+      total: iguales.length,
+      clave,
+      reciente: r
+        ? {
+            fecha: r.fecha,
+            estado: r.estado,
+            casa: (r.casas_apuestas as unknown as { nombre: string } | null)?.nombre ?? null,
+            importe: Number(r.importe),
+            cuota: r.cuota_total == null ? null : Number(r.cuota_total),
+            divisa: r.divisa,
+          }
+        : null,
+    }
+  } catch (e) {
+    // No bloquea el guardado: el error va al log (sin datos personales).
+    registrarError('apuestas:duplicadas', e)
+    return { ok: false }
+  }
 }

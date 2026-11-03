@@ -251,6 +251,7 @@ export function RegistroCapturas({
           indice={item.indice}
           textoGuardar={items.length > 1 && actual + 1 < items.length ? 'Guardar y seguir' : 'Guardar'}
           onGuardada={siguiente}
+          onDescartar={() => descartar(item)}
           onOpcionCreada={(tipo, o) => {
             // Lo creado en esta captura sirve también para las siguientes.
             const anadir = (l: Opcion[]) => (l.some((x) => x.id === o.id) ? l : [...l, o])

@@ -25,6 +25,8 @@ archivo o panel ponerlas).
    guardar (solo se ven en la revisión), panel "Estado y resultado" en el detalle con "Editar
    apuesta" desplegable, guardar o borrar vuelve a la lista (con filtros, scroll y aviso breve),
    emojis de deporte y tarjeta de la lista con el resultado a la derecha.
+   **Aviso de apuesta duplicada** (rama `fase-1-duplicadas`, 2026-11-03, pendiente de verificar en
+   el móvil y de fusionar).
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
@@ -105,7 +107,8 @@ src/
     apuestas/         formulario de revisión, flujo de capturas, lista, filtros, visor de captura
   lib/
     apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
-                      cálculos, validación del formulario, esquema de la IA (propuesta.ts)
+                      cálculos, validación del formulario, esquema de la IA (propuesta.ts),
+                    duplicadas.ts (¿es una copia calcada de otra?)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
@@ -191,6 +194,30 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   pendiente y `al_resolver` si ya está resuelta (también una captura que llega resuelta). Si ya
   estaba marcada se conserva, **también si se reabre una apuesta resuelta**; al desmarcarla se
   borra. No se muestra en pantalla. Por eso guardar nunca falla por la regla del momento.
+- **Aviso de apuesta duplicada** (`lib/apuestas/duplicadas.ts` + `buscarDuplicadas` en
+  `apuestas/actions.ts`): al revisar una captura (también al retomarla) y en el registro a mano, si
+  la apuesta es una copia **calcada** de otra ya guardada (de cualquier estado), sale "Parece que
+  esta apuesta ya está registrada" con la más reciente (fecha · estado · casa · importe · cuota) y
+  cuántas hay. "Descartar" = descarte normal; "Incluir de nuevo" = guardar igual (no vuelve a
+  preguntar salvo que cambien los datos comparados). Se comprueba al abrir, al cambiar datos
+  (espera ~0,6 s; solo vale la respuesta de los datos actuales) y otra vez al pulsar Guardar con
+  los valores finales; con el aviso sin resolver, Guardar no guarda: lo lleva a la vista y pide
+  elegir. **Nunca al editar una apuesta guardada.** Si la comprobación falla (red, servidor), no
+  bloquea: se guarda normal y el error va al log (`[apuestas:duplicadas]`, sin datos personales).
+  - **Se compara:** casa, tipo, importe (céntimos), cuota total, ganancia potencial (solo si las
+    dos la tienen), número de selecciones y en cada una evento, mercado, pronóstico y cuota (vacía =
+    vacía, como en mismo partido) y día del evento (solo si los dos lo tienen). Orden de las
+    selecciones indiferente; textos sin mayúsculas, tildes ni espacios de más; números exactos.
+  - **No se compara:** estado, resultado, estrategia, notas, deporte, liga, hora, fecha de
+    registro, en directo ni precipitada.
+  - Una casa leída por la IA que aún no está en el catálogo no coincide con nada (tampoco con las
+    "sin casa"); al pulsar Guardar se usa la casa ya resuelta.
+  - **Límite:** comparación estricta, no por parecido. "Betis - Sevilla" y "Real Betis - Sevilla
+    FC", o una cuota 1,85 frente a 1,86, NO avisan. Es intencionado: mejor perder algún aviso que
+    molestar con falsos.
+  - La búsqueda se hace **SIEMPRE con la sesión del usuario (RLS)**, nunca con la clave de
+    administrador: solo puede encontrar apuestas propias. Sin migración ni índice nuevo (filtra
+    en la BD por importe y tipo, y compara el resto en el servidor).
 - `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
   `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
@@ -369,3 +396,6 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-03 | Sin migración en estos retoques | Todo se apoya en columnas existentes |
 | 2026-11-03 | Tras guardar o borrar en el detalle se vuelve a la lista (la misma, con sus filtros, vía `?volver=`), reemplazando el historial, con datos frescos, scroll recuperado y aviso breve arriba | Atrás no reabre el formulario guardado; si el guardado falla no se cierra nada y se conserva lo escrito |
 | 2026-11-03 | **Retoques de la Fase 1 fusionados en `main`** (rama `fase-1-retoques`) | Verificados en el móvil; pruebas de GitHub Actions en verde; sin migración |
+| 2026-11-03 | **Aviso de apuesta duplicada** con comparación estricta (lista de campos comparados y no comparados en "Base de datos") | Evita registrar dos veces la misma captura; estricta para no dar falsos avisos (no detecta copias "parecidas") |
+| 2026-11-03 | Duplicadas: la IA no interviene, sin migración; búsqueda siempre con la sesión del usuario (RLS), nunca con la clave de administrador | Sin coste extra; imposible ver apuestas de otro usuario |
+| 2026-11-03 | Duplicadas: si la comprobación falla, se guarda igual; con el aviso sin resolver, Guardar pide elegir | Nunca se pierde un guardado por el aviso; el usuario decide |

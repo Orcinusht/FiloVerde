@@ -150,6 +150,10 @@ async function rest(req, res, url, cuerpo) {
   const unObjeto = (req.headers.accept ?? '').includes('vnd.pgrst.object')
 
   const resultado = await comoUsuario(claims, async (tx) => {
+    if (partes[0] === 'apuestas' && req.method === 'GET' && url.searchParams.has('importe') && fallosDuplicadas > 0) {
+      fallosDuplicadas--
+      throw Object.assign(new Error('Fallo simulado al buscar duplicadas'), { code: 'XX000' })
+    }
     if (partes[0] === 'rpc' && fallosGuardado > 0) {
       fallosGuardado--
       throw Object.assign(new Error('Fallo simulado al guardar'), { code: 'XX000' })
@@ -255,6 +259,7 @@ async function rest(req, res, url, cuerpo) {
 const archivos = new Map()
 let fallosBorrado = 0 // para simular que el borrado de imágenes falla
 let fallosGuardado = 0 // para simular que guardar una apuesta falla
+let fallosDuplicadas = 0 // para simular que la búsqueda de duplicadas falla
 
 async function storage(req, res, url, cuerpoBuf) {
   const claims = leerToken(req)
@@ -423,7 +428,13 @@ APUESTAS.en_juego_resuelta = apuesta({
   importe: 6, cuota_total: '1.50', ganancia_potencial: 9, estado: 'ganada', importe_cobrado: 9,
   selecciones: [sel('Osasuna - Getafe', 'Osasuna', '1.50', { estado: 'ganada', evento_fecha: '2026-11-04', evento_hora: '16:15' })],
 })
+// Para las pruebas de duplicadas: una apuesta que no se parece a ninguna otra.
+APUESTAS.unica = apuesta({
+  casa: null, importe: 7, cuota_total: '2.20', ganancia_potencial: 15.4,
+  selecciones: [sel('Rayo Vallecano - RCD Mallorca', 'Rayo Vallecano', '2.20')],
+})
 const RESPUESTAS = {
+  unica: con(APUESTAS.unica),
   en_juego: con(APUESTAS.en_juego),
   en_juego_resuelta: con(APUESTAS.en_juego_resuelta),
   deducido: con(APUESTAS.deducido),
@@ -433,6 +444,7 @@ const RESPUESTAS = {
   combinada: con(APUESTAS.combinada),
   resuelta: con(APUESTAS.resuelta),
   mismo_partido: con(APUESTAS.mismo_partido),
+  dos_iguales: con(APUESTAS.unica, APUESTAS.unica),
   dos_apuestas: con(APUESTAS.simple, apuesta({ ...APUESTAS.resuelta, casa: 'Bet365' })),
   no_apuesta: { hay_apuestas: false, motivo: 'Es una foto de un perro, no un resguardo de apuesta.', apuestas: [] },
 }
@@ -455,6 +467,10 @@ createServer(async (req, res) => {
     )
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify(rows))
+  }
+  if (url.pathname === '/__fallar_duplicadas') {
+    fallosDuplicadas = Number(cuerpo || 1)
+    return res.writeHead(204).end()
   }
   if (url.pathname === '/__fallar_guardado') {
     fallosGuardado = Number(cuerpo || 1)
