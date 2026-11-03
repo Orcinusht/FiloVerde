@@ -150,6 +150,10 @@ async function rest(req, res, url, cuerpo) {
   const unObjeto = (req.headers.accept ?? '').includes('vnd.pgrst.object')
 
   const resultado = await comoUsuario(claims, async (tx) => {
+    if (partes[0] === 'rpc' && fallosGuardado > 0) {
+      fallosGuardado--
+      throw Object.assign(new Error('Fallo simulado al guardar'), { code: 'XX000' })
+    }
     if (partes[0] === 'rpc') {
       const args = JSON.parse(cuerpo || '{}')
       const nombres = Object.keys(args)
@@ -250,6 +254,7 @@ async function rest(req, res, url, cuerpo) {
 
 const archivos = new Map()
 let fallosBorrado = 0 // para simular que el borrado de imágenes falla
+let fallosGuardado = 0 // para simular que guardar una apuesta falla
 
 async function storage(req, res, url, cuerpoBuf) {
   const claims = leerToken(req)
@@ -450,6 +455,10 @@ createServer(async (req, res) => {
     )
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify(rows))
+  }
+  if (url.pathname === '/__fallar_guardado') {
+    fallosGuardado = Number(cuerpo || 1)
+    return res.writeHead(204).end()
   }
   if (url.pathname === '/__fallar_borrado') {
     fallosBorrado = Number(cuerpo || 1)

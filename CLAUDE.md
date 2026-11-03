@@ -363,3 +363,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-03 | Emojis de deporte (⚽ 🎾 🏀 ⚾ 🏈 🏒 🤾 🏐 🏉 🥊, 🏅 el resto, 🔀 Mixto) solo como decoración | Se reconocen de un vistazo; ocultos a lectores de pantalla (en desplegables, etiqueta sin emoji) |
 | 2026-11-03 | Tarjeta de la lista: todo a la izquierda y SOLO el resultado a la derecha; importe · cuota · estado pasan a dos líneas antes de cortarse | Lectura rápida del resultado; sin solapes de 320 a 430 px |
 | 2026-11-03 | Sin migración en estos retoques | Todo se apoya en columnas existentes |
+| 2026-11-03 | Tras guardar o borrar en el detalle se vuelve a la lista (la misma, con sus filtros, vía `?volver=`), reemplazando el historial, con datos frescos, scroll recuperado y aviso breve arriba | Atrás no reabre el formulario guardado; si el guardado falla no se cierra nada y se conserva lo escrito |

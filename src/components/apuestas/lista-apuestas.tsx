@@ -8,6 +8,7 @@ import { cuotaATexto } from '@/lib/apuestas/cuotas'
 import { formatoFecha } from '@/lib/apuestas/fechas'
 import { FiltrosApuestas } from './filtros-apuestas'
 import { ReintentoSilencioso } from './reintento-silencioso'
+import { VueltaALista } from './vuelta-a-lista'
 import { DeporteConEmoji } from './deporte-con-emoji'
 
 type Busqueda = Promise<Record<string, string | string[] | undefined>>
@@ -66,6 +67,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
   return (
     <div className="space-y-3 px-4 pt-1">
       <ReintentoSilencioso />
+      <VueltaALista />
       {nPendientes > 0 && (
         <Link
           href="/apuestas/nueva?pendientes=1"
@@ -95,7 +97,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
           {filas.map((a) => (
             <li key={a.id}>
               <Link
-                href={`/apuestas/${a.id}`}
+                href={`/apuestas/${a.id}?volver=${encodeURIComponent(enlace(pagina))}`}
                 className="flex min-h-11 items-start gap-3 rounded-2xl border border-border bg-surface p-3 active:bg-background"
               >
                 {/* Bloque principal: todo menos el resultado. */}

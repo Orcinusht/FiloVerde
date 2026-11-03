@@ -7,6 +7,7 @@ import { valoresVacios, type Opcion, type ValoresFormulario } from '@/lib/apuest
 import type { Catalogo } from '@/lib/apuestas/catalogo'
 import { FormularioApuesta, resultadoEscritoAMano } from './formulario-apuesta'
 import { DeporteConEmoji } from './deporte-con-emoji'
+import { avisarAlVolver, rutaDeVuelta } from '@/lib/navegador/volver-a-lista'
 
 // Detalle de una apuesta guardada (sin captura: las capturas se borran al guardar).
 //  · Arriba, un resumen y el panel "Estado y resultado" (+ Precipitada) con su Guardar.
@@ -33,7 +34,6 @@ export function EditarApuesta({
   const [confirmar, setConfirmar] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [borrando, iniciar] = useTransition()
-  const [guardado, setGuardado] = useState(false)
 
   function borrar() {
     setError(null)
@@ -43,16 +43,19 @@ export function EditarApuesta({
         setError(r.error ?? 'No se ha podido borrar.')
         return
       }
-      router.replace('/apuestas')
-      router.refresh()
+      volver('Apuesta borrada')
     })
   }
 
-  const alGuardar = () => {
-    setGuardado(true)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+  // Tras guardar o borrar bien: a la lista de la que venía (con sus filtros), REEMPLAZANDO
+  // esta pantalla en el historial (Atrás no la vuelve a abrir) y con datos frescos.
+  function volver(aviso: string) {
+    avisarAlVolver(aviso)
+    router.replace(rutaDeVuelta(), { scroll: false })
     router.refresh()
   }
+
+  const alGuardar = () => volver('Apuesta guardada')
   const comunes = {
     inicial,
     compartido,
@@ -66,11 +69,6 @@ export function EditarApuesta({
 
   return (
     <>
-      {guardado && (
-        <p role="status" className="mx-4 mb-3 rounded-xl bg-green-500/10 px-3 py-2 text-sm font-medium text-green-800 dark:text-green-300">
-          ✓ Cambios guardados
-        </p>
-      )}
       <div className="mx-4 mb-4 min-w-0 rounded-2xl border border-border bg-surface p-4">
         <p className="truncate font-semibold">{resumen.titulo}</p>
         {resumen.deporte && (
