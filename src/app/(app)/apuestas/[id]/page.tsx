@@ -8,6 +8,8 @@ import { centimosATexto } from '@/lib/apuestas/dinero'
 import { cuotaATexto } from '@/lib/apuestas/cuotas'
 import { isoALocal } from '@/lib/apuestas/fechas'
 import type { ValoresFormulario } from '@/lib/apuestas/formulario'
+import { NOMBRE_TIPO } from '@/lib/apuestas/estados'
+import { deporteResumen } from '@/lib/apuestas/catalogo'
 
 export const metadata = { title: 'Apuesta · Filoverde' }
 export const maxDuration = 60
@@ -77,8 +79,11 @@ async function Detalle({ params }: { params: PageProps<'/apuestas/[id]'>['params
     <EditarApuesta
       id={apuesta.id}
       valores={valores}
-      imagen={apuesta.imagen_origen}
-      resultadoGuardado={apuesta.resultado_economico != null}
+      resumen={{
+        titulo: `${casas.find((c) => c.id === apuesta.casa_id)?.nombre ?? 'Sin casa'} · ${NOMBRE_TIPO[apuesta.tipo]}`,
+        deporte: deporteResumen(apuesta.selecciones.map((s) => s.deporte)) || null,
+        evento: apuesta.selecciones[0]?.evento ?? apuesta.selecciones[0]?.pronostico ?? null,
+      }}
       casas={casas}
       estrategias={estrategias}
       catalogo={catalogo}

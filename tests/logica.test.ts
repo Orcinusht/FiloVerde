@@ -328,3 +328,19 @@ test('la IA nunca marca directo ni precipitada (por defecto: pre-partido y norma
   )
   assert.ok(!('en_directo' in esquemaPropuestaIA.shape.apuestas.element.shape), 'sin campos nuevos en el esquema de la IA')
 })
+
+// ---------- Emojis de deporte ----------
+import { emojiDeporte } from '../src/lib/apuestas/emojis.ts'
+
+test('emojis de deporte por nombre (sin mayúsculas ni tildes)', () => {
+  assert.equal(emojiDeporte('Fútbol'), '⚽')
+  assert.equal(emojiDeporte('FUTBOL'), '⚽')
+  assert.equal(emojiDeporte('fútbol americano'), '🏈')
+  assert.equal(emojiDeporte('Béisbol'), '⚾')
+  assert.equal(emojiDeporte('MMA/Boxeo'), '🥊')
+  assert.equal(emojiDeporte('Ciclismo'), '🏅')
+  assert.equal(emojiDeporte('eSports'), '🏅')
+  assert.equal(emojiDeporte('Pádel'), '🏅')
+  assert.equal(emojiDeporte('Mixto'), '🔀')
+  assert.equal(emojiDeporte(''), '')
+})

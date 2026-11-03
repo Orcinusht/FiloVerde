@@ -113,6 +113,7 @@ function condiciones(params, valores) {
     else if (op === 'ilike') where.push(`${col} ilike $${valores.push(val.replace(/\*/g, '%'))}`)
     else if (op === 'gt') where.push(`${col} > $${valores.push(val)}`)
     else if (op === 'is' && val === 'null') where.push(`${col} is null`)
+    else if (op === 'not' && val === 'is.null') where.push(`${col} is not null`)
     else if (op === 'in') {
       const lista = val.replace(/^\(|\)$/g, '').split(',').map((x) => x.replace(/^"|"$/g, '')).filter(Boolean)
       where.push(lista.length ? `${col}::text = any($${valores.push(lista)})` : 'false')
@@ -248,6 +249,7 @@ async function rest(req, res, url, cuerpo) {
 // ---------- storage ----------
 
 const archivos = new Map()
+let fallosBorrado = 0 // para simular que el borrado de imágenes falla
 
 async function storage(req, res, url, cuerpoBuf) {
   const claims = leerToken(req)
@@ -255,6 +257,27 @@ async function storage(req, res, url, cuerpoBuf) {
   const [bucket, ...trozos] = resto.split('/')
   const nombre = trozos.join('/')
 
+  // Listado de una carpeta (supabase.storage.from(b).list(carpeta)).
+  if (req.method === 'POST' && bucket === 'list') {
+    const { prefix = '', limit = 100, offset = 0 } = JSON.parse(cuerpoBuf.toString() || '{}')
+    const b = trozos[0]
+    const { rows } = await comoUsuario(claims, (tx) =>
+      tx.query(`select name, created_at from storage.objects where bucket_id = $1 and name like $2 order by name limit $3 offset $4`, [
+        b, `${prefix.replace(/\/$/, '')}/%`, limit, offset,
+      ]),
+    )
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(
+      JSON.stringify(
+        rows.map((r) => ({
+          name: r.name.slice(prefix.replace(/\/$/, '').length + 1),
+          id: r.name,
+          created_at: r.created_at,
+          metadata: { size: archivos.get(`${b}/${r.name}`)?.bytes.length ?? 0 },
+        })),
+      ),
+    )
+  }
   if (req.method === 'POST' && nombre) {
     await comoUsuario(claims, (tx) => tx.query(`insert into storage.objects (bucket_id, name) values ($1, $2)`, [bucket, nombre]))
     archivos.set(`${bucket}/${nombre}`, { bytes: cuerpoBuf, tipo: req.headers['content-type'] })
@@ -274,6 +297,11 @@ async function storage(req, res, url, cuerpoBuf) {
     return res.end(a.bytes)
   }
   if (req.method === 'DELETE') {
+    if (fallosBorrado > 0) {
+      fallosBorrado--
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ statusCode: '500', error: 'internal', message: 'Fallo simulado' }))
+    }
     const { prefixes } = JSON.parse(cuerpoBuf.toString() || '{}')
     const { rows } = await comoUsuario(claims, (tx) =>
       tx.query(`delete from storage.objects where bucket_id = $1 and name = any($2) returning name`, [bucket, prefixes]),
@@ -422,6 +450,29 @@ createServer(async (req, res) => {
     )
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify(rows))
+  }
+  if (url.pathname === '/__fallar_borrado') {
+    fallosBorrado = Number(cuerpo || 1)
+    return res.writeHead(204).end()
+  }
+  if (url.pathname === '/__sql') {
+    // Solo para las pruebas locales (como administrador): consultas de control.
+    const { rows } = await db.query(cuerpo)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify(rows))
+  }
+  if (url.pathname === '/__archivo_suelto') {
+    // Crea una imagen "antigua" en Storage (sin enlace o enlazada a una apuesta, como antes).
+    const { ruta, apuestaEvento } = JSON.parse(cuerpo)
+    await db.query(`insert into storage.objects (bucket_id, name, created_at) values ('capturas', $1, now() - interval '3 days')`, [ruta])
+    archivos.set(`capturas/${ruta}`, { bytes: Buffer.alloc(150_000), tipo: 'image/jpeg' })
+    if (apuestaEvento) {
+      await db.query(
+        `update apuestas set imagen_origen = $1 where id = (select apuesta_id from selecciones where evento = $2 order by created_at desc limit 1)`,
+        [ruta, apuestaEvento],
+      )
+    }
+    return res.writeHead(204).end()
   }
   if (url.pathname === '/__archivos') {
     res.writeHead(200, { 'Content-Type': 'application/json' })

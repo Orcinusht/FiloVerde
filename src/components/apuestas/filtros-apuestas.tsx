@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { ESTADOS_APUESTA, NOMBRE_ESTADO } from '@/lib/apuestas/estados'
 import type { Opcion } from '@/lib/apuestas/formulario'
+import { emojiDeporte } from '@/lib/apuestas/emojis'
 
 // Filtros básicos de la lista: por estado y por casa (se guardan en la dirección).
 export function FiltrosApuestas({
@@ -70,8 +71,8 @@ export function FiltrosApuestas({
         <option value="">Todos los deportes</option>
         {deporte && !deportes.includes(deporte) && <option value={deporte}>{deporte}</option>}
         {deportes.map((d) => (
-          <option key={d} value={d}>
-            {d}
+          <option key={d} value={d} aria-label={d}>
+            {emojiDeporte(d)} {d}
           </option>
         ))}
       </select>

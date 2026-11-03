@@ -87,9 +87,11 @@ src/
     (app)/            pantallas con sesión + barra inferior
       apuestas/         lista (filtros) · nueva/ (capturas o ?manual=1) · [id]/ (detalle y edición)
         actions.ts      guardar, borrar, crear casa/estrategia, descartar captura (Server Actions)
-      ajustes/          tema, coste de la IA (coste-ia.tsx), deportes/ (catálogo: renombrar y borrar), cuenta
+      ajustes/          tema, coste de la IA (coste-ia.tsx), capturas guardadas (recuento y borrado),
+                        deportes/ (catálogo: renombrar y borrar), cuenta
       graficas/ bankroll/
-    api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada)
+    api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada, solo en la revisión)
+                      · reintentar/ (reintenta en silencio los borrados de imágenes que fallaron)
     login/            pantalla de entrada (providers.ts = proveedores, actions.ts = login en servidor)
     auth/callback/    vuelta de Google (?code) y del email de confirmación (#tokens) → sesión
     auth/confirm/     alternativa para el email si se usa plantilla con token_hash
@@ -104,7 +106,8 @@ src/
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
                       capturas.ts (bucket), datos.ts (lecturas de la BD), catalogo.ts y
-                      acciones-catalogo.ts (deportes y ligas), pendientes.ts (sin revisar)
+                      acciones-catalogo.ts (deportes y ligas), pendientes.ts (sin revisar),
+                      limpieza.ts (capturas temporales: reintento y borrado de las antiguas)
   proxy.ts            renueva sesión y protege rutas
 supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
@@ -143,8 +146,22 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 - **Apuestas sin revisar** = las de la `propuesta` de una transcripción que no están guardadas ni
   en `descartadas` (`lib/server/pendientes.ts`). La lista muestra "Tienes N sin revisar" y se
   retoman sin volver a llamar a la IA. Borrar una apuesta guardada la marca como descartada.
-- **La imagen se borra del bucket** solo si ninguna apuesta guardada la usa y no queda ninguna
-  apuesta de esa captura sin revisar. La transcripción se conserva (coste) con `imagen` vacía.
+- **Las capturas son TEMPORALES** (desde el 2026-11-03): solo se ven en la pantalla de revisión
+  (también al retomar una a medias). Al guardar una apuesta NO se guarda `imagen_origen` (queda
+  vacío; la columna se mantiene para las antiguas). Primero se guarda en la BD y, si va bien,
+  después de responder se borra la imagen (`after()`), siempre que no quede ninguna apuesta de esa
+  captura sin revisar (con varias apuestas, al guardar o descartar la última). La transcripción se
+  conserva (coste, propuesta, dudosos) con `imagen` vacía.
+- **Si el borrado falla**, el guardado no falla y no se avisa: la transcripción conserva su
+  `imagen` como marca de "pendiente de borrar". Al abrir la lista, `/api/capturas/reintentar`
+  responde al momento y reintenta después (hasta 20). Nunca toca capturas con apuestas sin
+  revisar, imágenes enlazadas a apuestas antiguas ni lecturas de menos de 2 h
+  (`FILOVERDE_MARGEN_CAPTURAS_MIN`, 120 por defecto; 0 en la prueba local).
+- **Ajustes → Capturas guardadas**: recuento con la API de Storage (sesión del usuario: solo su
+  carpeta) separado en "de apuestas guardadas o descartadas", "sin enlace en la BD" (avisa si
+  Storage tiene más archivos de los que enlaza la BD), "pendientes de revisar" y "recién subidas"
+  (estas dos nunca se borran). "Borrar" pide confirmación, recalcula en el servidor y vacía los
+  enlaces (`apuestas.imagen_origen`, `transcripciones.imagen`). Irreversible.
 - En `transcripciones` el usuario solo puede cambiar `descartadas` e `imagen` (permiso por
   columna): el modelo, los tokens y el coste no se pueden modificar.
 - **Catálogo de deportes y ligas** (`deportes`, `ligas`): nombres únicos por usuario sin
@@ -337,3 +354,12 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-02 | Migración `20261104000001` solo aditiva y repetible, después de la de deportes | No rompe `main` |
 | 2026-11-02 | Los nombres `20261103…` y `20261104…` de las migraciones no son fechas reales (se hicieron el 2026-11-02) | Solo marcan el orden; ya están aplicadas y no se renombran |
 | 2026-11-02 | **Fase 1 cerrada** y fusionada en `main` | Verificada en el móvil; RLS en vivo 37/37; pruebas de GitHub Actions en verde |
+| 2026-11-03 | **Las capturas se borran al guardar** (son temporales; solo se ven en la revisión) | Una vez revisada y guardada, la imagen no aporta: todos sus datos están en la BD y la propuesta de la IA en `transcripciones`. Menos datos personales guardados, menos espacio y nada que proteger después |
+| 2026-11-03 | Orden: guardar en la BD → borrar la imagen después de responder; reintento silencioso al abrir la lista | El guardado nunca falla por el borrado; sin tablas nuevas (la marca es `transcripciones.imagen`) |
+| 2026-11-03 | Capturas antiguas: recuento y borrado desde Ajustes con la API de Storage y confirmación | La decisión irreversible la toma el usuario; nunca toca las pendientes de revisar |
+| 2026-11-03 | **Panel "Estado y resultado"** en el detalle: Ganada / Perdida (botones grandes), resto en desplegable, resultado editable, Precipitada debajo, un solo Guardar | Resolver una apuesta con un toque, sin abrir el formulario entero |
+| 2026-11-03 | Aviso antes de pisar un resultado escrito a mano (al cambiar el estado) o de recalcular al cambiar importe/cuota de una resuelta | La IA y el cálculo proponen; el usuario decide |
+| 2026-11-03 | "Editar apuesta" despliega el formulario completo sin captura; comparte datos con el panel (cualquier Guardar guarda todo) | No se pierde lo cambiado en la otra parte |
+| 2026-11-03 | Emojis de deporte (⚽ 🎾 🏀 ⚾ 🏈 🏒 🤾 🏐 🏉 🥊, 🏅 el resto, 🔀 Mixto) solo como decoración | Se reconocen de un vistazo; ocultos a lectores de pantalla (en desplegables, etiqueta sin emoji) |
+| 2026-11-03 | Tarjeta de la lista: todo a la izquierda y SOLO el resultado a la derecha; importe · cuota · estado pasan a dos líneas antes de cortarse | Lectura rápida del resultado; sin solapes de 320 a 430 px |
+| 2026-11-03 | Sin migración en estos retoques | Todo se apoya en columnas existentes |

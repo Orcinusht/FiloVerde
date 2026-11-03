@@ -7,6 +7,8 @@ import { formatoImporte } from '@/lib/apuestas/dinero'
 import { cuotaATexto } from '@/lib/apuestas/cuotas'
 import { formatoFecha } from '@/lib/apuestas/fechas'
 import { FiltrosApuestas } from './filtros-apuestas'
+import { ReintentoSilencioso } from './reintento-silencioso'
+import { DeporteConEmoji } from './deporte-con-emoji'
 
 type Busqueda = Promise<Record<string, string | string[] | undefined>>
 
@@ -63,6 +65,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
 
   return (
     <div className="space-y-3 px-4 pt-1">
+      <ReintentoSilencioso />
       {nPendientes > 0 && (
         <Link
           href="/apuestas/nueva?pendientes=1"
@@ -93,8 +96,9 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
             <li key={a.id}>
               <Link
                 href={`/apuestas/${a.id}`}
-                className="flex items-start justify-between gap-3 rounded-2xl border border-border bg-surface p-3 active:bg-background"
+                className="flex min-h-11 items-start gap-3 rounded-2xl border border-border bg-surface p-3 active:bg-background"
               >
+                {/* Bloque principal: todo menos el resultado. */}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">
                     {a.en_directo && (
@@ -114,30 +118,36 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
                     {a.casa ?? 'Sin casa'} · {NOMBRE_TIPO[a.tipo]}
                     {a.n_selecciones > 1 ? ` (${a.n_selecciones})` : ''}
                   </p>
-                  {a.deporte && <p className="truncate text-xs font-medium text-muted">{a.deporte}</p>}
-                  <p className="truncate text-sm text-muted">{a.primer_evento ?? '—'}</p>
-                  <p className="mt-1 text-xs text-muted">{formatoFecha(a.fecha)}</p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-sm font-semibold">{formatoImporte(a.importe, a.divisa)}</p>
-                  <p className="text-xs text-muted">@ {cuotaATexto(a.cuota_total) || '—'}</p>
-                  <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${COLOR_ESTADO[a.estado]}`}>
-                    {NOMBRE_ESTADO[a.estado]}
-                  </span>
-                  {a.resultado_economico != null && a.estado !== 'pendiente' && (
-                    <p
-                      className={`text-xs font-semibold ${
-                        a.resultado_economico > 0
-                          ? 'text-green-700 dark:text-green-400'
-                          : a.resultado_economico < 0
-                            ? 'text-red-700 dark:text-red-400'
-                            : 'text-muted'
-                      }`}
-                    >
-                      {formatoImporte(a.resultado_economico, a.divisa, { conSigno: true })}
+                  {a.deporte && (
+                    <p className="truncate text-xs font-medium text-muted">
+                      <DeporteConEmoji nombre={a.deporte} />
                     </p>
                   )}
+                  <p className="truncate text-sm text-muted">{a.primer_evento ?? '—'}</p>
+                  <p className="text-xs text-muted">{formatoFecha(a.fecha)}</p>
+                  {/* Si no cabe, pasa a dos líneas: los números nunca se cortan. */}
+                  <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                    <span className="shrink-0 font-semibold">{formatoImporte(a.importe, a.divisa)}</span>
+                    <span className="shrink-0 text-muted">@ {cuotaATexto(a.cuota_total) || '—'}</span>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${COLOR_ESTADO[a.estado]}`}>
+                      {NOMBRE_ESTADO[a.estado]}
+                    </span>
+                  </div>
                 </div>
+                {/* Ranura de la derecha: SOLO el resultado (vacía en pendientes). */}
+                {a.resultado_economico != null && a.estado !== 'pendiente' && (
+                  <p
+                    className={`shrink-0 whitespace-nowrap pt-0.5 text-right text-lg font-bold leading-tight ${
+                      a.resultado_economico > 0
+                        ? 'text-green-700 dark:text-green-400'
+                        : a.resultado_economico < 0
+                          ? 'text-red-700 dark:text-red-400'
+                          : 'text-muted'
+                    }`}
+                  >
+                    {formatoImporte(a.resultado_economico, a.divisa, { conSigno: true })}
+                  </p>
+                )}
               </Link>
             </li>
           ))}

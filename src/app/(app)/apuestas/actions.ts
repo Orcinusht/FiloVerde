@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { validarFormulario } from '@/lib/apuestas/formulario'
 import { esRutaPropia, registrarError, usuarioActual } from '@/lib/server/capturas'
@@ -50,7 +51,8 @@ export async function guardarApuesta(entrada: {
       p_id: id,
       p_apuesta: {
         ...apuesta,
-        imagen_origen: id ? null : imagen,
+        // La captura es temporal: la apuesta nunca guarda el enlace a la imagen.
+        imagen_origen: null,
         transcripcion_id: id ? null : transcripcionId,
         transcripcion_indice: id || transcripcionId === null ? null : indice,
       },
@@ -66,6 +68,17 @@ export async function guardarApuesta(entrada: {
       return { ok: false, error: FALLO }
     }
     revalidatePath('/apuestas')
+    // Guardado OK → se borra la captura (si ya no queda ninguna apuesta suya por revisar).
+    // Va después de responder; si falla, no se avisa: se reintenta más tarde.
+    if (imagen) {
+      after(async () => {
+        try {
+          await limpiarImagenSiNoSeUsa(await createClient(), imagen)
+        } catch (e) {
+          registrarError('capturas:borrar-tras-guardar', e)
+        }
+      })
+    }
     return { ok: true, id: data as string, avisos: v.avisos }
   } catch (e) {
     registrarError('apuestas:guardar', e)

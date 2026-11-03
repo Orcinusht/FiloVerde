@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/page-header'
 import { ThemeSelector } from './theme-selector'
 import { AccountSection } from './account-section'
 import { CosteIA } from './coste-ia'
+import { CapturasGuardadas } from './capturas-guardadas'
 
 export const metadata = { title: 'Ajustes · Filoverde' }
 
@@ -15,6 +16,9 @@ export default function Page() {
         <ThemeSelector />
         <Suspense fallback={<div className="h-40 animate-pulse rounded-xl bg-surface" />}>
           <CosteIA />
+        </Suspense>
+        <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-surface" />}>
+          <CapturasGuardadas />
         </Suspense>
         <section>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">Catálogo</h2>

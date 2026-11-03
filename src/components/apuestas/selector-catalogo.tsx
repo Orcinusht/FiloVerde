@@ -23,7 +23,9 @@ export function SelectorCatalogo({
   ayudaDeshabilitado,
   crear,
   onCambio,
+  emoji,
 }: {
+  emoji?: (nombre: string) => string // decoración delante de cada opción (p. ej. deporte)
   valor: string
   opciones: string[]
   vacio: string // texto de la opción vacía ("Elige el deporte")
@@ -83,8 +85,8 @@ export function SelectorCatalogo({
           <option value="">{deshabilitado && !fuera ? (ayudaDeshabilitado ?? vacio) : vacio}</option>
           {fuera && <option value={valor}>{valor} (no está en tu catálogo)</option>}
           {opciones.map((o) => (
-            <option key={o} value={o}>
-              {o}
+            <option key={o} value={o} aria-label={emoji ? o : undefined}>
+              {emoji?.(o) ? `${emoji(o)} ${o}` : o}
             </option>
           ))}
           {!deshabilitado && <option value={NUEVO}>{textoNuevo}</option>}

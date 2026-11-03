@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useMemo, useState, useTransition, type ReactNode } from 'react'
+import { useId, useMemo, useState, useTransition, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { guardarApuesta } from '@/app/(app)/apuestas/actions'
 import { resultadoPropuesto } from '@/lib/apuestas/calculos'
 import { cuotaADecimal } from '@/lib/apuestas/cuotas'
@@ -38,6 +38,7 @@ import {
 import { crearDeporte, crearLiga } from '@/app/(app)/apuestas/actions'
 import { IdCampo, useIdCampo } from './id-campo'
 import { SelectorCatalogo } from './selector-catalogo'
+import { emojiDeporte } from '@/lib/apuestas/emojis'
 import { SelectorOpcion } from './selector-opcion'
 import { VisorCaptura } from './visor-captura'
 
@@ -58,6 +59,18 @@ type Props = {
   catalogo: Catalogo
   onCatalogoCambiado?: (c: Catalogo) => void
   extra?: ReactNode
+  // 'revision' = pantalla de revisión de una captura (como siempre) · 'panel' = detalle: solo
+  // estado, resultado y precipitada · 'edicion' = detalle: el resto de la apuesta.
+  modo?: 'revision' | 'panel' | 'edicion'
+  // En el detalle, el panel y "Editar apuesta" comparten los mismos datos.
+  compartido?: [ValoresFormulario, Dispatch<SetStateAction<ValoresFormulario>>]
+}
+
+// ¿El resultado guardado no es el que saldría al calcularlo? Entonces se escribió a mano.
+export function resultadoEscritoAMano(v: ValoresFormulario): boolean {
+  if (!v.resultado_economico.trim() || v.estado === 'pendiente') return false
+  return textoACentimos(v.resultado_economico, { permitirNegativo: true }) !==
+    textoACentimos(recalcular(v).resultado_economico, { permitirNegativo: true })
 }
 
 // Campos cuyo cambio recalcula el resultado económico propuesto.
@@ -73,7 +86,8 @@ export function FormularioApuesta(props: Props) {
 
   const [casas, setCasas] = useState(casasIniciales)
   const [estrategias, setEstrategias] = useState(estrategiasIniciales)
-  const [valores, setValores] = useState<ValoresFormulario>(() => {
+  const modo = props.modo ?? 'revision'
+  const [propios, setPropios] = useState<ValoresFormulario>(() => {
     const v = { ...props.inicial }
     if (!v.casa_id && props.casaDetectada) {
       const igual = casasIniciales.find((c) => normalizar(c.nombre) === normalizar(props.casaDetectada!))
@@ -81,6 +95,7 @@ export function FormularioApuesta(props: Props) {
     }
     return v
   })
+  const [valores, setValores] = props.compartido ?? [propios, setPropios]
   const [dudosos, setDudosos] = useState<Record<string, MotivoRevision>>(() => ({ ...(props.dudosos ?? {}) }))
   const [resultadoManual, setResultadoManual] = useState(props.resultadoManual ?? false)
   const [errores, setErrores] = useState<Record<string, string>>({})
@@ -89,6 +104,10 @@ export function FormularioApuesta(props: Props) {
   const [catalogo, setCatalogo] = useState<Catalogo>(props.catalogo)
   // Aviso por selección cuando al cambiar de deporte se vacía la liga.
   const [avisosLiga, setAvisosLiga] = useState<Record<number, string>>({})
+  // Cambio de estado pendiente de confirmar porque pisaría un resultado escrito a mano.
+  const [estadoPorConfirmar, setEstadoPorConfirmar] = useState<string | null>(null)
+  // En "Editar apuesta" de una apuesta resuelta: el resultado que saldría con los datos nuevos.
+  const [recalculoPropuesto, setRecalculoPropuesto] = useState<string | null>(null)
   const [guardando, iniciar] = useTransition()
 
   const tipo: TipoApuesta = esTipoApuesta(valores.tipo) ? valores.tipo : 'simple'
@@ -115,6 +134,17 @@ export function FormularioApuesta(props: Props) {
 
   function cambiar<K extends keyof ValoresFormulario>(clave: K, valor: ValoresFormulario[K]) {
     quitarMarca(clave)
+    // Editando una apuesta ya resuelta: no se recalcula sin preguntar.
+    if (modo === 'edicion' && AFECTAN_RESULTADO.has(clave) && valores.estado !== 'pendiente') {
+      const nuevo = { ...valores, [clave]: valor }
+      setValores(nuevo)
+      const propuesto = recalcular(nuevo).resultado_economico
+      const iguales =
+        textoACentimos(propuesto, { permitirNegativo: true }) ===
+        textoACentimos(nuevo.resultado_economico, { permitirNegativo: true })
+      setRecalculoPropuesto(iguales || !propuesto ? null : propuesto)
+      return
+    }
     setValores((v) => {
       const nuevo = { ...v, [clave]: valor }
       return AFECTAN_RESULTADO.has(clave) && !resultadoManual ? recalcular(nuevo) : nuevo
@@ -216,9 +246,20 @@ export function FormularioApuesta(props: Props) {
 
   // Al cambiar el estado de la apuesta, se proponen los de las selecciones.
   // Cambiar el estado siempre recalcula el resultado (después se puede corregir a mano).
-  function cambiarEstado(nuevo: string) {
+  // Antes de pisar un resultado escrito a mano, se pregunta.
+  function pedirCambioEstado(nuevo: string) {
+    if (nuevo === valores.estado) return
+    if (modo !== 'revision' && (resultadoManual || resultadoEscritoAMano(valores)) && valores.resultado_economico.trim()) {
+      setEstadoPorConfirmar(nuevo)
+      return
+    }
+    cambiarEstado(nuevo)
+  }
+
+  function cambiarEstado(nuevo: string, mantenerResultado = false) {
+    setEstadoPorConfirmar(null)
     quitarMarca('estado', 'resultado_economico')
-    setResultadoManual(false)
+    setResultadoManual(mantenerResultado)
     setValores((v) => {
       let selecciones = v.selecciones
       if (nuevo === 'ganada') {
@@ -232,7 +273,8 @@ export function FormularioApuesta(props: Props) {
       } else if (nuevo === 'pendiente') {
         selecciones = selecciones.map((s) => ({ ...s, estado: 'pendiente' }))
       }
-      return recalcular({ ...v, estado: nuevo, selecciones })
+      const n = { ...v, estado: nuevo, selecciones }
+      return mantenerResultado && nuevo !== 'pendiente' ? n : recalcular(n)
     })
   }
 
@@ -393,15 +435,16 @@ export function FormularioApuesta(props: Props) {
       }}
       noValidate
     >
-      {imagen && <VisorCaptura ruta={imagen} />}
+      {modo === 'revision' && imagen && <VisorCaptura ruta={imagen} />}
 
-      {nDudosos > 0 && (
+      {modo === 'revision' && nDudosos > 0 && (
         <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
           Los campos en <strong>ámbar</strong> no se veían, estaban borrosos o la IA los ha deducido: compáralos con la
           captura.
         </p>
       )}
 
+      {modo !== 'panel' && (
       <Grupo titulo="Apuesta">
         <Campo etiqueta="Casa de apuestas" {...p('casa_id')}>
           <SelectorOpcion
@@ -448,6 +491,7 @@ export function FormularioApuesta(props: Props) {
         )}
 
         <CasillasConducta
+          mostrar={modo === 'edicion' ? 'directo' : 'ambas'}
           valores={valores}
           onCambio={(c) =>
             setValores((v) => {
@@ -464,6 +508,9 @@ export function FormularioApuesta(props: Props) {
           <p className="text-sm">
             <span className="text-muted">Deporte de la apuesta: </span>
             <span className={`font-semibold ${deporteDeLaApuesta === DEPORTE_MIXTO ? 'rounded-full bg-violet-500/15 px-2 py-0.5 text-violet-700 dark:text-violet-300' : ''}`}>
+                <span aria-hidden="true" className="mr-1">
+                {emojiDeporte(deporteDeLaApuesta)}
+              </span>
               {deporteDeLaApuesta}
             </span>
             {deporteDeLaApuesta === DEPORTE_MIXTO && <span className="text-muted"> (selecciones de varios deportes)</span>}
@@ -478,6 +525,34 @@ export function FormularioApuesta(props: Props) {
             <Entrada inputMode="decimal" placeholder="1,85" value={valores.cuota_total} onChange={(v) => cambiar('cuota_total', v)} marca={dudosos.cuota_total} conError={!!errores.cuota_total} />
           </Campo>
         </div>
+
+        {modo === 'edicion' && recalculoPropuesto != null && (
+          <div role="alertdialog" aria-label="Recalcular el resultado" className="space-y-2 rounded-xl border border-amber-500/50 bg-amber-500/10 p-3">
+            <p className="text-sm">
+              La apuesta ya está resuelta con un resultado de <strong>{valores.resultado_economico || '0,00'} €</strong>. Con
+              los datos nuevos saldría <strong>{recalculoPropuesto} €</strong>. ¿Lo recalculo?
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setRecalculoPropuesto(null)}
+                className="min-h-11 rounded-xl border border-border bg-background px-2 text-sm font-semibold"
+              >
+                Mantener el mío
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setValores((v) => recalcular(v))
+                  setRecalculoPropuesto(null)
+                }}
+                className="min-h-11 rounded-xl bg-brand px-2 text-sm font-semibold text-brand-foreground"
+              >
+                Recalcular
+              </button>
+            </div>
+          </div>
+        )}
 
         <Campo etiqueta="Ganancia potencial (€)" ayuda="Lo que cobrarías si gana, incluido lo apostado." {...p('ganancia_potencial')}>
           <Entrada inputMode="decimal" placeholder={sugerirGanancia(valores)} value={valores.ganancia_potencial} onChange={(v) => cambiar('ganancia_potencial', v)} marca={dudosos.ganancia_potencial} conError={!!errores.ganancia_potencial} />
@@ -501,11 +576,49 @@ export function FormularioApuesta(props: Props) {
           />
         </Campo>
       </Grupo>
+      )}
 
+      {modo !== 'edicion' && (
       <Grupo titulo="Estado y resultado">
-        <Campo etiqueta="Estado de la apuesta" {...p('estado')}>
-          <Desplegable value={valores.estado} onChange={cambiarEstado} marca={dudosos.estado} opciones={ESTADOS_APUESTA.map((e) => [e, NOMBRE_ESTADO[e]])} />
-        </Campo>
+        {modo === 'panel' ? (
+          <BotonesEstado estado={estado} onElegir={pedirCambioEstado} />
+        ) : (
+          <Campo etiqueta="Estado de la apuesta" {...p('estado')}>
+            <Desplegable value={valores.estado} onChange={cambiarEstado} marca={dudosos.estado} opciones={ESTADOS_APUESTA.map((e) => [e, NOMBRE_ESTADO[e]])} />
+          </Campo>
+        )}
+
+        {estadoPorConfirmar && (
+          <div role="alertdialog" aria-label="Cambiar el estado" className="space-y-2 rounded-xl border border-amber-500/50 bg-amber-500/10 p-3">
+            <p className="text-sm">
+              Escribiste a mano el resultado (<strong>{valores.resultado_economico} €</strong>). Al pasar a «
+              {NOMBRE_ESTADO[estadoPorConfirmar as keyof typeof NOMBRE_ESTADO]}» se recalcularía. ¿Qué hago?
+            </p>
+            <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => cambiarEstado(estadoPorConfirmar)}
+                className="min-h-11 rounded-xl bg-brand px-2 text-sm font-semibold text-brand-foreground"
+              >
+                Recalcular
+              </button>
+              <button
+                type="button"
+                onClick={() => cambiarEstado(estadoPorConfirmar, true)}
+                className="min-h-11 rounded-xl border border-border bg-background px-2 text-sm font-semibold"
+              >
+                Mantener el mío
+              </button>
+              <button
+                type="button"
+                onClick={() => setEstadoPorConfirmar(null)}
+                className="min-h-11 rounded-xl px-2 text-sm font-medium text-muted min-[360px]:col-span-2"
+              >
+                Cancelar (no cambiar el estado)
+              </button>
+            </div>
+          </div>
+        )}
 
         {estado === 'perdida' && varias && (
           <div className="space-y-2 rounded-xl border border-red-500/30 bg-red-500/5 p-3">
@@ -572,9 +685,24 @@ export function FormularioApuesta(props: Props) {
             </div>
           </Campo>
         )}
-      </Grupo>
 
-      {tipo === 'mismo_partido' && (
+        {modo === 'panel' && (
+          <CasillasConducta
+            mostrar="precipitada"
+            valores={valores}
+            onCambio={(c) =>
+              setValores((v) => {
+                const n = { ...v, ...c }
+                if (!n.precipitada) n.recuperar_perdidas = false
+                return n
+              })
+            }
+          />
+        )}
+      </Grupo>
+      )}
+
+      {modo !== 'panel' && tipo === 'mismo_partido' && (
         <Grupo titulo="Partido">
           <Campo etiqueta="Evento" {...pComun('evento')}>
             <Entrada value={valores.selecciones[0]?.evento ?? ''} placeholder="Equipo A - Equipo B" onChange={(v) => cambiarComun('evento', v)} marca={pComun('evento').motivo} />
@@ -596,6 +724,7 @@ export function FormularioApuesta(props: Props) {
         </Grupo>
       )}
 
+      {modo !== 'panel' && (
       <Grupo titulo={tipo === 'mismo_partido' ? `Condiciones (${valores.selecciones.length})` : tipo === 'simple' ? 'Selección' : `Selecciones (${valores.selecciones.length})`}>
         {errores.selecciones && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{errores.selecciones}</p>}
         {tipo === 'mismo_partido' && <p className="text-xs text-muted">Sin cuota por condición: en «mismo partido» solo cuenta la cuota total.</p>}
@@ -631,6 +760,9 @@ export function FormularioApuesta(props: Props) {
         )}
       </Grupo>
 
+      )}
+
+      {modo !== 'panel' && (
       <Grupo titulo="Notas">
         <textarea
           aria-label="Notas"
@@ -642,6 +774,7 @@ export function FormularioApuesta(props: Props) {
           className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base"
         />
       </Grupo>
+      )}
 
       {avisos.length > 0 && (
         <ul className="space-y-2" aria-live="polite">
@@ -653,7 +786,13 @@ export function FormularioApuesta(props: Props) {
         </ul>
       )}
 
-      <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 -mx-4 space-y-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur">
+      <div
+        className={
+          modo === 'panel'
+            ? 'space-y-2'
+            : 'sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 -mx-4 space-y-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur'
+        }
+      >
         {errorGeneral && (
           <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">
             {errorGeneral}
@@ -760,9 +899,22 @@ function TarjetaSeleccion({
 
 type Conducta = Pick<ValoresFormulario, 'en_directo' | 'viendo_partido' | 'precipitada' | 'recuperar_perdidas'>
 
-function CasillasConducta({ valores, onCambio }: { valores: Conducta; onCambio: (c: Partial<Conducta>) => void }) {
+function CasillasConducta({
+  valores,
+  onCambio,
+  mostrar = 'ambas',
+}: {
+  valores: Conducta
+  onCambio: (c: Partial<Conducta>) => void
+  mostrar?: 'ambas' | 'directo' | 'precipitada'
+}) {
   return (
-    <div role="group" aria-label="Cómo fue la apuesta" className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
+    <div
+      role="group"
+      aria-label="Cómo fue la apuesta"
+      className={`grid grid-cols-1 gap-2 ${mostrar === 'ambas' ? 'min-[360px]:grid-cols-2' : ''}`}
+    >
+      {mostrar !== 'precipitada' && (
       <div className="min-w-0 space-y-1">
         <Casilla etiqueta="En directo" marcada={valores.en_directo} onCambio={(m) => onCambio({ en_directo: m })} />
         {valores.en_directo && (
@@ -774,6 +926,8 @@ function CasillasConducta({ valores, onCambio }: { valores: Conducta; onCambio: 
           />
         )}
       </div>
+      )}
+      {mostrar !== 'directo' && (
       <div className="min-w-0 space-y-1">
         <Casilla etiqueta="Precipitada" marcada={valores.precipitada} onCambio={(m) => onCambio({ precipitada: m })} />
         {valores.precipitada && (
@@ -785,6 +939,57 @@ function CasillasConducta({ valores, onCambio }: { valores: Conducta; onCambio: 
           />
         )}
       </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- panel de resultado (detalle) ----------
+
+const OTROS_ESTADOS = ['anulada', 'cash_out', 'media_ganada', 'media_perdida', 'pendiente'] as const
+
+function BotonesEstado({ estado, onElegir }: { estado: string; onElegir: (e: string) => void }) {
+  const otro = (OTROS_ESTADOS as readonly string[]).includes(estado) ? estado : ''
+  return (
+    <div className="space-y-2">
+      <div role="group" aria-label="Estado de la apuesta" className="grid grid-cols-2 gap-2">
+        {(['ganada', 'perdida'] as const).map((e) => {
+          const activo = estado === e
+          return (
+            <button
+              key={e}
+              type="button"
+              aria-pressed={activo}
+              onClick={() => !activo && onElegir(e)}
+              className={`h-14 rounded-xl border-2 text-base font-bold ${
+                activo
+                  ? e === 'ganada'
+                    ? 'border-green-600 bg-green-600 text-white'
+                    : 'border-red-600 bg-red-600 text-white'
+                  : e === 'ganada'
+                    ? 'border-green-600/40 text-green-700 dark:text-green-400'
+                    : 'border-red-600/40 text-red-700 dark:text-red-400'
+              }`}
+            >
+              {activo ? '✓ ' : ''}
+              {NOMBRE_ESTADO[e]}
+            </button>
+          )
+        })}
+      </div>
+      <select
+        aria-label="Otro estado"
+        value={otro}
+        onChange={(ev) => ev.target.value && onElegir(ev.target.value)}
+        className={`h-12 w-full min-w-0 rounded-xl border px-3 text-base ${otro ? 'border-brand bg-brand/10 font-semibold' : 'border-border bg-background'}`}
+      >
+        <option value="">Otro estado…</option>
+        {OTROS_ESTADOS.map((e) => (
+          <option key={e} value={e}>
+            {NOMBRE_ESTADO[e]}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }
@@ -853,6 +1058,7 @@ function CamposDeporteLiga({
             opciones={catalogo.deportes.map((d) => d.nombre)}
             vacio="Elige…"
             textoNuevo="+ Nuevo deporte…"
+            emoji={emojiDeporte}
             marcado={!!pDeporte.motivo}
             conError={!!pDeporte.error}
             esNueva={pDeporte.motivo === 'nueva'}

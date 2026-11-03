@@ -78,6 +78,7 @@ export async function limpiarImagenSiNoSeUsa(supabase: SupabaseClient, ruta: str
 
   const { error: e2 } = await supabase.storage.from(BUCKET).remove([ruta])
   if (e2) {
+    // El enlace en la transcripción se mantiene: así el reintento sabe que falta borrarla.
     registrarError('capturas:borrar', e2)
     return false
   }
