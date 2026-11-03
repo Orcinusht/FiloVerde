@@ -21,10 +21,14 @@ archivo o panel ponerlas).
    capturas → transcripción con IA (API de Claude, solo desde servidor) → revisión → guardado;
    lista, detalle, edición, borrado, registro manual, coste de la IA en Ajustes, varias apuestas
    por captura, tipo "mismo partido", catálogo de deportes y ligas, en directo y precipitada.
+   **Retoques fusionados el 2026-11-03** (verificados en el móvil): las capturas se borran al
+   guardar (solo se ven en la revisión), panel "Estado y resultado" en el detalle con "Editar
+   apuesta" desplegable, guardar o borrar vuelve a la lista (con filtros, scroll y aviso breve),
+   emojis de deporte y tarjeta de la lista con el resultado a la derecha.
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-03)
 - **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
@@ -364,3 +368,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-03 | Tarjeta de la lista: todo a la izquierda y SOLO el resultado a la derecha; importe · cuota · estado pasan a dos líneas antes de cortarse | Lectura rápida del resultado; sin solapes de 320 a 430 px |
 | 2026-11-03 | Sin migración en estos retoques | Todo se apoya en columnas existentes |
 | 2026-11-03 | Tras guardar o borrar en el detalle se vuelve a la lista (la misma, con sus filtros, vía `?volver=`), reemplazando el historial, con datos frescos, scroll recuperado y aviso breve arriba | Atrás no reabre el formulario guardado; si el guardado falla no se cierra nada y se conserva lo escrito |
+| 2026-11-03 | **Retoques de la Fase 1 fusionados en `main`** (rama `fase-1-retoques`) | Verificados en el móvil; pruebas de GitHub Actions en verde; sin migración |
