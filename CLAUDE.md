@@ -25,12 +25,11 @@ archivo o panel ponerlas).
    guardar (solo se ven en la revisión), panel "Estado y resultado" en el detalle con "Editar
    apuesta" desplegable, guardar o borrar vuelve a la lista (con filtros, scroll y aviso breve),
    emojis de deporte y tarjeta de la lista con el resultado a la derecha.
-   **Aviso de apuesta duplicada** (rama `fase-1-duplicadas`, 2026-11-03, pendiente de verificar en
-   el móvil y de fusionar).
+   **Aviso de apuesta duplicada fusionado el 2026-11-03** (verificado en el móvil; sin migración).
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-03)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-03, tras fusionar el aviso de duplicadas)
 - **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
@@ -399,3 +398,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-03 | **Aviso de apuesta duplicada** con comparación estricta (lista de campos comparados y no comparados en "Base de datos") | Evita registrar dos veces la misma captura; estricta para no dar falsos avisos (no detecta copias "parecidas") |
 | 2026-11-03 | Duplicadas: la IA no interviene, sin migración; búsqueda siempre con la sesión del usuario (RLS), nunca con la clave de administrador | Sin coste extra; imposible ver apuestas de otro usuario |
 | 2026-11-03 | Duplicadas: si la comprobación falla, se guarda igual; con el aviso sin resolver, Guardar pide elegir | Nunca se pierde un guardado por el aviso; el usuario decide |
+| 2026-11-03 | **Aviso de apuesta duplicada fusionado en `main`** (rama `fase-1-duplicadas`) | Verificado en el móvil; pruebas de GitHub Actions en verde; sin migración |
