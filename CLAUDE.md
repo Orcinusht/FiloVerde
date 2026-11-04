@@ -31,20 +31,20 @@ archivo o panel ponerlas).
    **IA más fiable y jugadores sustituidos fusionados el 2026-11-04** (verificados en el móvil; sin
    migración): reintentos desde el móvil, 429 separado de la saturación, caché de Anthropic y regla
    del sustituto (instrucciones v5).
-   **Cola de revisión, elección de apuestas, día de la apuesta y fecha del evento** (rama
-   `fase-1-cola-lecturas`, 2026-11-04, sin migración; pendiente de verificar en el móvil y fusionar).
+   **Cola de revisión, elección de apuestas, día de la apuesta y fecha del evento fusionados el
+   2026-11-04** (verificados en el móvil; sin migración; instrucciones v6).
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-04, tras fusionar la IA más fiable)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-04, tras fusionar la cola de revisión)
 - **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
 - **API-Football** u otra fuente de datos deportivos (Fase 2 o 3).
-- **Exportación a CSV** de las apuestas.
+- **Exportación a CSV** de las apuestas (aún sin rama ni fusionar a 2026-11-04).
 - **Análisis del coste y del modelo de IA**: revisar en Ajustes el coste medio real por captura
-  (por versión de instrucciones: v4 de promociones y v5 con caché; comprobar en Vercel → Logs,
-  `[ia:uso]`, que la caché se lee) y decidir si se mantiene `claude-sonnet-5-5` o se cambia.
+  (por versión de instrucciones: v4 de promociones, v5 con caché y v6 de apuestas cortadas y fechas;
+  comprobar en Vercel → Logs, `[ia:uso]`, que la caché se lee) y decidir si se mantiene `claude-sonnet-5-5` o se cambia.
 - **Seguimiento del saldo y la caducidad de los créditos** de promoción (fuera de la ronda de
   promociones).
 - **Modelo de reserva** (aparcado el 2026-11-04): SOLO si, tras los reintentos y la caché, siguen
@@ -558,3 +558,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | Cola con Anterior/Siguiente; en colas de varias, capturas borradas al Terminar (no al guardar) | Poder volver atrás viendo la captura; lo sobrante lo recoge el borrado de las 2 h |
 | 2026-11-04 | Estado de la cola en `sessionStorage`, recuperado solo al recargar | Sobrevive a una recarga sin datos nuevos en la BD; nada importante vive solo en el móvil |
 | 2026-11-04 | Día de la apuesta sin hora: hoy = hora actual, otro día = 12:00, al editar sin cambiar el día se conserva | La hora no se usa; misma columna, sin migración |
+| 2026-11-04 | **Cola de revisión, elección de apuestas, día de la apuesta y fecha del evento fusionados en `main`** (rama `fase-1-cola-lecturas`) | Verificados en el móvil; pruebas de GitHub Actions en verde; sin migración |
