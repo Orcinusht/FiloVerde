@@ -7,7 +7,7 @@
 
 import { spawn, execSync } from 'node:child_process'
 import { createHmac } from 'node:crypto'
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -41,7 +41,7 @@ function arrancar(cmd, args, listo) {
     procesos.push(p)
     const ver = (d) => {
       const t = d.toString()
-      if (process.env.VERBOSE || /error|⨯|\[ia:|\[capturas|\[apuestas/i.test(t)) process.stdout.write(`   │ ${t}`)
+      if (process.env.VERBOSE || /error|⨯|\[ia:|\[capturas|\[apuestas|\[exportar/i.test(t)) process.stdout.write(`   │ ${t}`)
       if (listo.test(t)) ok(p)
     }
     p.stdout.on('data', ver)
@@ -1707,6 +1707,94 @@ const grande = llamadas.find((l) => l.bytesImagen > 0 && l.bytesImagen < 600_000
 assert.ok(grande.bytesImagen < 600_000, `imagen reducida: ${grande.bytesImagen} bytes`)
 bien(`La captura de 3000×5000 llegó a la IA reducida (${Math.round(grande.bytesImagen / 1024)} KB)`)
 
+// ---------- Copia de seguridad en CSV ----------
+paso('Copia de seguridad: descargar apuestas y selecciones en CSV')
+// Lee un CSV como Excel: separador ";", comillas dobles, saltos de línea dentro de comillas.
+function leerCsv(texto) {
+  assert.ok(texto.startsWith('﻿'), 'con BOM UTF-8')
+  const filas = []
+  let fila = []
+  let celda = ''
+  let dentro = false
+  const t = texto.slice(1)
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i]
+    if (dentro) {
+      if (ch === '"' && t[i + 1] === '"') { celda += '"'; i++ } else if (ch === '"') dentro = false
+      else celda += ch
+    } else if (ch === '"') dentro = true
+    else if (ch === ';') { fila.push(celda); celda = '' }
+    else if (ch === '\r' && t[i + 1] === '\n') { fila.push(celda); filas.push(fila); fila = []; celda = ''; i++ }
+    else celda += ch
+  }
+  const [cab, ...resto] = filas
+  return resto.map((f) => Object.fromEntries(cab.map((c, i) => [c, f[i]])))
+}
+async function descargarCsv(p, boton) {
+  const [descarga] = await Promise.all([p.waitForEvent('download'), p.getByRole('button', { name: boton }).click()])
+  const ruta = join(SALIDA, descarga.suggestedFilename())
+  await descarga.saveAs(ruta)
+  return { nombre: descarga.suggestedFilename(), filas: leerCsv(readFileSync(ruta, 'utf8')) }
+}
+
+await pag.goto(`${APP}/ajustes`)
+await pag.getByRole('heading', { name: 'Copia de seguridad' }).waitFor()
+const csvAna = await descargarCsv(pag, 'Descargar apuestas (CSV)')
+assert.equal(csvAna.nombre, `filoverde-apuestas-${hoyMadrid}.csv`)
+const [{ n: nAna }] = await sql(`select count(*)::int n from apuestas where user_id = '${ANA.id}'`)
+assert.equal(csvAna.filas.length, nAna, 'una fila por apuesta')
+await pag.getByText(`Descargado filoverde-apuestas-${hoyMadrid}.csv (${nAna} apuestas).`).waitFor()
+assert.ok(csvAna.filas.every((f) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(f.fecha)), 'fechas AAAA-MM-DD HH:MM')
+assert.ok(csvAna.filas.every((f) => /^\d+,\d{2}$/.test(f.importe)), 'importes con coma y 2 decimales')
+assert.ok(csvAna.filas.some((f) => f.casa === 'Codere'), 'la casa sale por nombre')
+const fechasAna = csvAna.filas.map((f) => f.fecha)
+assert.deepEqual(fechasAna, [...fechasAna].sort(), 'ordenadas por fecha')
+await foto('70-copia-seguridad')
+const selAna = await descargarCsv(pag, 'Descargar selecciones (CSV)')
+assert.equal(selAna.nombre, `filoverde-selecciones-${hoyMadrid}.csv`)
+const [{ n: nSelAna }] = await sql(`select count(*)::int n from selecciones where user_id = '${ANA.id}'`)
+assert.equal(selAna.filas.length, nSelAna)
+const combinada = csvAna.filas.find((f) => f.tipo === 'combinada')
+assert.ok(combinada, 'Ana tiene una combinada')
+assert.ok(selAna.filas.filter((s) => s.apuesta_id === combinada.id).length >= 2, 'la combinada tiene varias filas con su id')
+bien(`Ana: ${nAna} apuestas y ${nSelAna} selecciones; la combinada sale en varias filas con el mismo id de apuesta`)
+
+// Carla: más de 1000 apuestas (Supabase y el simulador cortan en 1000 por consulta).
+const CARLA = { id: '00000000-0000-4000-8000-00000000000c', email: 'carla@prueba.local' }
+await sql(`insert into apuestas (user_id, tipo, fecha, importe, divisa, cuota_total, estado, resultado_economico, notas)
+  select '${CARLA.id}', 'simple', timestamptz '2026-01-01 12:00+01' + g * interval '1 hour', 1000 + g, 'EUR', 1.85,
+         case when g = 1 then 'perdida' else 'pendiente' end, case when g = 1 then -1250 end,
+         case when g = 1 then '=HIPERVINCULO("x"); ojo' when g = 2 then 'Línea 1' || chr(10) || 'Línea 2 con ñ' end
+  from generate_series(1, 1205) g`)
+await sql(`insert into selecciones (apuesta_id, user_id, orden, evento, deporte, mercado, pronostico, cuota, estado)
+  select id, user_id, 0, 'Betis - Sevilla', 'Fútbol', '1X2', '-1 hándicap', 1.85, 'pendiente' from apuestas where user_id = '${CARLA.id}'`)
+const ctxCarla = await navegador.newContext({ ...movil, acceptDownloads: true })
+await ctxCarla.addCookies([cookieSesion(CARLA)])
+const pagCarla = await ctxCarla.newPage()
+pagCarla.on('pageerror', (e) => erroresConsola.push(e.message))
+await pagCarla.goto(`${APP}/ajustes`)
+const csvCarla = await descargarCsv(pagCarla, 'Descargar apuestas (CSV)')
+assert.equal(csvCarla.filas.length, 1205, 'las 1205 apuestas, no solo 1000')
+assert.equal(csvCarla.filas[0].resultado_economico, '-12,50', 'resultado negativo como número, sin apóstrofo')
+assert.equal(csvCarla.filas[0].notas, `'=HIPERVINCULO("x"); ojo`, 'nota con "=" protegida')
+assert.equal(csvCarla.filas[1].notas, 'Línea 1\nLínea 2 con ñ', 'salto de línea y ñ dentro de la celda')
+assert.equal(csvCarla.filas[0].fecha, '2026-01-01 13:00')
+assert.equal(csvCarla.filas[1204].importe, '22,05')
+assert.equal(csvCarla.filas[0].cuota_total, '1,85')
+const selCarla = await descargarCsv(pagCarla, 'Descargar selecciones (CSV)')
+assert.equal(selCarla.filas.length, 1205)
+assert.equal(selCarla.filas[0].pronostico, "'-1 hándicap", 'pronóstico que empieza por "-" protegido')
+assert.equal(selCarla.filas[0].cuota, '1,85', 'la cuota sigue siendo número')
+assert.equal(selCarla.filas[0].apuesta_id, csvCarla.filas[0].id, 'mismo orden que las apuestas')
+assert.ok(!selCarla.filas.some((s) => csvAna.filas.some((a) => a.id === s.apuesta_id)), 'nada de Ana')
+bien('Carla: 1205 apuestas y 1205 selecciones (más de 1000), negativos como número y fórmulas protegidas')
+await ctxCarla.close()
+
+// Sin sesión: no hay archivo.
+const sinSesionCsv = await (await navegador.newContext()).request.get(`${APP}/api/exportar/apuestas`, { maxRedirects: 0 })
+assert.ok([307, 401].includes(sinSesionCsv.status()), `sin sesión: ${sinSesionCsv.status()}`)
+bien('Sin sesión no se descarga nada')
+
 // ---------- Beto: no puede ver nada de Ana ----------
 paso('Otro usuario (Beto) no ve nada de Ana')
 const ctxBeto = await navegador.newContext(movil)
@@ -1715,6 +1803,18 @@ const pagBeto = await ctxBeto.newPage()
 await pagBeto.goto(`${APP}/apuestas`)
 await pagBeto.getByText('Aún no hay apuestas').waitFor()
 bien('Su lista está vacía')
+await pagBeto.goto(`${APP}/ajustes`)
+let descargaBeto = false
+pagBeto.on('download', () => (descargaBeto = true))
+await pagBeto.getByRole('button', { name: 'Descargar apuestas (CSV)' }).click()
+await pagBeto.getByText('Todavía no tienes apuestas registradas: no hay nada que exportar.').waitFor()
+await pagBeto.getByRole('button', { name: 'Descargar selecciones (CSV)' }).click()
+await pagBeto.getByText('Todavía no tienes apuestas registradas: no hay nada que exportar.').waitFor()
+await pagBeto.screenshot({ path: join(SALIDA, '71-copia-sin-apuestas.png'), fullPage: true })
+assert.equal(descargaBeto, false, 'sin archivo vacío')
+const rBetoCsv = await pagBeto.request.get(`${APP}/api/exportar/apuestas`)
+assert.equal(rBetoCsv.status(), 404)
+bien('Sin apuestas: mensaje claro y ningún archivo (la de Ana no le cuenta)')
 await pagBeto.goto(`${APP}/ajustes/deportes`)
 await pagBeto.getByRole('button', { name: /^Tenis/ }).click()
 assert.equal(await pagBeto.getByLabel('Nombre de la liga Laver Cup 2026').count(), 0)

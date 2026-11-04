@@ -5,6 +5,7 @@ import { ThemeSelector } from './theme-selector'
 import { AccountSection } from './account-section'
 import { CosteIA } from './coste-ia'
 import { CapturasGuardadas } from './capturas-guardadas'
+import { CopiaSeguridad } from './copia-seguridad'
 
 export const metadata = { title: 'Ajustes · Filoverde' }
 
@@ -20,6 +21,7 @@ export default function Page() {
         <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-surface" />}>
           <CapturasGuardadas />
         </Suspense>
+        <CopiaSeguridad />
         <section>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">Catálogo</h2>
           <Link

@@ -587,3 +587,23 @@ test('La migración de promociones se puede pegar dos veces sin errores', async 
   assert.equal(rows[0].n, 6)
   await como(ANA, async (tx) => assert.deepEqual(await promo(tx, ids.apuesta), SIN_PROMO))
 })
+
+test('Exportar a CSV: Beto, con las consultas de la exportación y el id de Ana, no obtiene nada de ella', async () => {
+  // Mismas consultas que src/lib/exportar/leer.ts (filtro por user_id + RLS), con el id de Ana.
+  await como(BETO, async (tx) => {
+    for (const [tabla, cols] of [
+      ['apuestas', 'id, fecha, casa_id, notas, promo_tipo, promo_credito'],
+      ['selecciones', 'id, apuesta_id, evento, cuota'],
+      ['casas_apuestas', 'id, nombre'],
+      ['estrategias', 'id, nombre'],
+    ]) {
+      const { rows } = await tx.query(`select ${cols} from ${tabla} where user_id = $1 order by id limit 1000 offset 0`, [ANA])
+      assert.equal(rows.length, 0, `${tabla}: 0 filas de Ana`)
+    }
+  })
+  // Ana, con las mismas consultas, sí ve lo suyo.
+  await como(ANA, async (tx) => {
+    const { rows } = await tx.query(`select id from apuestas where user_id = $1 order by fecha, created_at, id limit 1000 offset 0`, [ANA])
+    assert.ok(rows.length >= 1)
+  })
+})

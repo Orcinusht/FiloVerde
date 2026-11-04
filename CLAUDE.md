@@ -33,6 +33,8 @@ archivo o panel ponerlas).
    del sustituto (instrucciones v5).
    **Cola de revisión, elección de apuestas, día de la apuesta y fecha del evento fusionados el
    2026-11-04** (verificados en el móvil; sin migración; instrucciones v6).
+   **Copia de seguridad en CSV** (rama `exportar-csv`, 2026-11-04; sin migración): adelantada antes
+   de la Fase 2. Pendiente de verificar en el móvil y de fusionar.
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
@@ -41,7 +43,8 @@ archivo o panel ponerlas).
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
 - **API-Football** u otra fuente de datos deportivos (Fase 2 o 3).
-- **Exportación a CSV** de las apuestas (aún sin rama ni fusionar a 2026-11-04).
+- **Importación de CSV** (restaurar una copia): no hecha; los CSV de la copia ya usan los códigos
+  internos y los ids para poder hacerla más adelante.
 - **Análisis del coste y del modelo de IA**: revisar en Ajustes el coste medio real por captura
   (por versión de instrucciones: v4 de promociones, v5 con caché y v6 de apuestas cortadas y fechas;
   comprobar en Vercel → Logs, `[ia:uso]`, que la caché se lee) y decidir si se mantiene `claude-sonnet-5-5` o se cambia.
@@ -116,10 +119,12 @@ src/
       apuestas/         lista (filtros) · nueva/ (capturas o ?manual=1) · [id]/ (detalle y edición)
         actions.ts      guardar, borrar, crear casa/estrategia, descartar captura (Server Actions)
       ajustes/          tema, coste de la IA (coste-ia.tsx), capturas guardadas (recuento y borrado),
+                        copia de seguridad (copia-seguridad.tsx: descarga de los CSV),
                         deportes/ (catálogo: renombrar y borrar), cuenta
       graficas/ bankroll/
     api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada, solo en la revisión)
                       · reintentar/ (reintenta en silencio los borrados de imágenes que fallaron)
+    api/exportar/     GET apuestas/ y selecciones/ (copia de seguridad en CSV; responder.ts = común)
     login/            pantalla de entrada (providers.ts = proveedores, actions.ts = login en servidor)
     auth/callback/    vuelta de Google (?code) y del email de confirmación (#tokens) → sesión
     auth/confirm/     alternativa para el email si se usa plantilla con token_hash
@@ -132,10 +137,12 @@ src/
   lib/
     apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
                       cálculos, validación del formulario, esquema de la IA (propuesta.ts),
-                    duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
-                    asegurada y crédito: cálculos en céntimos), reintentos-ia.ts (errores de la
-                    IA: clasificación, cuáles se reintentan, esperas y mensajes), fecha-evento.ts
-                    (traduce el texto de la fecha del evento), cola.ts (estados de la cola)
+                      duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
+                      asegurada y crédito: cálculos en céntimos), reintentos-ia.ts (errores de la
+                      IA: clasificación, cuáles se reintentan, esperas y mensajes), fecha-evento.ts
+                      (traduce el texto de la fecha del evento), cola.ts (estados de la cola)
+    exportar/         csv.ts (formato: celdas, columnas, lectura en tandas) · leer.ts (consultas
+                      con la sesión del usuario; sin claves, se prueba con un cliente falso)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
@@ -145,7 +152,7 @@ src/
   proxy.ts            renueva sesión y protege rutas
 supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
-tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts)
+tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts) + copia en CSV (exportar.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -285,6 +292,34 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   (pasado o futuro) → 12:00 de España; al editar sin cambiar el día → se conserva lo guardado. Misma
   columna `apuestas.fecha` (`timestamptz`), sin migración. Ninguna métrica la usa por la hora; la
   lista ordena por `fecha` y desempata por `created_at`; duplicadas no la compara.
+- **Copia de seguridad en CSV** (desde el 2026-11-04, sin migración): Ajustes → "Copia de
+  seguridad" con dos botones (dos descargas separadas: los móviles bloquean varias a la vez).
+  `GET /api/exportar/apuestas` y `/api/exportar/selecciones`, generadas en el servidor con la sesión
+  del usuario (RLS) y filtrando además por su id, que sale de la sesión (nunca del navegador). Sin
+  sesión → 401 (o el proxy manda a /login); sin apuestas → 404 con "Todavía no tienes apuestas
+  registradas: no hay nada que exportar." y no se descarga nada; fallo → 500 con mensaje en español
+  y el error real al log (`[exportar:apuestas]` / `[exportar:selecciones]`, sin datos personales).
+  - **Todas las filas:** se leen en tandas de 1000 (límite de Supabase por consulta) con orden fijo
+    (fecha, creación, id). Incluye pendientes, anuladas y resueltas (es una copia, no un análisis).
+  - **apuestas.csv:** una fila por apuesta, de la más antigua a la más reciente: id, fecha, casa y
+    estrategia (por nombre), tipo, deporte (resumen), importe, divisa, cuota_total,
+    ganancia_potencial, estado, resultado_economico, notas, en_directo, viendo_partido, precipitada,
+    recuperar_perdidas, precipitada_momento, los 5 campos `promo_*`, creada y modificada.
+  - **selecciones.csv:** una fila por selección, en el orden de sus apuestas y de su `orden`:
+    apuesta_id, id, orden, evento, deporte, liga, mercado, pronostico, cuota, evento_fecha,
+    evento_hora, estado, creada y modificada.
+  - **Formato (Excel en español):** UTF-8 con BOM, separador `;`, fin de línea `\r\n`; importes en
+    euros con coma y 2 decimales sin símbolo ni miles (`-12,50`); cuotas con coma (`1,85`, `2,00`,
+    sin redondear); fechas `AAAA-MM-DD HH:MM` en hora de España; día `AAAA-MM-DD` y hora `HH:MM` del
+    evento; casillas `sí`/`no`; estados, tipos y promociones con su **código interno**
+    (`media_ganada`, `mismo_partido`…). Nombre: `filoverde-apuestas-AAAA-MM-DD.csv`.
+  - **Fórmulas:** SOLO en texto libre (notas, evento, deporte, liga, mercado, pronóstico, nombres de
+    casa y estrategia) que empieza por `=` `+` `-` `@` (o tabulador / retorno de carro) se antepone
+    un apóstrofo. Nunca en importes, cuotas ni resultados (un `-12,50` sigue siendo número). Textos
+    con `;`, comillas o saltos de línea van entre comillas (las internas, duplicadas).
+  - No se exportan capturas, transcripciones ni costes de la IA. No hay importación.
+  - Con la coma decimal, Google Sheets debe estar en español (Archivo → Configuración → Configuración
+    regional: España); en inglés, los números se verían como texto.
 - `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
   `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
@@ -433,7 +468,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -559,3 +594,9 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | Estado de la cola en `sessionStorage`, recuperado solo al recargar | Sobrevive a una recarga sin datos nuevos en la BD; nada importante vive solo en el móvil |
 | 2026-11-04 | Día de la apuesta sin hora: hoy = hora actual, otro día = 12:00, al editar sin cambiar el día se conserva | La hora no se usa; misma columna, sin migración |
 | 2026-11-04 | **Cola de revisión, elección de apuestas, día de la apuesta y fecha del evento fusionados en `main`** (rama `fase-1-cola-lecturas`) | Verificados en el móvil; pruebas de GitHub Actions en verde; sin migración |
+| 2026-11-04 | **Exportación a CSV adelantada antes de la Fase 2** por falta de copias automáticas en el plan gratuito (rama `exportar-csv`) | El usuario ya tiene apuestas reales y Supabase gratis no hace copias de seguridad |
+| 2026-11-04 | CSV generado en el servidor (rutas GET con la sesión), dos archivos separados, sin ZIP | El móvil no habla directo con Supabase; los móviles bloquean varias descargas; un ZIP obliga a descomprimir antes de abrir |
+| 2026-11-04 | Formato para Excel en español: BOM, `;`, coma decimal, sin símbolo €; estados y tipos con código interno; columnas extra de promoción, divisa y orden | Se abre bien con doble toque; los códigos y los ids sirven para una futura importación; la copia no pierde datos |
+| 2026-11-04 | Protección contra fórmulas solo en texto libre, nunca en números | Un resultado negativo debe seguir siendo un número en Excel |
+| 2026-11-04 | Lectura en tandas de 1000; el simulador local también corta en 1000 | Supabase devuelve como mucho 1000 filas por consulta; la prueba local lo reproduce (1205 apuestas) |
+| 2026-11-04 | Sin cambios en `comprobar_rls_en_vivo.sql` | No hay tablas, permisos ni funciones nuevas: la exportación solo lee con la sesión del usuario, ya cubierto por RLS |
