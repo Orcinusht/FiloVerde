@@ -24,6 +24,8 @@ export const SECRETO = 'secreto-solo-local'
 export const USUARIOS = {
   ana: { id: '00000000-0000-4000-8000-00000000000a', email: 'ana@prueba.local' },
   beto: { id: '00000000-0000-4000-8000-00000000000b', email: 'beto@prueba.local' },
+  // Carla: cuenta con más de 1000 apuestas para probar la copia de seguridad en CSV.
+  carla: { id: '00000000-0000-4000-8000-00000000000c', email: 'carla@prueba.local' },
 }
 
 // ---------- tokens ----------
@@ -187,14 +189,15 @@ async function rest(req, res, url, cuerpo) {
             })
             .join(', ')}`
         : ''
-      const limit = url.searchParams.get('limit')
+      // Como Supabase (max-rows): nunca más de 1000 filas por consulta.
+      const limit = Math.min(Number(url.searchParams.get('limit') ?? 1000), 1000)
       const offset = Number(url.searchParams.get('offset') ?? 0)
       let total
       if (prefer.includes('count=exact')) {
         total = (await tx.query(`select count(*)::int n from public.${tabla} ${where}`, valores)).rows[0].n
       }
       const { rows } = await tx.query(
-        `select ${cols} from public.${tabla} ${where} ${orderBy} ${limit ? `limit ${Number(limit)}` : ''} offset ${offset}`,
+        `select ${cols} from public.${tabla} ${where} ${orderBy} limit ${limit} offset ${offset}`,
         valores,
       )
       await embeber(tx, nombreTabla, rows, embebidos)
