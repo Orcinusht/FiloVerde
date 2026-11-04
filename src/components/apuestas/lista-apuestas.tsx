@@ -24,6 +24,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
   const deporte = uno(sp.deporte).trim().slice(0, 60)
   const directo = uno(sp.directo) === '1'
   const precipitada = uno(sp.precipitada) === '1'
+  const promo = uno(sp.promo) === '1'
   const pagina = Math.max(0, Math.min(1000, Number.parseInt(uno(sp.pagina) || '0', 10) || 0))
 
   let datos: Awaited<ReturnType<typeof listarApuestas>>
@@ -34,7 +35,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
     let pendientes: Awaited<ReturnType<typeof listarPendientes>>
     let catalogo: Awaited<ReturnType<typeof obtenerCatalogo>>
     ;[datos, casas, catalogo, pendientes] = await Promise.all([
-      listarApuestas({ estado, casa, deporte, directo, precipitada, pagina }),
+      listarApuestas({ estado, casa, deporte, directo, precipitada, promo, pagina }),
       listarCasas(),
       obtenerCatalogo(),
       listarPendientes().catch(() => []),
@@ -51,7 +52,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
   }
 
   const { filas, total } = datos
-  const hayFiltro = Boolean(estado || casa || deporte || directo || precipitada)
+  const hayFiltro = Boolean(estado || casa || deporte || directo || precipitada || promo)
   const enlace = (p: number) => {
     const q = new URLSearchParams()
     if (estado) q.set('estado', estado)
@@ -59,6 +60,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
     if (deporte) q.set('deporte', deporte)
     if (directo) q.set('directo', '1')
     if (precipitada) q.set('precipitada', '1')
+    if (promo) q.set('promo', '1')
     if (p > 0) q.set('pagina', String(p))
     const s = q.toString()
     return s ? `/apuestas?${s}` : '/apuestas'
@@ -79,7 +81,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
           <span className="shrink-0 font-semibold text-brand">Revisar →</span>
         </Link>
       )}
-      <FiltrosApuestas estado={estado} casa={casa} deporte={deporte} casas={casas} deportes={[...deportes, DEPORTE_MIXTO]} directo={directo} precipitada={precipitada} />
+      <FiltrosApuestas estado={estado} casa={casa} deporte={deporte} casas={casas} deportes={[...deportes, DEPORTE_MIXTO]} directo={directo} precipitada={precipitada} promo={promo} />
 
       {filas.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-surface p-8 text-center">
@@ -115,6 +117,16 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
                         className="mr-1.5 inline-block rounded bg-amber-500/20 px-1.5 py-px align-[1px] text-[10px] font-bold text-amber-800 dark:text-amber-300"
                       >
                         ⚡ PRECIP.
+                      </span>
+                    )}
+                    {a.promo_tipo && (
+                      <span className="mr-1.5 inline-block rounded bg-violet-500/15 px-1.5 py-px align-[1px] text-[10px] font-bold tracking-wide text-violet-700 dark:text-violet-300">
+                        PROMO
+                      </span>
+                    )}
+                    {a.promo_tipo === 'credito' && (
+                      <span className="mr-1.5 inline-block rounded bg-sky-500/15 px-1.5 py-px align-[1px] text-[10px] font-bold tracking-wide text-sky-700 dark:text-sky-300">
+                        CRÉDITO
                       </span>
                     )}
                     {a.casa ?? 'Sin casa'} · {NOMBRE_TIPO[a.tipo]}

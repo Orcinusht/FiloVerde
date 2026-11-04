@@ -24,6 +24,7 @@ export type FilaApuesta = {
   deporte: string | null // deporte resumen (o "Mixto")
   en_directo: boolean
   precipitada: boolean
+  promo_tipo: string | null
   n_selecciones: number
   primer_evento: string | null
 }
@@ -46,6 +47,11 @@ export type DetalleApuesta = {
   viendo_partido: boolean
   precipitada: boolean
   recuperar_perdidas: boolean
+  promo_tipo: string | null
+  promo_cuota_original: number | null
+  promo_aumento: number | null
+  promo_credito: number | null
+  promo_base: string | null
   selecciones: {
     evento: string | null
     liga: string | null
@@ -89,6 +95,7 @@ export async function listarApuestas(filtros: {
   deporte?: string
   directo?: boolean
   precipitada?: boolean
+  promo?: boolean
   pagina?: number
 }) {
   const supabase = await createClient()
@@ -96,7 +103,7 @@ export async function listarApuestas(filtros: {
   let q = supabase
     .from('apuestas')
     .select(
-      'id, fecha, tipo, importe, divisa, cuota_total, estado, resultado_economico, deporte, en_directo, precipitada, casas_apuestas(nombre), selecciones(evento, pronostico, orden)',
+      'id, fecha, tipo, importe, divisa, cuota_total, estado, resultado_economico, deporte, en_directo, precipitada, promo_tipo, casas_apuestas(nombre), selecciones(evento, pronostico, orden)',
       { count: 'exact' },
     )
     .order('fecha', { ascending: false })
@@ -106,6 +113,7 @@ export async function listarApuestas(filtros: {
   if (filtros.deporte) q = q.eq('deporte', filtros.deporte)
   if (filtros.directo) q = q.eq('en_directo', true)
   if (filtros.precipitada) q = q.eq('precipitada', true)
+  if (filtros.promo) q = q.not('promo_tipo', 'is', null)
   if (filtros.casa === 'sin') q = q.is('casa_id', null)
   else if (filtros.casa) q = q.eq('casa_id', filtros.casa)
 
@@ -129,6 +137,7 @@ export async function listarApuestas(filtros: {
       deporte: a.deporte ?? null,
       en_directo: a.en_directo === true,
       precipitada: a.precipitada === true,
+      promo_tipo: a.promo_tipo ?? null,
       n_selecciones: sels.length,
       primer_evento: sels[0]?.evento ?? sels[0]?.pronostico ?? null,
     }
@@ -142,7 +151,7 @@ export async function obtenerApuesta(id: string): Promise<DetalleApuesta | null>
   const { data, error } = await supabase
     .from('apuestas')
     .select(
-      'id, casa_id, estrategia_id, tipo, fecha, importe, divisa, cuota_total, ganancia_potencial, estado, resultado_economico, notas, imagen_origen, en_directo, viendo_partido, precipitada, recuperar_perdidas, selecciones(evento, liga, deporte, mercado, pronostico, cuota, estado, evento_fecha, evento_hora, orden)',
+      'id, casa_id, estrategia_id, tipo, fecha, importe, divisa, cuota_total, ganancia_potencial, estado, resultado_economico, notas, imagen_origen, en_directo, viendo_partido, precipitada, recuperar_perdidas, promo_tipo, promo_cuota_original, promo_aumento, promo_credito, promo_base, selecciones(evento, liga, deporte, mercado, pronostico, cuota, estado, evento_fecha, evento_hora, orden)',
     )
     .eq('id', id)
     .maybeSingle()
@@ -157,6 +166,9 @@ export async function obtenerApuesta(id: string): Promise<DetalleApuesta | null>
     cuota_total: num(data.cuota_total),
     ganancia_potencial: num(data.ganancia_potencial),
     resultado_economico: num(data.resultado_economico),
+    promo_cuota_original: num(data.promo_cuota_original),
+    promo_aumento: num(data.promo_aumento),
+    promo_credito: num(data.promo_credito),
     selecciones: sels.map((s) => ({ ...s, cuota: num(s.cuota) })),
   } as DetalleApuesta
 }

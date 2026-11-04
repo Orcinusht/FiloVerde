@@ -14,12 +14,14 @@ export function FiltrosApuestas({
   deportes,
   directo,
   precipitada,
+  promo = false,
 }: {
   estado: string
   casa: string
   deporte: string
   directo: boolean
   precipitada: boolean
+  promo?: boolean
   casas: Opcion[]
   deportes: string[]
 }) {
@@ -31,8 +33,10 @@ export function FiltrosApuestas({
     nuevoDeporte = deporte,
     nuevoDirecto = directo,
     nuevaPrecipitada = precipitada,
+    nuevaPromo = promo,
   ) {
     const q = new URLSearchParams()
+    if (nuevaPromo) q.set('promo', '1')
     if (nuevoDirecto) q.set('directo', '1')
     if (nuevaPrecipitada) q.set('precipitada', '1')
     if (nuevoEstado) q.set('estado', nuevoEstado)
@@ -78,17 +82,18 @@ export function FiltrosApuestas({
       </select>
       <Chip etiqueta="En directo" activo={directo} onClick={() => ir(estado, casa, deporte, !directo, precipitada)} />
       <Chip etiqueta="Precipitadas" activo={precipitada} onClick={() => ir(estado, casa, deporte, directo, !precipitada)} />
+      <Chip etiqueta="Con promoción" ancho activo={promo} onClick={() => ir(estado, casa, deporte, directo, precipitada, !promo)} />
     </div>
   )
 }
 
-function Chip({ etiqueta, activo, onClick }: { etiqueta: string; activo: boolean; onClick: () => void }) {
+function Chip({ etiqueta, activo, onClick, ancho }: { etiqueta: string; activo: boolean; onClick: () => void; ancho?: boolean }) {
   return (
     <button
       type="button"
       aria-pressed={activo}
       onClick={onClick}
-      className={`h-11 min-w-0 rounded-xl border px-3 text-sm font-medium ${
+      className={`h-11 min-w-0 rounded-xl border px-3 text-sm font-medium ${ancho ? 'col-span-2' : ''} ${
         activo ? 'border-brand bg-brand text-brand-foreground' : 'border-border bg-surface'
       }`}
     >

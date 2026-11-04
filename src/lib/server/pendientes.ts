@@ -1,6 +1,6 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { esquemaPropuestaIA, propuestaARevisiones, type ApuestaPendiente } from '@/lib/apuestas/propuesta'
+import { completarPropuestaAntigua, esquemaPropuestaIA, propuestaARevisiones, type ApuestaPendiente } from '@/lib/apuestas/propuesta'
 import { BUCKET, registrarError } from './capturas'
 import { leerCatalogo } from './catalogo'
 import { catalogoVacio } from '@/lib/apuestas/catalogo'
@@ -49,7 +49,7 @@ export async function apuestasPendientes(
 
   const pendientes: ApuestaPendiente[] = []
   for (const f of filas) {
-    const propuesta = esquemaPropuestaIA.safeParse(f.propuesta)
+    const propuesta = esquemaPropuestaIA.safeParse(completarPropuestaAntigua(f.propuesta))
     if (!propuesta.success) continue
     const revisiones = propuestaARevisiones(propuesta.data, catalogo)
     const descartadas = new Set(f.descartadas ?? [])

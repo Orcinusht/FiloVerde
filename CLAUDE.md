@@ -26,6 +26,8 @@ archivo o panel ponerlas).
    apuesta" desplegable, guardar o borrar vuelve a la lista (con filtros, scroll y aviso breve),
    emojis de deporte y tarjeta de la lista con el resultado a la derecha.
    **Aviso de apuesta duplicada fusionado el 2026-11-03** (verificado en el móvil; sin migración).
+   **Promociones y selector de minutos** (rama `fase-1-promos`, 2026-11-04, pendiente de aplicar la
+   migración `20261105000001`, verificar en el móvil y fusionar).
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
@@ -59,6 +61,13 @@ archivo o panel ponerlas).
 - **Fase 2: las métricas por liga, deporte y casa cuentan APUESTAS, no selecciones.** Una
   combinada de 3 partidos de LaLiga es 1 apuesta de LaLiga; un "mismo partido" con 4 condiciones
   es 1 apuesta (en la BD cada condición repite evento/liga/fecha: no sumarlas como si fueran 4).
+- **Fase 2 · promociones:** (a) el beneficio por promociones se muestra APARTE; (b) el crédito
+  recibido en las aseguradas (`promo_credito`) nunca cuenta como beneficio; (c) el aumento solo es
+  "cobrado" si la apuesta se gana; (d) las apuestas **con crédito** NO entran en el yield ni en el %
+  de acierto en efectivo (su importe no es dinero propio y una perdida tiene resultado 0): llevan un
+  bloque propio (número, ganadas, dinero real obtenido) y el beneficio neto total muestra efectivo,
+  crédito y la suma; (e) una apuesta con **aumento negativo** no suma como "aumento cobrado" y se
+  marca como dato dudoso.
 - **Fase 2 · directo y precipitada:** sin marcar significa **pre-partido** y **normal**; las
   métricas lo tratan así y deben avisar de que una apuesta en directo que se olvidó marcar cuenta
   como pre-partido. Para medir el sesgo, comparar "precipitada" marcada **al registrar** frente a
@@ -103,11 +112,13 @@ src/
     api/diagnostico/  comprueba la configuración de Supabase (sin mostrar claves)
     manifest.ts       datos de instalación de la PWA
   components/         piezas de interfaz reutilizables
-    apuestas/         formulario de revisión, flujo de capturas, lista, filtros, visor de captura
+    apuestas/         formulario de revisión, flujo de capturas, lista, filtros, visor de captura,
+                      selector-hora.tsx (hora y minuto en dos desplegables)
   lib/
     apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
                       cálculos, validación del formulario, esquema de la IA (propuesta.ts),
-                    duplicadas.ts (¿es una copia calcada de otra?)
+                    duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
+                    asegurada y crédito: cálculos en céntimos)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
@@ -181,7 +192,8 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   si hay varios, "Mixto". Lo calcula SIEMPRE `guardar_apuesta` (`deporte_resumen()`), al crear y
   al editar; lo que mande el navegador se ignora.
 - `transcripciones.version_instrucciones`: versión de las instrucciones de la IA (vacía = 1, sin
-  catálogo; 2 = con catálogo; 3 = ignora señales de directo). Ajustes compara el coste medio por versión.
+  catálogo; 2 = con catálogo; 3 = ignora señales de directo; 4 = lee promociones). Ajustes compara el
+  coste medio por versión.
 - **Conducta** (la marca SIEMPRE el usuario, nunca la IA): `apuestas.en_directo` y
   `viendo_partido` (solo si en directo), `precipitada` y `recuperar_perdidas` (solo si
   precipitada). Booleanos no nulos, falso por defecto: sin marcar = pre-partido y normal (así
@@ -208,7 +220,7 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
     vacía, como en mismo partido) y día del evento (solo si los dos lo tienen). Orden de las
     selecciones indiferente; textos sin mayúsculas, tildes ni espacios de más; números exactos.
   - **No se compara:** estado, resultado, estrategia, notas, deporte, liga, hora, fecha de
-    registro, en directo ni precipitada.
+    registro, en directo, precipitada ni los datos de promoción.
   - Una casa leída por la IA que aún no está en el catálogo no coincide con nada (tampoco con las
     "sin casa"); al pulsar Guardar se usa la casa ya resuelta.
   - **Límite:** comparación estricta, no por parecido. "Betis - Sevilla" y "Real Betis - Sevilla
@@ -217,6 +229,38 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   - La búsqueda se hace **SIEMPRE con la sesión del usuario (RLS)**, nunca con la clave de
     administrador: solo puede encontrar apuestas propias. Sin migración ni índice nuevo (filtra
     en la BD por importe y tipo, y compara el resto en el servidor).
+- **Promociones** (desde el 2026-11-04, migración `20261105000001`; columnas en `apuestas`):
+  `promo_tipo` (`superaumento` · `aumento` · `asegurada` · `credito` · `otra`; NULL = sin promoción,
+  así quedaron todas las anteriores), `promo_cuota_original` (`numeric(12,6)`, ≥ 1),
+  `promo_aumento` (céntimos; **puede ser negativo**: la app avisa sin bloquear), `promo_base`
+  (`cuota_original` · `aumento` · `ambos`: cuál se leyó o escribió) y `promo_credito` (céntimos,
+  ≥ 0). CHECK: sin tipo, todo vacío; cuota original, aumento y base solo en superaumento/aumento;
+  crédito solo en asegurada. La casilla "Promoción" (desmarcada = sin promoción) está junto a En
+  directo y Precipitada; al desmarcarla se vacían los datos.
+  - **Superaumento / aumento** (`lib/apuestas/promociones.ts`, en céntimos y sin coma flotante):
+    ganancia con promoción = `ganancia_potencial` (si falta, importe × cuota total). Con la cuota
+    original: aumento = ganancia con promoción − importe × cuota original. Con el aumento: cuota
+    original = (ganancia con promoción − aumento) / importe. Con los dos: se conservan y se avisa
+    si no cuadran (más de 2 céntimos). El **dato derivado lo recalcula el servidor en CADA
+    guardado** a partir del dato base (`promo_base`): si se edita el importe o la cuota no queda
+    desfasado. Sin ninguno: la cuota original sale vacía en ámbar ("falta"). Avisos sin bloquear:
+    cuota original mayor que la pagada y aumento negativo. Ganada = ganancia potencial − importe;
+    media ganada/perdida, fórmula normal (sin aumento). Sin aviso de importe × cuota.
+  - **Asegurada:** "Crédito si se pierde", por defecto el importe (sigue al importe mientras no se
+    toque). Perdida = −importe; el crédito se guarda aparte y NO es beneficio.
+  - **Con crédito** (el importe es crédito de promoción): ganada = importe × (cuota − 1); media
+    ganada = la mitad de eso; perdida, media perdida y anulada = 0; cash out = **todo lo
+    recuperado**. Editable. Sin aviso de importe × cuota.
+  - `guardar_apuesta` mantiene su firma: la promoción va dentro de `p_apuesta`. La app nueva SIEMPRE
+    envía `promo_tipo` (null = sin promoción → vacía los cinco campos); si no llega (versión
+    anterior), al crear queda sin promoción y al editar se conserva.
+  - Lista: filtro "Con promoción" (`?promo=1`) y marcas PROMO y CRÉDITO en la tarjeta.
+- **Horas** (desde el 2026-11-04): hora del evento y hora de la apuesta con dos desplegables (hora
+  00-23 y minuto de 5 en 5; `selector-hora.tsx`), porque Safari de iPhone ignora el paso del control
+  nativo. Un minuto que no es múltiplo de 5 (leído por la IA o guardado) se muestra como una opción
+  más y **nunca se redondea solo**. La hora del evento admite "—" (sin hora) y no puede haber hora
+  sin día. La fecha de la apuesta: día con su control de siempre y hora aparte; vacía = la hora
+  exacta del guardado; con día y sin hora = 12:00; con hora y sin día, error.
 - `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
   `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
@@ -259,6 +303,12 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
   de ahí. El servidor lo comprueba: lo que no esté en el catálogo (o una liga de otro deporte)
   sale en ámbar como **"nueva"** con "Crear y usar". Coste extra medido: ~200 tokens de catálogo
   + ~150 de instrucciones ≈ +0,0007 $ por captura con Sonnet 5.5 (≈ +6 %).
+- Promociones (instrucciones v4): la IA SOLO lee `promo_tipo` (si la captura lo dice de forma
+  explícita; "apuesta gratuita"/"free bet" = crédito), `promo_cuota_original`, `promo_aumento` y
+  `promo_credito`; no calcula nada. El tipo propuesto sale en ámbar ("confírmalo"). Las lecturas
+  guardadas antes (v1-v3) se retoman igual (`completarPropuestaAntigua`). Coste extra estimado:
+  ~450 tokens de entrada + ~20 de salida por apuesta ≈ +0,001 $ por captura con Sonnet 5.5
+  (≈ +9 %); medirlo en Ajustes (v4).
 - Directo: la IA tiene orden expresa de IGNORAR "En juego", marcador y minuto (reflejan el
   momento de la captura, no el de apostar). No hay campos de directo/precipitada en su esquema.
 - Clasificación: varios partidos distintos = combinada; un partido con varias condiciones sin
@@ -399,3 +449,13 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-03 | Duplicadas: la IA no interviene, sin migración; búsqueda siempre con la sesión del usuario (RLS), nunca con la clave de administrador | Sin coste extra; imposible ver apuestas de otro usuario |
 | 2026-11-03 | Duplicadas: si la comprobación falla, se guarda igual; con el aviso sin resolver, Guardar pide elegir | Nunca se pierde un guardado por el aviso; el usuario decide |
 | 2026-11-03 | **Aviso de apuesta duplicada fusionado en `main`** (rama `fase-1-duplicadas`) | Verificado en el móvil; pruebas de GitHub Actions en verde; sin migración |
+| 2026-11-04 | **Promociones** en columnas de `apuestas` (`promo_tipo` + cifras) con CHECK por tipo | Un solo tipo por apuesta; la BD impide datos que no encajan con su tipo |
+| 2026-11-04 | Columna extra `promo_base` (cuál de los dos datos se leyó o escribió) | Para recalcular el otro en cada guardado (si cambia el importe o la cuota) sin adivinar cuál era el original |
+| 2026-11-04 | `promo_aumento` admite negativos (la app avisa sin bloquear); `promo_credito` ≥ 0 | Un aumento negativo casi siempre es una cuota mal leída: nunca debe impedir guardar |
+| 2026-11-04 | Cálculos de promociones en funciones puras compartidas: el formulario los enseña al momento y el servidor los repite al guardar (es el que cuenta) | Resumen inmediato sin fiarse del navegador |
+| 2026-11-04 | Con crédito: ganada = importe × (cuota − 1), perdida/anulada 0, cash out = todo lo recuperado | El importe no era dinero propio |
+| 2026-11-04 | Media ganada/perdida con aumento o asegurada: fórmula normal | El aumento suele aplicarse solo a la apuesta ganada completa; se puede corregir a mano |
+| 2026-11-04 | `guardar_apuesta` con la misma firma; promoción dentro de `p_apuesta` y solo se toca si llega `promo_tipo` | La app publicada en `main` sigue funcionando con la migración aplicada |
+| 2026-11-04 | IA instrucciones v4: lee promociones sin calcular; lecturas antiguas completadas con null al retomarlas | La IA propone, el código calcula; no se pierden revisiones a medias |
+| 2026-11-04 | Hora y minuto con dos desplegables (paso de 5) en vez del control nativo; minutos raros se conservan | iOS Safari ignora el paso; nunca se cambia un dato sin que lo cambie el usuario |
+| 2026-11-04 | Migración `20261105000001` solo aditiva y repetible (el nombre no es una fecha real: solo marca el orden) | No rompe `main`; segura si se pega dos veces |

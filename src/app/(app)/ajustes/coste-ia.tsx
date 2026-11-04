@@ -59,6 +59,7 @@ const NOMBRE_VERSION: Record<number, string> = {
   1: 'antes del catálogo',
   2: 'con catálogo',
   3: 'ignora señales de directo',
+  4: 'lee promociones',
 }
 
 // Coste medio antes y después de cambiar las instrucciones de la IA (p. ej. con el catálogo).

@@ -1,3 +1,4 @@
+import { porCuota } from './promociones.ts'
 import type { EstadoApuesta } from './estados.ts'
 
 // Resultado económico NETO (en céntimos) que se propone según el estado.
@@ -9,9 +10,32 @@ export function resultadoPropuesto(args: {
   cuota: number | null
   gananciaPotencial: number | null
   recuperado?: number | null // solo cash out
+  promo?: string | null // tipo de promoción ('credito' cambia el cálculo)
 }): number | null {
   const { estado, importe, cuota, gananciaPotencial, recuperado } = args
   if (importe == null) return null
+  // Apuesta con CRÉDITO: el importe no es dinero propio. Si gana, solo cuenta la ganancia (el
+  // importe no se devuelve); si pierde (o se anula), el resultado es 0; en cash out, todo lo
+  // recuperado.
+  if (args.promo === 'credito') {
+    switch (estado) {
+      case 'pendiente':
+        return null
+      case 'ganada':
+        if (cuota != null) return porCuota(importe, cuota) - importe
+        return gananciaPotencial != null ? gananciaPotencial - importe : null
+      case 'media_ganada':
+        return cuota != null ? Math.round((porCuota(importe, cuota) - importe) / 2) : null
+      case 'perdida':
+      case 'media_perdida':
+      case 'anulada':
+        return 0
+      case 'cash_out':
+        return recuperado ?? null
+    }
+  }
+  // Sin promoción, con aumento o con asegurada: la fórmula de siempre (el aumento ya va en la
+  // ganancia potencial; en media ganada/perdida no se aplica el aumento).
   switch (estado) {
     case 'pendiente':
       return null
@@ -49,14 +73,17 @@ export function avisosCoherencia(args: {
   gananciaPotencial: number | null
   cuotasSelecciones: (number | null)[]
   estadosSelecciones?: string[]
+  promo?: string | null
 }): string[] {
   const { tipo, estado, importe, cuotaTotal, gananciaPotencial, cuotasSelecciones } = args
   const estados = args.estadosSelecciones ?? []
   const avisos: string[] = []
   const euros = (c: number) => (c / 100).toFixed(2).replace('.', ',')
 
-  // Importe × cuota TOTAL frente a la ganancia potencial (en todos los tipos).
-  if (importe != null && cuotaTotal != null && gananciaPotencial != null) {
+  // Importe × cuota TOTAL frente a la ganancia potencial (en todos los tipos). No en apuestas con
+  // aumento (la ganancia ya lleva el aumento) ni con crédito (la casa no devuelve el importe).
+  const sinComparar = args.promo === 'superaumento' || args.promo === 'aumento' || args.promo === 'credito'
+  if (!sinComparar && importe != null && cuotaTotal != null && gananciaPotencial != null) {
     const esperado = importe * cuotaTotal
     const dif = Math.abs(esperado - gananciaPotencial)
     // Tolerancia: 1 % o 5 céntimos (redondeos de la casa).

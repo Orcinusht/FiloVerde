@@ -484,3 +484,106 @@ test('Beto NO ve ni cambia las casillas de conducta de Ana', async () => {
   })
   await como(ANA, async (tx) => assert.equal((await conducta(tx, ids.apuesta)).precipitada, false))
 })
+
+// ---------- Fase 1 (retoques): promociones ----------
+
+const promo = async (tx, id) =>
+  (
+    await tx.query(
+      `select promo_tipo, promo_cuota_original::text as cuota_original, promo_aumento::int as aumento, promo_credito::int as credito, promo_base from apuestas where id = $1`,
+      [id],
+    )
+  ).rows[0]
+const SIN_PROMO = { promo_tipo: null, cuota_original: null, aumento: null, credito: null, promo_base: null }
+
+test('Promociones: las apuestas existentes quedan sin promoción y la versión anterior de la app las conserva', async () => {
+  await como(ANA, async (tx) => {
+    assert.deepEqual(await promo(tx, ids.apuesta), SIN_PROMO)
+    await tx.query('savepoint s')
+    const a = await guardarConducta(tx, null, { promo_tipo: 'aumento', promo_cuota_original: 1.8, promo_aumento: 100, promo_base: 'cuota_original' })
+    // Edición como la hace la app publicada en main (sin campos de promoción): se conserva.
+    await guardarConducta(tx, a, { importe: 600 })
+    assert.deepEqual(await promo(tx, a), { promo_tipo: 'aumento', cuota_original: '1.800000', aumento: 100, credito: null, promo_base: 'cuota_original' })
+    // La app nueva siempre envía promo_tipo: vacío = quitar la promoción y vaciar sus datos.
+    await guardarConducta(tx, a, { promo_tipo: '' })
+    assert.deepEqual(await promo(tx, a), SIN_PROMO)
+    // Crear como la app de main: sin promoción.
+    const b = await guardarConducta(tx, null, {})
+    assert.deepEqual(await promo(tx, b), SIN_PROMO)
+    await tx.query('rollback to savepoint s')
+  })
+})
+
+test('Promociones: cada tipo con sus datos; aumento negativo permitido (la app avisa)', async () => {
+  await como(ANA, async (tx) => {
+    await tx.query('savepoint s')
+    const sup = await guardarConducta(tx, null, { promo_tipo: 'superaumento', promo_aumento: -50, promo_cuota_original: 2.1, promo_base: 'aumento' })
+    assert.equal((await promo(tx, sup)).aumento, -50)
+    const as = await guardarConducta(tx, null, { promo_tipo: 'asegurada', promo_credito: 500 })
+    assert.equal((await promo(tx, as)).credito, 500)
+    for (const t of ['credito', 'otra']) {
+      const x = await guardarConducta(tx, null, { promo_tipo: t })
+      assert.equal((await promo(tx, x)).promo_tipo, t)
+    }
+    await tx.query('rollback to savepoint s')
+  })
+})
+
+test('Promociones: la base de datos rechaza combinaciones incoherentes', async () => {
+  const malas = {
+    'tipo desconocido': { promo_tipo: 'regalo' },
+    'datos sin tipo': { promo_aumento: 100 },
+    'crédito sin tipo': { promo_credito: 100 },
+    'base sin tipo': { promo_base: 'aumento' },
+    'cuota original en asegurada': { promo_tipo: 'asegurada', promo_cuota_original: 1.5 },
+    'aumento en crédito': { promo_tipo: 'credito', promo_aumento: 100 },
+    'crédito si se pierde en aumento': { promo_tipo: 'aumento', promo_credito: 100 },
+    'crédito si se pierde en «otra»': { promo_tipo: 'otra', promo_credito: 100 },
+    'crédito negativo': { promo_tipo: 'asegurada', promo_credito: -1 },
+    'base no válida': { promo_tipo: 'aumento', promo_base: 'inventada' },
+    'cuota original < 1': { promo_tipo: 'aumento', promo_cuota_original: 0.5 },
+  }
+  for (const [nombre, extra] of Object.entries(malas)) {
+    await assert.rejects(
+      como(ANA, (tx) => guardarConducta(tx, null, extra)),
+      /check|violates|promo/i,
+      nombre,
+    )
+  }
+  // Y también por fuera de guardar_apuesta (UPDATE directo con la sesión de Ana).
+  await assert.rejects(
+    como(ANA, (tx) => tx.query(`update apuestas set promo_aumento = 100 where id = $1`, [ids.apuesta])),
+    /promo/,
+  )
+})
+
+test('Beto NO ve ni cambia los datos de promoción de Ana', async () => {
+  let id
+  await como(ANA, async (tx) => {
+    id = await guardarConducta(tx, null, { promo_tipo: 'asegurada', promo_credito: 700 })
+  })
+  await como(BETO, async (tx) => {
+    const r = await tx.query(`select promo_tipo, promo_credito from apuestas where id = $1`, [id])
+    assert.equal(r.rows.length, 0)
+    const f = await tx.query(`select count(*)::int n from apuestas where promo_tipo is not null`)
+    assert.equal(f.rows[0].n, 0, 'el filtro «Con promoción» de Beto no encuentra nada de Ana')
+    const u = await tx.query(`update apuestas set promo_credito = 1 where id = $1`, [id])
+    assert.equal(u.affectedRows, 0)
+    await assert.rejects(tx.query(`select public.guardar_apuesta($1, '{"importe":100,"promo_tipo":""}'::jsonb, '[{"evento":"x","deporte":"Fútbol"}]'::jsonb)`, [id]), /no encontrada/)
+  })
+  await como(ANA, async (tx) => {
+    assert.equal((await promo(tx, id)).credito, 700)
+    await tx.query(`delete from apuestas where id = $1`, [id])
+  })
+})
+
+test('La migración de promociones se puede pegar dos veces sin errores', async () => {
+  const sql = readFileSync(join(ROOT, 'supabase/migrations/20261105000001_fase1_promociones.sql'), 'utf8')
+  await db.exec(sql)
+  await db.exec(sql)
+  const { rows } = await db.query(
+    `select count(*)::int n from pg_constraint where conrelid = 'public.apuestas'::regclass and conname like 'apuestas_promo%'`,
+  )
+  assert.equal(rows[0].n, 6)
+  await como(ANA, async (tx) => assert.deepEqual(await promo(tx, ids.apuesta), SIN_PROMO))
+})

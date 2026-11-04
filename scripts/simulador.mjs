@@ -369,7 +369,8 @@ const sel = (evento, pronostico, cuota, extra = {}) => ({
 })
 const apuesta = (extra) => ({
   casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
-  estado: null, importe_cobrado: null, selecciones: [], dudosos: [], ...extra,
+  estado: null, importe_cobrado: null, selecciones: [], dudosos: [],
+  promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null, ...extra,
 })
 const con = (...apuestas) => ({ hay_apuestas: true, motivo: null, apuestas })
 const APUESTAS = {
@@ -433,7 +434,40 @@ APUESTAS.unica = apuesta({
   casa: null, importe: 7, cuota_total: '2.20', ganancia_potencial: 15.4,
   selecciones: [sel('Rayo Vallecano - RCD Mallorca', 'Rayo Vallecano', '2.20')],
 })
+// Promociones: la IA solo LEE (tipo, cuota original, aumento, crédito); nunca calcula.
+const promoBase = (evento, extra) =>
+  apuesta({ casa: null, importe: 10, cuota_total: '2.50', ganancia_potencial: 25, selecciones: [sel(evento, evento.split(' - ')[0], '2.50')], ...extra })
+APUESTAS.sup_original = promoBase('Celta - Alavés', { promo_tipo: 'superaumento', promo_cuota_original: '2.00' })
+APUESTAS.sup_aumento = promoBase('Girona - Elche', { promo_tipo: 'superaumento', promo_aumento: 5 })
+APUESTAS.sup_nada = promoBase('Levante - Oviedo', { promo_tipo: 'superaumento' })
+APUESTAS.sup_incoherente = promoBase('Espanyol - Valencia', { promo_tipo: 'superaumento', promo_cuota_original: '2.00', promo_aumento: 6 })
+APUESTAS.aumento = apuesta({
+  casa: null, importe: 10, cuota_total: '2.00', ganancia_potencial: 22, promo_tipo: 'aumento', promo_cuota_original: '1.80',
+  selecciones: [sel('Sevilla FC - Villarreal', 'Sevilla FC', '2.00')],
+})
+APUESTAS.asegurada = apuesta({
+  casa: null, importe: 10, cuota_total: '3.00', ganancia_potencial: 30, promo_tipo: 'asegurada',
+  selecciones: [sel('Athletic - Real Sociedad', 'Athletic', '3.00')],
+})
+APUESTAS.asegurada_tope = apuesta({ ...APUESTAS.asegurada, promo_credito: 5, selecciones: [sel('Mallorca - Getafe', 'Mallorca', '3.00')] })
+APUESTAS.credito = apuesta({
+  casa: null, importe: 10, cuota_total: '2.00', ganancia_potencial: 10, promo_tipo: 'credito',
+  selecciones: [sel('Real Madrid - Atlético', 'Real Madrid', '2.00')],
+})
+APUESTAS.hora_rara = apuesta({
+  casa: null, importe: 4, cuota_total: '1.70', ganancia_potencial: 6.8, fecha: '2026-11-01T09:07',
+  selecciones: [sel('Alavés - Osasuna', 'Alavés', '1.70', { evento_hora: '14:32' })],
+})
 const RESPUESTAS = {
+  sup_original: con(APUESTAS.sup_original),
+  sup_aumento: con(APUESTAS.sup_aumento),
+  sup_nada: con(APUESTAS.sup_nada),
+  sup_incoherente: con(APUESTAS.sup_incoherente),
+  aumento: con(APUESTAS.aumento),
+  asegurada: con(APUESTAS.asegurada),
+  asegurada_tope: con(APUESTAS.asegurada_tope),
+  credito: con(APUESTAS.credito),
+  hora_rara: con(APUESTAS.hora_rara),
   unica: con(APUESTAS.unica),
   en_juego: con(APUESTAS.en_juego),
   en_juego_resuelta: con(APUESTAS.en_juego_resuelta),

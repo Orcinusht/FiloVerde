@@ -144,6 +144,63 @@ insert into resultado
   select 36, 'A intenta poner un momento sin «precipitada»: se ignora', 'vacío', coalesce(precipitada_momento, 'vacío'), precipitada_momento is null
   from apuestas where id in (select v from ids where k = 'apuesta_conducta');
 
+-- Promociones
+do $$
+declare v uuid; t text; c bigint;
+begin
+  v := public.guardar_apuesta(null,
+    '{"importe": 700, "notas": "PRUEBA-RLS", "promo_tipo": "asegurada", "promo_credito": 700}'::jsonb,
+    '[{"evento": "PRUEBA-RLS", "deporte": "Fútbol"}]'::jsonb);
+  insert into ids values ('apuesta_promo', v);
+  select promo_tipo, promo_credito into t, c from apuestas where id = v;
+  insert into resultado values (38, 'A guarda una apuesta asegurada con su crédito (control)', 'asegurada 700', coalesce(t, 'vacío') || ' ' || coalesce(c::text, 'vacío'), t = 'asegurada' and c = 700);
+  -- Quitar la promoción (la app envía promo_tipo vacío) vacía todos sus datos.
+  v := public.guardar_apuesta(null,
+    '{"importe": 500, "notas": "PRUEBA-RLS", "promo_tipo": "aumento", "promo_cuota_original": 1.8, "promo_aumento": 100, "promo_base": "cuota_original"}'::jsonb,
+    '[{"evento": "PRUEBA-RLS", "deporte": "Fútbol"}]'::jsonb);
+  insert into ids values ('apuesta_promo2', v);
+  perform public.guardar_apuesta(v, '{"importe": 500, "promo_tipo": ""}'::jsonb, '[{"evento": "PRUEBA-RLS", "deporte": "Fútbol"}]'::jsonb);
+  insert into resultado
+    select 39, 'A quita la promoción: se vacían sus datos', 'vacíos',
+           case when promo_tipo is null and promo_cuota_original is null and promo_aumento is null and promo_base is null then 'vacíos' else 'QUEDAN DATOS' end,
+           promo_tipo is null and promo_cuota_original is null and promo_aumento is null and promo_base is null
+    from apuestas where id = v;
+exception when others then
+  insert into resultado values (38, 'A guarda una apuesta con promoción (control)', 'guardada', 'ERROR: ' || sqlerrm, false);
+end $$;
+
+do $$
+begin
+  update apuestas set promo_aumento = 100 where id = (select v from ids where k = 'apuesta');
+  insert into resultado values (40, 'A pone un aumento sin tipo de promoción', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (40, 'A pone un aumento sin tipo de promoción', 'rechazado', 'rechazado', true);
+end $$;
+
+do $$
+begin
+  update apuestas set promo_tipo = 'aumento', promo_credito = 100 where id = (select v from ids where k = 'apuesta');
+  insert into resultado values (41, 'A pone «crédito si se pierde» en un aumento', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (41, 'A pone «crédito si se pierde» en un aumento', 'rechazado', 'rechazado', true);
+end $$;
+
+do $$
+begin
+  update apuestas set promo_credito = -1 where id = (select v from ids where k = 'apuesta_promo');
+  insert into resultado values (42, 'A pone un crédito negativo', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (42, 'A pone un crédito negativo', 'rechazado', 'rechazado', true);
+end $$;
+
+do $$
+begin
+  update apuestas set promo_tipo = 'regalo' where id = (select v from ids where k = 'apuesta');
+  insert into resultado values (43, 'A pone un tipo de promoción que no existe', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (43, 'A pone un tipo de promoción que no existe', 'rechazado', 'rechazado', true);
+end $$;
+
 do $$
 begin
   update transcripciones set coste_usd = 0 where id in (select v from ids);
@@ -244,6 +301,12 @@ with x as (update apuestas set en_directo = true, precipitada = true where id in
   insert into resultado select 37, 'B marca «en directo» o «precipitada» en una apuesta de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
 
 insert into resultado
+  select 44, 'B ve las apuestas con promoción de A', '0', count(*)::text, count(*) = 0
+  from apuestas where promo_tipo is not null and user_id = (select a from params);
+with x as (update apuestas set promo_tipo = null, promo_credito = null where id in (select v from ids) returning 1)
+  insert into resultado select 45, 'B quita o cambia la promoción de una apuesta de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+
+insert into resultado
   select 27, 'B ve los deportes de A', '0', count(*)::text, count(*) = 0
   from deportes where user_id = (select a from params);
 insert into resultado
@@ -290,6 +353,11 @@ insert into resultado
   select 12, 'La apuesta de A sigue intacta tras los ataques de B', 'importe 1000',
          'importe ' || coalesce(max(importe)::text, 'BORRADA'), coalesce(max(importe), 0) = 1000
   from apuestas where id in (select v from ids);
+
+insert into resultado
+  select 46, 'La promoción de A sigue intacta tras los intentos de B', 'asegurada 700',
+         coalesce(max(promo_tipo), 'BORRADA') || ' ' || coalesce(max(promo_credito)::text, '—'), max(promo_tipo) = 'asegurada' and max(promo_credito) = 700
+  from apuestas where id in (select v from ids where k = 'apuesta_promo');
 
 delete from apuestas where id in (select v from ids);             -- borra también su selección
 delete from casas_apuestas where id in (select v from ids);

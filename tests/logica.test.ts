@@ -115,7 +115,7 @@ test('mismo partido: sin cuota por selección, datos del partido comunes, sin co
     ],
   }
   const r = validarFormulario(v)
-  assert.ok(r.ok, JSON.stringify(!r.ok && r.errores))
+  assert.ok(r.ok, JSON.stringify(r))
   assert.deepEqual(r.datos.selecciones.map((s) => s.cuota), [null, null], 'cuotas propias quitadas')
   assert.deepEqual(r.datos.selecciones.map((s) => s.evento), ['Real Madrid - Barcelona', 'Real Madrid - Barcelona'])
   assert.deepEqual(r.datos.selecciones.map((s) => [s.evento_fecha, s.evento_hora]), [['2026-11-08', '21:00'], ['2026-11-08', '21:00']])
@@ -154,6 +154,7 @@ test('ajustarPorTipo: la simple guarda la cuota total en su selección', () => {
 const apuestaIA = (extra = {}) => ({
   casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
   estado: null, importe_cobrado: null, dudosos: [],
+  promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null,
   selecciones: [{ evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1.85', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' }],
   ...extra,
 })
@@ -412,4 +413,185 @@ test('duplicadas: mismo partido con cuotas nulas', () => {
   const conCuota = mp()
   conCuota.selecciones = [{ ...conCuota.selecciones[0], cuota: 1.9 }, conCuota.selecciones[1]]
   assert.ok(!esCalcada(mp(), conCuota), 'nula frente a 1,90')
+})
+
+// ---------- Promociones ----------
+import { calcularAumento, porCuota } from '../src/lib/apuestas/promociones.ts'
+import { sincronizarPromo, cuotaDeLaApuesta } from '../src/lib/apuestas/formulario.ts'
+import { completarPropuestaAntigua } from '../src/lib/apuestas/propuesta.ts'
+
+test('Promoción: importe × cuota en céntimos sin errores de coma flotante', () => {
+  assert.equal(porCuota(1000, 1.85), 1850)
+  assert.equal(porCuota(1005, 1.5), 1508) // 1507,5 → redondeo hacia arriba
+  assert.equal(porCuota(333, 3.3), 1099) // 1098,9
+  assert.equal(porCuota(1, 1.005), 1)
+  assert.equal(porCuota(1999, 1.15), 2299) // 2298,85 (en coma flotante sale 2298.8499…)
+  assert.equal(porCuota(70, 1.15), 81) // 80,5 → 81 (1.15 × 70 = 80.49999… en coma flotante)
+})
+
+test('Superaumento: con la cuota original leída se calcula el aumento', () => {
+  const c = calcularAumento({ importe: 1000, cuotaTotal: 2.5, gananciaPotencial: 2500, cuotaOriginal: 2, aumento: null, base: 'cuota_original' })
+  assert.deepEqual([c.gananciaSin, c.gananciaCon, c.aumento, c.base, c.falta, c.avisos], [2000, 2500, 500, 'cuota_original', false, []])
+  // Sin ganancia potencial: importe × cuota total.
+  const d = calcularAumento({ importe: 1000, cuotaTotal: 2.5, gananciaPotencial: null, cuotaOriginal: 2, aumento: null })
+  assert.equal(d.aumento, 500)
+})
+
+test('Superaumento: con el aumento leído se calcula la cuota original', () => {
+  const c = calcularAumento({ importe: 1000, cuotaTotal: 2.5, gananciaPotencial: 2500, cuotaOriginal: null, aumento: 500, base: 'aumento' })
+  assert.deepEqual([c.cuotaOriginal, c.gananciaSin, c.base, c.falta], [2, 2000, 'aumento', false])
+  const r = calcularAumento({ importe: 300, cuotaTotal: 2, gananciaPotencial: 600, cuotaOriginal: null, aumento: 50 })
+  assert.equal(r.cuotaOriginal, 1.833333)
+})
+
+test('Superaumento: sin ninguno de los dos, la cuota original «falta»', () => {
+  const c = calcularAumento({ importe: 1000, cuotaTotal: 2.5, gananciaPotencial: 2500, cuotaOriginal: null, aumento: null })
+  assert.deepEqual([c.cuotaOriginal, c.aumento, c.base, c.falta, c.gananciaCon, c.gananciaSin], [null, null, null, true, 2500, null])
+})
+
+test('Superaumento: los dos leídos e incoherentes se conservan y avisan (tolerancia 2 céntimos)', () => {
+  const ok = calcularAumento({ importe: 1000, cuotaTotal: 2.5, gananciaPotencial: 2500, cuotaOriginal: 2, aumento: 502, base: 'ambos' })
+  assert.deepEqual([ok.cuotaOriginal, ok.aumento, ok.avisos.length], [2, 502, 0])
+  const mal = calcularAumento({ importe: 1000, cuotaTotal: 2.5, gananciaPotencial: 2500, cuotaOriginal: 2, aumento: 503, base: 'ambos' })
+  assert.deepEqual([mal.cuotaOriginal, mal.aumento], [2, 503])
+  assert.match(mal.avisos.join(' '), /no cuadran/)
+})
+
+test('Superaumento: avisos sin bloquear (cuota original mayor que la pagada, aumento negativo)', () => {
+  const c = calcularAumento({ importe: 1000, cuotaTotal: 2, gananciaPotencial: 2000, cuotaOriginal: 2.2, aumento: null })
+  assert.equal(c.aumento, -200)
+  assert.match(c.avisos.join(' '), /mayor que la cuota pagada/)
+  assert.match(c.avisos.join(' '), /negativo/)
+  const v = validarFormulario({ ...valoresVacios(), importe: '10', cuota_total: '2', selecciones: [sel()], promo: true, promo_tipo: 'aumento', promo_cuota_original: '2,2', promo_base: 'cuota_original' })
+  assert.equal(v.ok, true, 'no bloquea')
+  assert.ok(v.ok, JSON.stringify(v))
+  if (v.ok) assert.equal(v.datos.promo_aumento, -200)
+})
+
+test('Promoción: el servidor recalcula el dato derivado en cada guardado (no se fía del navegador)', () => {
+  const base = { ...valoresVacios(), importe: '10', cuota_total: '2,5', ganancia_potencial: '25', selecciones: [sel()], promo: true, promo_tipo: 'superaumento' }
+  // Base = cuota original: el aumento que mande el navegador se ignora y se recalcula.
+  const a = validarFormulario({ ...base, promo_cuota_original: '2', promo_aumento: '999', promo_base: 'cuota_original' })
+  assert.ok(a.ok)
+  assert.ok(a.ok, JSON.stringify(a))
+  if (a.ok) assert.deepEqual([a.datos.promo_cuota_original, a.datos.promo_aumento, a.datos.promo_base], [2, 500, 'cuota_original'])
+  // Se edita el importe (20 € a 2,5 → 50 €): el aumento sigue a la cuota original.
+  const b = validarFormulario({ ...base, importe: '20', ganancia_potencial: '50', promo_cuota_original: '2', promo_aumento: '5', promo_base: 'cuota_original' })
+  assert.ok(b.ok, JSON.stringify(b))
+  if (b.ok) assert.equal(b.datos.promo_aumento, 1000)
+  // Base = aumento: la cuota original se recalcula.
+  const c = validarFormulario({ ...base, importe: '20', ganancia_potencial: '50', promo_cuota_original: '2', promo_aumento: '5', promo_base: 'aumento' })
+  assert.ok(c.ok, JSON.stringify(c))
+  if (c.ok) assert.deepEqual([c.datos.promo_aumento, c.datos.promo_cuota_original], [500, 2.25])
+  // Sin ganancia potencial ni cuota total → no se puede calcular: queda vacío.
+  const d = validarFormulario({ ...base, cuota_total: '', ganancia_potencial: '', promo_aumento: '5', promo_base: 'aumento' })
+  assert.ok(d.ok, JSON.stringify(d))
+  if (d.ok) assert.deepEqual([d.datos.promo_aumento, d.datos.promo_cuota_original], [500, null])
+})
+
+test('Promoción: en el formulario el dato derivado se rellena al momento', () => {
+  const v = sincronizarPromo({ ...valoresVacios(), importe: '10', cuota_total: '2,5', selecciones: [sel()], promo: true, promo_tipo: 'aumento', promo_cuota_original: '2', promo_base: 'cuota_original' })
+  assert.equal(v.promo_aumento, '5,00')
+  const w = sincronizarPromo({ ...v, promo_aumento: '2,5', promo_base: 'aumento' })
+  assert.equal(w.promo_cuota_original, '2,25')
+  assert.equal(cuotaDeLaApuesta({ cuota_total: '', tipo: 'simple', selecciones: [sel({ cuota: '1,9' })] }), 1.9)
+})
+
+test('Aumento: ganada = ganancia potencial − importe; media ganada/perdida sin aumento; sin aviso de coherencia', () => {
+  const comun = { importe: 1000, cuota: 2.5, gananciaPotencial: 2600, promo: 'aumento' }
+  assert.equal(resultadoPropuesto({ ...comun, estado: 'ganada' }), 1600)
+  assert.equal(resultadoPropuesto({ ...comun, estado: 'media_ganada' }), 750)
+  assert.equal(resultadoPropuesto({ ...comun, estado: 'media_perdida' }), -500)
+  const aviso = (promo: string | null) =>
+    avisosCoherencia({ tipo: 'simple', importe: 1000, cuotaTotal: 2, gananciaPotencial: 2600, cuotasSelecciones: [2], promo }).length
+  assert.equal(aviso(null), 1, 'sin promoción sí avisa')
+  assert.equal(aviso('superaumento'), 0)
+  assert.equal(aviso('aumento'), 0)
+  assert.equal(aviso('credito'), 0)
+  assert.equal(aviso('asegurada'), 1)
+})
+
+test('Asegurada: perdida = −importe; el crédito se guarda aparte (por defecto, el importe)', () => {
+  assert.equal(resultadoPropuesto({ estado: 'perdida', importe: 1000, cuota: 2, gananciaPotencial: null, promo: 'asegurada' }), -1000)
+  const base = { ...valoresVacios(), importe: '10', cuota_total: '2', estado: 'perdida', selecciones: [sel({ estado: 'perdida' })], promo: true, promo_tipo: 'asegurada' }
+  const sinTope = validarFormulario(base)
+  assert.ok(sinTope.ok, JSON.stringify(sinTope))
+  if (sinTope.ok) assert.deepEqual([sinTope.datos.resultado_economico, sinTope.datos.promo_credito], [-1000, 1000])
+  const conTope = validarFormulario({ ...base, promo_credito: '5' })
+  assert.ok(conTope.ok, JSON.stringify(conTope))
+  if (conTope.ok) assert.deepEqual([conTope.datos.resultado_economico, conTope.datos.promo_credito], [-1000, 500])
+  assert.equal(validarFormulario({ ...base, promo_credito: '-5' }).ok, false, 'crédito negativo no')
+})
+
+test('Crédito: ganada solo la ganancia; perdida, media perdida y anulada 0; media ganada; cash out todo lo recuperado', () => {
+  const r = (estado: Parameters<typeof resultadoPropuesto>[0]['estado'], extra = {}) =>
+    resultadoPropuesto({ estado, importe: 1000, cuota: 2, gananciaPotencial: 2000, promo: 'credito', ...extra })
+  assert.equal(r('ganada'), 1000, '10 € a 2,00 = +10 €')
+  assert.equal(r('perdida'), 0)
+  assert.equal(r('media_perdida'), 0)
+  assert.equal(r('anulada'), 0)
+  assert.equal(r('media_ganada'), 500)
+  assert.equal(r('cash_out', { recuperado: 730 }), 730)
+  assert.equal(r('ganada', { cuota: 1.85 }), 850)
+  const v = validarFormulario({ ...valoresVacios(), importe: '10', cuota_total: '2', estado: 'ganada', selecciones: [sel({ estado: 'ganada' })], promo: true, promo_tipo: 'credito' })
+  assert.ok(v.ok, JSON.stringify(v))
+  if (v.ok) assert.equal(v.datos.resultado_economico, 1000)
+})
+
+test('Promoción: sin marcar (o al quitarla) todos los datos van vacíos; marcada sin tipo, error', () => {
+  const v = validarFormulario({ ...valoresVacios(), importe: '10', cuota_total: '2', selecciones: [sel()], promo: false, promo_tipo: 'aumento', promo_cuota_original: '1,8', promo_credito: '5' })
+  assert.ok(v.ok)
+  assert.ok(v.ok, JSON.stringify(v))
+  if (v.ok) {
+    assert.deepEqual(
+      [v.datos.promo_tipo, v.datos.promo_cuota_original, v.datos.promo_aumento, v.datos.promo_credito, v.datos.promo_base],
+      [null, null, null, null, null],
+    )
+    assert.ok('promo_tipo' in v.datos, 'siempre se envía (para vaciar al editar)')
+  }
+  const sinTipo = validarFormulario({ ...valoresVacios(), importe: '10', cuota_total: '2', selecciones: [sel()], promo: true, promo_tipo: '' })
+  assert.equal(sinTipo.ok, false)
+  // Solo se guardan los datos de su tipo.
+  const otra = validarFormulario({ ...valoresVacios(), importe: '10', cuota_total: '2', selecciones: [sel()], promo: true, promo_tipo: 'credito', promo_cuota_original: '1,8', promo_credito: '5' })
+  assert.ok(otra.ok, JSON.stringify(otra))
+  if (otra.ok) assert.deepEqual([otra.datos.promo_cuota_original, otra.datos.promo_credito], [null, null])
+})
+
+test('IA: lee la promoción sin calcular; el tipo a confirmar; la cuota original que falta, en ámbar', () => {
+  const p = esquemaPropuestaIA.parse({
+    hay_apuestas: true,
+    motivo: null,
+    apuestas: [
+      apuestaIA({ cuota_total: '2.50', ganancia_potencial: 25, promo_tipo: 'superaumento', promo_cuota_original: '2.00', promo_aumento: null, promo_credito: null }),
+      apuestaIA({ cuota_total: '2.50', ganancia_potencial: 25, promo_tipo: 'aumento', promo_cuota_original: null, promo_aumento: null, promo_credito: null }),
+      apuestaIA({ promo_tipo: 'asegurada', promo_cuota_original: null, promo_aumento: null, promo_credito: null }),
+      apuestaIA({ estado: 'ganada', importe_cobrado: 8.5, promo_tipo: 'credito', promo_cuota_original: null, promo_aumento: null, promo_credito: null }),
+      apuestaIA({ promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null }),
+    ],
+  })
+  const [sup, aum, ase, cre, nada] = propuestaARevisiones(p)
+  assert.deepEqual([sup.valores.promo, sup.valores.promo_tipo, sup.valores.promo_cuota_original, sup.valores.promo_aumento, sup.valores.promo_base], [true, 'superaumento', '2,00', '', 'cuota_original'])
+  assert.equal(sup.dudosos.promo_tipo, 'propuesta')
+  assert.equal(sincronizarPromo(sup.valores).promo_aumento, '5,00', 'el aumento lo calcula el código, no la IA')
+  assert.deepEqual([aum.valores.promo_cuota_original, aum.valores.promo_aumento, aum.valores.promo_base], ['', '', ''])
+  assert.equal(ase.valores.promo_credito, '10,00', 'asegurada: por defecto, el importe')
+  assert.equal(cre.valores.resultado_economico, '8,50', 'con crédito, el resultado es todo lo cobrado')
+  assert.equal(nada.valores.promo, false)
+})
+
+test('Retomar una lectura antigua (sin campos de promoción) sigue funcionando', () => {
+  const { promo_tipo, promo_cuota_original, promo_aumento, promo_credito, ...vieja } = apuestaIA()
+  void [promo_tipo, promo_cuota_original, promo_aumento, promo_credito]
+  const antigua = { hay_apuestas: true, motivo: null, apuestas: [vieja] }
+  assert.equal(esquemaPropuestaIA.safeParse(antigua).success, false)
+  const r = esquemaPropuestaIA.safeParse(completarPropuestaAntigua(antigua))
+  assert.equal(r.success, true)
+})
+
+test('Hora de la apuesta: el minuto exacto se conserva; sin día no vale', () => {
+  assert.equal(isoALocal(localAIso('2026-11-04T15:24')), '2026-11-04T15:24')
+  const v = validarFormulario({ ...valoresVacios(), importe: '1', cuota_total: '2', selecciones: [sel()], fecha: 'T15:24' })
+  assert.equal(v.ok, false)
+  if (!v.ok) assert.match(v.errores.fecha, /día/)
+  assert.equal(validarHora('14:32'), '14:32')
 })

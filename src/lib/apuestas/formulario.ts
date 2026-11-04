@@ -4,7 +4,7 @@
 
 import { avisosCoherencia, resultadoPropuesto } from './calculos.ts'
 import { cuotaADecimal } from './cuotas.ts'
-import { textoACentimos } from './dinero.ts'
+import { centimosATexto, textoACentimos } from './dinero.ts'
 import {
   MIN_SELECCIONES,
   NOMBRE_TIPO,
@@ -17,6 +17,8 @@ import {
 } from './estados.ts'
 import { localAIso, validarDia, validarHora } from './fechas.ts'
 import { esMixto } from './catalogo.ts'
+import { calcularAumento, esBasePromo, esPromoAumento, esTipoPromo, type BasePromo, type TipoPromo } from './promociones.ts'
+import { cuotaATexto } from './cuotas.ts'
 
 export type Opcion = { id: string; nombre: string }
 
@@ -53,6 +55,13 @@ export type ValoresFormulario = {
   viendo_partido: boolean // solo si en_directo
   precipitada: boolean
   recuperar_perdidas: boolean // solo si precipitada
+  // Promoción (la casilla la marca el usuario; la IA solo propone el tipo si lo ve escrito).
+  promo: boolean
+  promo_tipo: string // '' o uno de TIPOS_PROMO
+  promo_cuota_original: string // superaumento / aumento
+  promo_aumento: string // euros (puede ser negativo: se avisa)
+  promo_base: string // cuál de los dos se leyó o escribió: 'cuota_original' · 'aumento' · 'ambos' · ''
+  promo_credito: string // asegurada: crédito si se pierde (euros)
   selecciones: ValoresSeleccion[]
 }
 
@@ -83,6 +92,12 @@ export type DatosApuesta = {
   viendo_partido: boolean
   precipitada: boolean
   recuperar_perdidas: boolean
+  // Siempre presentes (null = sin promoción): así, al editar, quitar la promoción la vacía.
+  promo_tipo: TipoPromo | null
+  promo_cuota_original: number | null
+  promo_aumento: number | null // céntimos
+  promo_credito: number | null // céntimos
+  promo_base: BasePromo | null
   selecciones: DatosSeleccion[]
 }
 
@@ -148,8 +163,47 @@ export function valoresVacios(): ValoresFormulario {
     viendo_partido: false,
     precipitada: false,
     recuperar_perdidas: false,
+    ...promoVacia(),
     selecciones: [seleccionVacia()],
   }
+}
+
+export function promoVacia(): Pick<
+  ValoresFormulario,
+  'promo' | 'promo_tipo' | 'promo_cuota_original' | 'promo_aumento' | 'promo_base' | 'promo_credito'
+> {
+  return { promo: false, promo_tipo: '', promo_cuota_original: '', promo_aumento: '', promo_base: '', promo_credito: '' }
+}
+
+// Cuota efectiva de la apuesta (la total; en una simple, la de su selección si falta).
+export function cuotaDeLaApuesta(v: Pick<ValoresFormulario, 'cuota_total' | 'tipo' | 'selecciones'>): number | null {
+  const total = cuotaADecimal(v.cuota_total)
+  if (total) return total
+  if (v.tipo === 'simple' && v.selecciones.length === 1) return cuotaADecimal(v.selecciones[0].cuota) ?? null
+  return null
+}
+
+// En el formulario: rellena el dato DERIVADO (aumento o cuota original) a partir del que se leyó
+// o escribió, para que se vea al momento. El servidor lo vuelve a calcular al guardar.
+export function sincronizarPromo(v: ValoresFormulario): ValoresFormulario {
+  if (!v.promo || !esPromoAumento(v.promo_tipo)) return v
+  const c = calcularAumento({
+    importe: textoACentimos(v.importe) ?? null,
+    cuotaTotal: cuotaDeLaApuesta(v),
+    gananciaPotencial: textoACentimos(v.ganancia_potencial) ?? null,
+    cuotaOriginal: cuotaADecimal(v.promo_cuota_original) ?? null,
+    aumento: textoACentimos(v.promo_aumento, { permitirNegativo: true }) ?? null,
+    base: v.promo_base,
+  })
+  if (c.base === 'cuota_original') {
+    const t = centimosATexto(c.aumento)
+    return t === v.promo_aumento && v.promo_base === 'cuota_original' ? v : { ...v, promo_aumento: t, promo_base: 'cuota_original' }
+  }
+  if (c.base === 'aumento') {
+    const t = c.cuotaOriginal != null ? cuotaATexto(c.cuotaOriginal) : ''
+    return t === v.promo_cuota_original && v.promo_base === 'aumento' ? v : { ...v, promo_cuota_original: t, promo_base: 'aumento' }
+  }
+  return v
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -190,7 +244,8 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
   if (!esEstadoApuesta(estado)) errores.estado = 'Elige el estado.'
 
   const fecha = localAIso(texto(e.fecha))
-  if (fecha === undefined) errores.fecha = 'Fecha no válida.'
+  if (texto(e.fecha).startsWith('T')) errores.fecha = 'Pon también el día de la apuesta (o quita la hora).'
+  else if (fecha === undefined) errores.fecha = 'Fecha no válida.'
 
   const importe = textoACentimos(texto(e.importe))
   if (importe == null) errores.importe = 'Escribe el importe apostado.'
@@ -264,6 +319,45 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
 
   const cuotaFinal = cuotaTotal ?? null
 
+  // ---------- Promoción ----------
+  const avisosPromo: string[] = []
+  const conPromo = bruto.promo === true
+  const tipoPromoTxt = texto(bruto.promo_tipo)
+  let promoTipo: TipoPromo | null = null
+  let promoCuotaOriginal: number | null = null
+  let promoAumento: number | null = null
+  let promoCredito: number | null = null
+  let promoBase: BasePromo | null = null
+  if (conPromo) {
+    if (!esTipoPromo(tipoPromoTxt)) errores.promo_tipo = 'Elige el tipo de promoción.'
+    else promoTipo = tipoPromoTxt
+  }
+  if (promoTipo && esPromoAumento(promoTipo)) {
+    const c0 = cuotaADecimal(texto(bruto.promo_cuota_original))
+    if (c0 === undefined) errores.promo_cuota_original = 'Cuota no válida (ej.: 1,80).'
+    const au = textoACentimos(texto(bruto.promo_aumento), { permitirNegativo: true })
+    if (au === undefined) errores.promo_aumento = 'Importe no válido.'
+    const baseTxt = texto(bruto.promo_base)
+    // El dato derivado NO se fía del navegador: se recalcula aquí, en cada guardado.
+    const calc = calcularAumento({
+      importe: importe ?? null,
+      cuotaTotal: cuotaFinal ?? (tipo === 'simple' ? (selecciones[0]?.cuota ?? null) : null),
+      gananciaPotencial: ganancia ?? null,
+      cuotaOriginal: c0 ?? null,
+      aumento: au ?? null,
+      base: esBasePromo(baseTxt) ? baseTxt : null,
+    })
+    promoCuotaOriginal = calc.cuotaOriginal
+    promoAumento = calc.aumento
+    promoBase = calc.base
+    avisosPromo.push(...calc.avisos)
+  } else if (promoTipo === 'asegurada') {
+    const cr = textoACentimos(texto(bruto.promo_credito))
+    if (cr === undefined) errores.promo_credito = 'Importe no válido.'
+    // Por defecto, el crédito si se pierde es el importe apostado.
+    promoCredito = cr ?? importe ?? null
+  }
+
   // Resultado: si está resuelta y no se ha escrito, se calcula.
   if (esEstadoApuesta(estado)) {
     if (estado === 'pendiente') resultado = null
@@ -274,6 +368,7 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
         cuota: cuotaFinal,
         gananciaPotencial: ganancia ?? null,
         recuperado: recuperado ?? null,
+        promo: promoTipo,
       })
       if (resultado == null) {
         errores[estado === 'cash_out' ? 'importe_recuperado' : 'resultado_economico'] =
@@ -292,7 +387,9 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
     gananciaPotencial: ganancia ?? null,
     cuotasSelecciones: selecciones.map((s) => s.cuota),
     estadosSelecciones: selecciones.map((s) => s.estado),
+    promo: promoTipo,
   })
+  avisos.push(...avisosPromo)
 
   if (Object.keys(errores).length > 0) return { ok: false, errores, avisos }
 
@@ -315,6 +412,11 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
       viendo_partido: bruto.en_directo === true && bruto.viendo_partido === true,
       precipitada: bruto.precipitada === true,
       recuperar_perdidas: bruto.precipitada === true && bruto.recuperar_perdidas === true,
+      promo_tipo: promoTipo,
+      promo_cuota_original: promoCuotaOriginal,
+      promo_aumento: promoAumento,
+      promo_credito: promoCredito,
+      promo_base: promoBase,
       selecciones,
     },
   }

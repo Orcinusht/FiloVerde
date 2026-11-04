@@ -58,13 +58,17 @@ export const TIPOS_CON_CUOTA_POR_SELECCION: readonly TipoApuesta[] = ['combinada
 // Por qué un dato se marca "a revisar".
 export const MOTIVOS_DUDA = ['no_visible', 'borroso', 'deducido'] as const
 export type MotivoDuda = (typeof MOTIVOS_DUDA)[number]
-// En la revisión, además: "nueva" = deporte o liga que no está en tu catálogo.
-export type MotivoRevision = MotivoDuda | 'nueva'
+// En la revisión, además: "nueva" = deporte o liga que no está en tu catálogo · "falta" = dato
+// necesario que no se ve ni se puede calcular · "propuesta" = la IA lo ha leído y hay que confirmarlo
+// (tipo de promoción).
+export type MotivoRevision = MotivoDuda | 'nueva' | 'falta' | 'propuesta'
 export const NOMBRE_MOTIVO: Record<MotivoRevision, string> = {
   no_visible: 'no visible',
   borroso: 'borroso',
   deducido: 'deducido',
   nueva: 'nueva',
+  falta: 'falta',
+  propuesta: 'confírmalo',
 }
 
 // Clases de color para la etiqueta de estado.

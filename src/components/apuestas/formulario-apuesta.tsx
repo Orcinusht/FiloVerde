@@ -23,9 +23,20 @@ import {
   type TipoApuesta,
 } from '@/lib/apuestas/estados'
 import {
+  NOMBRE_PROMO,
+  TEXTO_CREDITO,
+  TIPOS_PROMO,
+  calcularAumento,
+  esPromoAumento,
+} from '@/lib/apuestas/promociones'
+import { SelectorHora, partirFecha, unirFecha } from './selector-hora'
+import {
   CAMPOS_COMUNES,
   ajustarPorTipo,
+  cuotaDeLaApuesta,
+  promoVacia,
   seleccionVacia,
+  sincronizarPromo,
   validarFormulario,
   type Opcion,
   type ValoresFormulario,
@@ -100,7 +111,8 @@ export function FormularioApuesta(props: Props) {
       const igual = casasIniciales.find((c) => normalizar(c.nombre) === normalizar(props.casaDetectada!))
       if (igual) v.casa_id = igual.id
     }
-    return v
+    // Promoción leída por la IA: el dato que falte (aumento o cuota original) se calcula ya.
+    return sincronizarPromo(v)
   })
   const [valores, setValores] = props.compartido ?? [propios, setPropios]
   const [dudosos, setDudosos] = useState<Record<string, MotivoRevision>>(() => ({ ...(props.dudosos ?? {}) }))
@@ -168,7 +180,7 @@ export function FormularioApuesta(props: Props) {
     quitarMarca(clave)
     // Editando una apuesta ya resuelta: no se recalcula sin preguntar.
     if (modo === 'edicion' && AFECTAN_RESULTADO.has(clave) && valores.estado !== 'pendiente') {
-      const nuevo = { ...valores, [clave]: valor }
+      const nuevo = sincronizarPromo({ ...valores, [clave]: valor })
       setValores(nuevo)
       const propuesto = recalcular(nuevo).resultado_economico
       const iguales =
@@ -178,8 +190,44 @@ export function FormularioApuesta(props: Props) {
       return
     }
     setValores((v) => {
-      const nuevo = { ...v, [clave]: valor }
+      const base = { ...v, [clave]: valor }
+      // Asegurada: si el crédito seguía siendo el importe, sigue al importe nuevo.
+      if (clave === 'importe' && v.promo && v.promo_tipo === 'asegurada' && v.promo_credito === v.importe) base.promo_credito = valor as string
+      const nuevo = sincronizarPromo(base)
       return AFECTAN_RESULTADO.has(clave) && !resultadoManual ? recalcular(nuevo) : nuevo
+    })
+  }
+
+  // ---------- promoción ----------
+
+  type CamposPromo = Partial<Pick<ValoresFormulario, keyof ReturnType<typeof promoVacia>>>
+  function cambiarPromo(c: CamposPromo) {
+    quitarMarca(...Object.keys(c))
+    const aplicar = (v: ValoresFormulario) => {
+      let n = { ...v, ...c }
+      if (!n.promo) n = { ...n, ...promoVacia() } // al desmarcar, se vacían los datos
+      if (c.promo_tipo !== undefined && c.promo_tipo !== v.promo_tipo) {
+        // Al cambiar de tipo, solo se quedan los datos del tipo nuevo.
+        n = { ...n, promo_cuota_original: '', promo_aumento: '', promo_base: '', promo_credito: '' }
+        // Asegurada: el crédito si se pierde es, por defecto, el importe apostado.
+        if (n.promo_tipo === 'asegurada') n.promo_credito = v.importe
+      }
+      return sincronizarPromo(n)
+    }
+    // Cambia el cálculo del resultado (crédito). En una apuesta resuelta que se edita, se pregunta.
+    if (modo === 'edicion' && valores.estado !== 'pendiente') {
+      const nuevo = aplicar(valores)
+      setValores(nuevo)
+      const propuesto = recalcular(nuevo).resultado_economico
+      const iguales =
+        textoACentimos(propuesto, { permitirNegativo: true }) ===
+        textoACentimos(nuevo.resultado_economico, { permitirNegativo: true })
+      setRecalculoPropuesto(iguales || !propuesto ? null : propuesto)
+      return
+    }
+    setValores((v) => {
+      const n = aplicar(v)
+      return resultadoManual ? n : recalcular(n)
     })
   }
 
@@ -564,6 +612,8 @@ export function FormularioApuesta(props: Props) {
           }
         />
 
+        <BloquePromocion valores={valores} dudosos={dudosos} errores={errores} onCambio={cambiarPromo} />
+
         {deporteDeLaApuesta && (
           <p className="text-sm">
             <span className="text-muted">Deporte de la apuesta: </span>
@@ -618,8 +668,33 @@ export function FormularioApuesta(props: Props) {
           <Entrada inputMode="decimal" placeholder={sugerirGanancia(valores)} value={valores.ganancia_potencial} onChange={(v) => cambiar('ganancia_potencial', v)} marca={dudosos.ganancia_potencial} conError={!!errores.ganancia_potencial} />
         </Campo>
 
-        <Campo etiqueta="Fecha de la apuesta" ayuda={valores.fecha ? 'Cuándo la hiciste.' : 'Cuándo la hiciste. Si la dejas vacía, se guarda la de ahora.'} {...p('fecha')}>
-          <Entrada type="datetime-local" value={valores.fecha} onChange={(v) => cambiar('fecha', v)} marca={dudosos.fecha} conError={!!errores.fecha} />
+        <Campo
+          etiqueta="Fecha de la apuesta"
+          ayuda={
+            !valores.fecha
+              ? 'Cuándo la hiciste. Si la dejas vacía, se guarda la de ahora.'
+              : !partirFecha(valores.fecha).hora
+                ? 'Cuándo la hiciste. Sin hora, se guarda a las 12:00.'
+                : 'Cuándo la hiciste.'
+          }
+          {...p('fecha')}
+        >
+          <Entrada
+            type="date"
+            value={partirFecha(valores.fecha).dia}
+            onChange={(d) => cambiar('fecha', unirFecha(d, partirFecha(valores.fecha).hora))}
+            marca={dudosos.fecha}
+            conError={!!errores.fecha}
+          />
+        </Campo>
+        <Campo etiqueta="Hora de la apuesta">
+          <SelectorHora
+            valor={partirFecha(valores.fecha).hora}
+            onCambio={(h) => cambiar('fecha', unirFecha(partirFecha(valores.fecha).dia, h))}
+            etiquetaMinuto="Minuto de la apuesta"
+            marcado={!!dudosos.fecha}
+            conError={!!errores.fecha}
+          />
         </Campo>
 
         <Campo etiqueta="Estrategia (opcional)" {...p('estrategia_id')}>
@@ -746,6 +821,15 @@ export function FormularioApuesta(props: Props) {
           </Campo>
         )}
 
+        {valores.promo && valores.promo_tipo === 'credito' && (
+          <p className="rounded-xl bg-sky-500/10 px-3 py-2 text-sm text-sky-800 dark:text-sky-300">{TEXTO_CREDITO}</p>
+        )}
+        {valores.promo && valores.promo_tipo === 'asegurada' && estado === 'perdida' && valores.promo_credito.trim() && (
+          <p className="rounded-xl bg-sky-500/10 px-3 py-2 text-sm text-sky-800 dark:text-sky-300">
+            Asegurada: recibes {valores.promo_credito} € en crédito. Se guarda aparte y no cuenta como beneficio.
+          </p>
+        )}
+
         {modo === 'panel' && (
           <CasillasConducta
             mostrar="precipitada"
@@ -773,14 +857,12 @@ export function FormularioApuesta(props: Props) {
             pComun('deporte'),
             pComun('liga'),
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="Día del partido" {...pComun('evento_fecha')}>
-              <Entrada type="date" value={valores.selecciones[0]?.evento_fecha ?? ''} onChange={(v) => cambiarComun('evento_fecha', v)} marca={pComun('evento_fecha').motivo} conError={!!errores['selecciones.0.evento_fecha']} />
-            </Campo>
-            <Campo etiqueta="Hora" {...pComun('evento_hora')}>
-              <Entrada type="time" value={valores.selecciones[0]?.evento_hora ?? ''} onChange={(v) => cambiarComun('evento_hora', v)} marca={pComun('evento_hora').motivo} conError={!!errores['selecciones.0.evento_hora']} />
-            </Campo>
-          </div>
+          <Campo etiqueta="Día del partido" {...pComun('evento_fecha')}>
+            <Entrada type="date" value={valores.selecciones[0]?.evento_fecha ?? ''} onChange={(v) => cambiarComun('evento_fecha', v)} marca={pComun('evento_fecha').motivo} conError={!!errores['selecciones.0.evento_fecha']} />
+          </Campo>
+          <Campo etiqueta="Hora" {...pComun('evento_hora')}>
+            <SelectorHora valor={valores.selecciones[0]?.evento_hora ?? ''} onCambio={(v) => cambiarComun('evento_hora', v)} marcado={!!pComun('evento_hora').motivo} conError={!!errores['selecciones.0.evento_hora']} />
+          </Campo>
         </Grupo>
       )}
 
@@ -938,14 +1020,12 @@ function TarjetaSeleccion({
       {partidoPropio && (
         <>
           {deporteLiga}
-          <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="Día del evento" {...ps('evento_fecha')}>
-              {ent('evento_fecha', { type: 'date' })}
-            </Campo>
-            <Campo etiqueta="Hora" {...ps('evento_hora')}>
-              {ent('evento_hora', { type: 'time' })}
-            </Campo>
-          </div>
+          <Campo etiqueta="Día del evento" {...ps('evento_fecha')}>
+            {ent('evento_fecha', { type: 'date' })}
+          </Campo>
+          <Campo etiqueta="Hora" {...ps('evento_hora')}>
+            <SelectorHora valor={s.evento_hora} onCambio={(v) => onCambio('evento_hora', v)} marcado={!!dudosos[k('evento_hora')]} conError={!!errores[k('evento_hora')]} />
+          </Campo>
         </>
       )}
       <Campo etiqueta={tipo === 'mismo_partido' ? 'Estado de la condición' : 'Estado de la selección'} {...ps('estado')}>
@@ -1065,6 +1145,120 @@ function CasillasConducta({
           />
         )}
       </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- promoción ----------
+
+type CamposPromoValores = Pick<
+  ValoresFormulario,
+  'promo' | 'promo_tipo' | 'promo_cuota_original' | 'promo_aumento' | 'promo_base' | 'promo_credito'
+>
+
+function BloquePromocion({
+  valores,
+  dudosos,
+  errores,
+  onCambio,
+}: {
+  valores: ValoresFormulario
+  dudosos: Record<string, MotivoRevision>
+  errores: Record<string, string>
+  onCambio: (c: Partial<CamposPromoValores>) => void
+}) {
+  const p = (clave: string, motivo?: MotivoRevision) => ({ motivo: motivo ?? dudosos[clave], error: errores[clave] })
+  const conAumento = valores.promo && esPromoAumento(valores.promo_tipo)
+  const calculo = conAumento
+    ? calcularAumento({
+        importe: textoACentimos(valores.importe) ?? null,
+        cuotaTotal: cuotaDeLaApuesta(valores),
+        gananciaPotencial: textoACentimos(valores.ganancia_potencial) ?? null,
+        cuotaOriginal: cuotaADecimal(valores.promo_cuota_original) ?? null,
+        aumento: textoACentimos(valores.promo_aumento, { permitirNegativo: true }) ?? null,
+        base: valores.promo_base,
+      })
+    : null
+  // Escribir en uno de los dos campos lo convierte en el dato "base"; el otro se calcula.
+  // Si se vacía el que manda, se vacían los dos (para no recalcular a partir del calculado).
+  const escribir = (campo: 'promo_cuota_original' | 'promo_aumento', v: string) => {
+    const base = campo === 'promo_cuota_original' ? 'cuota_original' : 'aumento'
+    if (!v.trim() && valores.promo_base === base) onCambio({ promo_cuota_original: '', promo_aumento: '', promo_base: '' })
+    else onCambio({ [campo]: v, promo_base: base })
+  }
+  const eur = (c: number | null | undefined) => (c == null ? '—' : formatoImporte(c))
+
+  return (
+    <div className="min-w-0 space-y-2">
+      <Casilla etiqueta="Promoción" marcada={valores.promo} onCambio={(m) => onCambio({ promo: m })} />
+      {valores.promo && (
+        <div className="min-w-0 space-y-3 rounded-xl border border-border bg-background p-3">
+          <Campo etiqueta="Tipo de promoción" {...p('promo_tipo')}>
+            <Desplegable
+              value={valores.promo_tipo}
+              onChange={(t) => onCambio({ promo_tipo: t })}
+              marca={dudosos.promo_tipo}
+              conError={!!errores.promo_tipo}
+              opciones={[['', 'Elige el tipo…'], ...TIPOS_PROMO.map((t) => [t, NOMBRE_PROMO[t]] as [string, string])]}
+            />
+          </Campo>
+
+          {conAumento && calculo && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Campo
+                  etiqueta="Cuota original"
+                  {...p('promo_cuota_original', calculo.falta && !dudosos.promo_cuota_original ? 'falta' : undefined)}
+                >
+                  <Entrada
+                    inputMode="decimal"
+                    placeholder="1,80"
+                    value={valores.promo_cuota_original}
+                    onChange={(v) => escribir('promo_cuota_original', v)}
+                    marca={calculo.falta ? 'falta' : dudosos.promo_cuota_original}
+                    conError={!!errores.promo_cuota_original}
+                  />
+                </Campo>
+                <Campo etiqueta="Aumento (€)" {...p('promo_aumento')}>
+                  <Entrada
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={valores.promo_aumento}
+                    onChange={(v) => escribir('promo_aumento', v)}
+                    marca={dudosos.promo_aumento}
+                    conError={!!errores.promo_aumento}
+                  />
+                </Campo>
+              </div>
+              <p className="text-xs text-muted">
+                Cuota original = sin la promoción. Escribe uno de los dos y el otro se calcula
+                {calculo.base === 'cuota_original' ? ' (ahora se calcula el aumento)' : calculo.base === 'aumento' ? ' (ahora se calcula la cuota original)' : ''}.
+              </p>
+              <p aria-label="Resumen de la promoción" className="rounded-xl bg-brand/10 px-3 py-2 text-sm">
+                Sin promoción: <strong>{eur(calculo.gananciaSin)}</strong> · Con promoción: <strong>{eur(calculo.gananciaCon)}</strong> · Aumento:{' '}
+                <strong>{eur(calculo.aumento)}</strong>
+              </p>
+            </>
+          )}
+
+          {valores.promo_tipo === 'asegurada' && (
+            <Campo etiqueta="Crédito si se pierde (€)" ayuda="Lo que la casa te devuelve en crédito si pierdes. No cuenta como beneficio." {...p('promo_credito')}>
+              <Entrada
+                inputMode="decimal"
+                placeholder={valores.importe || '0,00'}
+                value={valores.promo_credito}
+                onChange={(v) => onCambio({ promo_credito: v })}
+                marca={dudosos.promo_credito}
+                conError={!!errores.promo_credito}
+              />
+            </Campo>
+          )}
+
+          {valores.promo_tipo === 'credito' && (
+            <p className="rounded-xl bg-sky-500/10 px-3 py-2 text-sm text-sky-800 dark:text-sky-300">{TEXTO_CREDITO}</p>
+          )}
+        </div>
       )}
     </div>
   )
@@ -1302,12 +1496,7 @@ function porNombre(a: Opcion, b: Opcion) {
   return a.nombre.localeCompare(b.nombre, 'es')
 }
 
-function cuotaEfectiva(v: ValoresFormulario): number | null {
-  const total = cuotaADecimal(v.cuota_total)
-  if (total) return total
-  if (v.tipo === 'simple' && v.selecciones.length === 1) return cuotaADecimal(v.selecciones[0].cuota) ?? null
-  return null
-}
+const cuotaEfectiva = cuotaDeLaApuesta
 
 function recalcular(v: ValoresFormulario): ValoresFormulario {
   if (!esEstadoApuesta(v.estado)) return v
@@ -1317,6 +1506,7 @@ function recalcular(v: ValoresFormulario): ValoresFormulario {
     cuota: cuotaEfectiva(v),
     gananciaPotencial: textoACentimos(v.ganancia_potencial) ?? null,
     recuperado: textoACentimos(v.importe_recuperado) ?? null,
+    promo: v.promo ? v.promo_tipo : null,
   })
   return { ...v, resultado_economico: centimosATexto(r) }
 }
@@ -1423,15 +1613,17 @@ function Desplegable({
   onChange,
   opciones,
   marca,
+  conError,
 }: {
   value: string
   onChange: (v: string) => void
   opciones: [string, string][]
   marca?: MotivoRevision
+  conError?: boolean
 }) {
   const { id, descripcion } = useIdCampo()
   return (
-    <select id={id} aria-describedby={descripcion} value={value} onChange={(e) => onChange(e.target.value)} className={clasesEntrada(!!marca)}>
+    <select id={id} aria-describedby={descripcion} value={value} onChange={(e) => onChange(e.target.value)} className={clasesEntrada(!!marca, conError)}>
       {opciones.map(([v, t]) => (
         <option key={v} value={v}>
           {t}

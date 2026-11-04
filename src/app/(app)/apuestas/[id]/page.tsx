@@ -52,16 +52,22 @@ async function Detalle({ params }: { params: PageProps<'/apuestas/[id]'>['params
     ganancia_potencial: centimosATexto(apuesta.ganancia_potencial),
     estado: apuesta.estado,
     resultado_economico: centimosATexto(apuesta.resultado_economico),
-    // En un cash out guardado, lo recuperado = resultado + importe.
+    // En un cash out guardado, lo recuperado = resultado + importe (con crédito: el resultado).
     importe_recuperado:
       apuesta.estado === 'cash_out' && apuesta.resultado_economico != null
-        ? centimosATexto(apuesta.resultado_economico + apuesta.importe)
+        ? centimosATexto(apuesta.resultado_economico + (apuesta.promo_tipo === 'credito' ? 0 : apuesta.importe))
         : '',
     notas: apuesta.notas ?? '',
     en_directo: apuesta.en_directo === true,
     viendo_partido: apuesta.viendo_partido === true,
     precipitada: apuesta.precipitada === true,
     recuperar_perdidas: apuesta.recuperar_perdidas === true,
+    promo: apuesta.promo_tipo != null,
+    promo_tipo: apuesta.promo_tipo ?? '',
+    promo_cuota_original: cuotaATexto(apuesta.promo_cuota_original),
+    promo_aumento: centimosATexto(apuesta.promo_aumento),
+    promo_base: apuesta.promo_base ?? '',
+    promo_credito: centimosATexto(apuesta.promo_credito),
     selecciones: apuesta.selecciones.map((s) => ({
       evento: s.evento ?? '',
       liga: s.liga ?? '',

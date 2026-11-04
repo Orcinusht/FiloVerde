@@ -86,14 +86,19 @@ Campos:
 - "casa": por el logo o el texto.
 - Directo: "En juego", "Live", "En vivo", un marcador o un minuto de partido indican solo el momento en que se hizo la CAPTURA, no el de la apuesta. No los uses para nada ni los anotes en ningún campo (el usuario marca él mismo si apostó en directo). Sigue leyendo con normalidad el evento, la liga, la fecha/hora y, si la captura lo muestra claramente, el estado resuelto.
 
+Promociones (de cada apuesta). SOLO lees; no calcules nada y no inventes:
+- "promo_tipo" SOLO si la captura indica la promoción de forma explícita: "superaumento" (Superaumento, Supercuota…), "aumento" (Aumento de ganancias, Cuota mejorada, Boost…), "asegurada" (Apuesta asegurada, Reembolso si pierdes…), "credito" (Apuesta gratuita, Free bet, Apuesta con crédito, Bono de apuesta), "otra" (otra promoción escrita que no encaje). Si no lo dice, null (una cuota alta NO es una promoción).
+- "promo_cuota_original": la cuota SIN la promoción (suele aparecer tachada junto a la nueva), copiada tal cual. "promo_aumento": el aumento de ganancias en unidades de moneda, si aparece escrito. "promo_credito": en una asegurada, el crédito que devuelven si se pierde, si aparece escrito (p. ej. "hasta 10 €"). Lo que no aparezca, null; nunca lo calcules a partir de otros datos.
+
 Campos dudosos ("dudosos" de cada apuesta), con "campo" y "motivo":
 - Marca un campo SOLO si: no aparece en la imagen ("no_visible"), se ve borroso o cortado ("borroso"), o lo has deducido sin verlo escrito ("deducido").
 - NUNCA marques un dato que se lee con claridad. Si dudas entre dos lecturas, usa la más probable y marca "borroso".
-- Nombres de campo: "casa", "tipo", "fecha", "importe", "cuota_total", "ganancia_potencial", "estado", o "selecciones.N.campo" (N empieza en 0), p. ej. "selecciones.1.liga".`
+- Nombres de campo: "casa", "tipo", "fecha", "importe", "cuota_total", "ganancia_potencial", "estado", "promo_cuota_original", "promo_aumento", "promo_credito", o "selecciones.N.campo" (N empieza en 0), p. ej. "selecciones.1.liga".`
 
 // Versión de estas instrucciones (se guarda en cada lectura para comparar el coste real).
-// 1 = antes del catálogo de deportes y ligas · 2 = con catálogo · 3 = ignora señales de directo.
-export const VERSION_INSTRUCCIONES = 3
+// 1 = antes del catálogo de deportes y ligas · 2 = con catálogo · 3 = ignora señales de directo ·
+// 4 = lee las promociones (tipo, cuota original, aumento y crédito; sin calcular).
+export const VERSION_INSTRUCCIONES = 4
 
 export async function transcribirCaptura(
   imagen: Buffer,

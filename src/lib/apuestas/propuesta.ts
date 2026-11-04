@@ -23,6 +23,7 @@ import {
   type ValoresFormulario,
 } from './formulario.ts'
 import { resultadoPropuesto } from './calculos.ts'
+import { TIPOS_PROMO, esPromoAumento } from './promociones.ts'
 
 const textoONulo = z.string().nullable()
 
@@ -52,6 +53,13 @@ export const esquemaApuestaIA = z.object({
   ganancia_potencial: z.number().nullable().describe('Ganancia/retorno potencial total que muestra la captura (incluye lo apostado)'),
   estado: z.enum(ESTADOS_APUESTA).nullable().describe('Solo si la captura muestra que ya está resuelta'),
   importe_cobrado: z.number().nullable().describe('Si está resuelta: lo cobrado en total (premio, devolución o cash out). 0 si perdida'),
+  promo_tipo: z
+    .enum(TIPOS_PROMO)
+    .nullable()
+    .describe('Promoción SOLO si la captura la indica de forma explícita; null si no'),
+  promo_cuota_original: textoONulo.describe('Superaumento/aumento: cuota SIN la promoción (p. ej. la tachada), EXACTAMENTE como aparece'),
+  promo_aumento: z.number().nullable().describe('Superaumento/aumento: aumento de ganancias en unidades de moneda, si aparece escrito'),
+  promo_credito: z.number().nullable().describe('Apuesta asegurada: crédito que devuelven si se pierde, si aparece escrito'),
   selecciones: z.array(esquemaSeleccionIA),
   dudosos: z.array(esquemaDudaIA).describe('SOLO los campos no visibles, borrosos o deducidos. Nunca lo que se lee con claridad'),
 })
@@ -63,6 +71,21 @@ export const esquemaPropuestaIA = z.object({
 })
 
 export type PropuestaIA = z.infer<typeof esquemaPropuestaIA>
+
+// Propuestas guardadas ANTES de leer promociones (instrucciones v1-v3) no traen sus campos: se
+// completan con null para poder retomarlas sin volver a llamar a la IA.
+export function completarPropuestaAntigua(p: unknown): unknown {
+  if (!p || typeof p !== 'object' || !Array.isArray((p as { apuestas?: unknown }).apuestas)) return p
+  const o = p as { apuestas: unknown[] }
+  return {
+    ...o,
+    apuestas: o.apuestas.map((a) =>
+      a && typeof a === 'object'
+        ? { promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null, ...a }
+        : a,
+    ),
+  }
+}
 export type ApuestaIA = z.infer<typeof esquemaApuestaIA>
 
 export type Revision = {
@@ -86,6 +109,7 @@ const recortar = (v: string | null | undefined) => (v ?? '').trim().slice(0, MAX
 
 const CAMPOS_VALIDOS = new Set([
   'casa_id', 'tipo', 'fecha', 'importe', 'cuota_total', 'ganancia_potencial', 'estado', 'resultado_economico',
+  'promo_tipo', 'promo_cuota_original', 'promo_aumento', 'promo_credito',
 ])
 const CAMPOS_SELECCION = new Set([
   'evento', 'liga', 'deporte', 'mercado', 'pronostico', 'cuota', 'estado', 'evento_fecha', 'evento_hora',
@@ -183,6 +207,26 @@ export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo): Revision {
     valores.cuota_total = valores.selecciones[0].cuota
   }
 
+  // Promoción: la IA SOLO lee (tipo, cuota original, aumento, crédito). Nada se calcula aquí: el
+  // dato que falte lo calcula el formulario (y el servidor al guardar). El tipo, siempre a confirmar.
+  const tipoPromo = p.promo_tipo && (TIPOS_PROMO as readonly string[]).includes(p.promo_tipo) ? p.promo_tipo : null
+  if (tipoPromo) {
+    valores.promo = true
+    valores.promo_tipo = tipoPromo
+    if (!dudosos.promo_tipo) dudosos.promo_tipo = 'propuesta'
+    if (esPromoAumento(tipoPromo)) {
+      const c0 = cuotaADecimal(p.promo_cuota_original)
+      if (p.promo_cuota_original && c0 === undefined) marcar('promo_cuota_original', 'borroso')
+      const au = p.promo_aumento != null ? eurosACentimos(p.promo_aumento) : null
+      valores.promo_cuota_original = c0 ? cuotaATexto(c0) : ''
+      valores.promo_aumento = au != null ? centimosATexto(au) : ''
+      valores.promo_base = c0 && au != null ? 'ambos' : c0 ? 'cuota_original' : au != null ? 'aumento' : ''
+    } else if (tipoPromo === 'asegurada') {
+      const cr = eurosACentimos(p.promo_credito)
+      valores.promo_credito = cr != null && cr >= 0 ? centimosATexto(cr) : valores.importe
+    }
+  }
+
   // Estado y resultado económico detectados (si la captura ya está resuelta).
   if (p.estado && p.estado !== 'pendiente') {
     valores.estado = p.estado
@@ -190,8 +234,11 @@ export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo): Revision {
     if (p.estado === 'cash_out' && cobrado != null) valores.importe_recuperado = centimosATexto(cobrado)
     const resultado =
       cobrado != null && importe != null
-        ? cobrado - importe
-        : resultadoPropuesto({ estado: p.estado, importe, cuota: cuotaTotal ?? null, gananciaPotencial: ganancia })
+        ? // Con crédito, el importe no era dinero propio: el resultado es todo lo cobrado.
+          tipoPromo === 'credito'
+          ? cobrado
+          : cobrado - importe
+        : resultadoPropuesto({ estado: p.estado, importe, cuota: cuotaTotal ?? null, gananciaPotencial: ganancia, promo: tipoPromo })
     valores.resultado_economico = centimosATexto(resultado)
   }
 
