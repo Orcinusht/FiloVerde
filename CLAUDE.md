@@ -28,20 +28,21 @@ archivo o panel ponerlas).
    **Aviso de apuesta duplicada fusionado el 2026-11-03** (verificado en el móvil; sin migración).
    **Promociones y selector de minutos fusionados el 2026-11-04** (verificados en el móvil;
    migración `20261105000001` aplicada; RLS en vivo 46/46).
-   **IA más fiable y jugadores sustituidos** (rama `fase-1-ia-fiable`, 2026-11-04, sin migración;
-   pendiente de verificar en el móvil y fusionar).
+   **IA más fiable y jugadores sustituidos fusionados el 2026-11-04** (verificados en el móvil; sin
+   migración): reintentos desde el móvil, 429 separado de la saturación, caché de Anthropic y regla
+   del sustituto (instrucciones v5).
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-04, tras fusionar las promociones)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-04, tras fusionar la IA más fiable)
 - **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
 - **API-Football** u otra fuente de datos deportivos (Fase 2 o 3).
 - **Exportación a CSV** de las apuestas.
 - **Análisis del coste y del modelo de IA**: revisar en Ajustes el coste medio real por captura
-  (por versión de instrucciones, también la v4 de promociones) y decidir si se mantiene
-  `claude-sonnet-5-5` o se cambia.
+  (por versión de instrucciones: v4 de promociones y v5 con caché; comprobar en Vercel → Logs,
+  `[ia:uso]`, que la caché se lee) y decidir si se mantiene `claude-sonnet-5-5` o se cambia.
 - **Seguimiento del saldo y la caducidad de los créditos** de promoción (fuera de la ronda de
   promociones).
 - **Modelo de reserva** (aparcado el 2026-11-04): SOLO si, tras los reintentos y la caché, siguen
@@ -510,3 +511,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | Caché de Anthropic en instrucciones y catálogo; imagen al final | En un lote, de la 2.ª captura en adelante la parte fija cuesta un 10 % y no cuenta para el límite por minuto |
 | 2026-11-04 | Instrucciones v5: en mercados de jugador, el pronóstico es el jugador tachado; el sustituto, a las notas | La captura muestra a los dos; el usuario eligió al tachado |
 | 2026-11-04 | Modelo de reserva aparcado | Primero medir si los reintentos y la caché bastan |
+| 2026-11-04 | **IA más fiable y jugadores sustituidos fusionados en `main`** (rama `fase-1-ia-fiable`) | Verificados en el móvil; pruebas de GitHub Actions en verde; sin migración |
