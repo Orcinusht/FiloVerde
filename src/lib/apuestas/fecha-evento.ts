@@ -5,9 +5,10 @@
 //
 // Reglas:
 //  · Año escrito → sin ámbar.
-//  · Sin año pero con día de la semana → el año cercano (anterior, actual o siguiente) en el que
-//    ese día cae en ese día de la semana, sin ámbar; si no cuadra con ninguno, el más cercano y en
-//    ámbar ("deducido").
+//  · Sin año pero con día de la semana → el año, DENTRO de la ventana de 6 meses antes a 6 meses
+//    después de hoy, en el que ese día cae en ese día de la semana, sin ámbar; si no cuadra con
+//    ninguno de la ventana, el año más cercano a hoy y en ámbar ("dia_semana": el día de la semana
+//    no coincide).
 //  · Sin año ni día de la semana → el año que deja la fecha más cerca de hoy, en ámbar ("deducido").
 //  · "Hoy", "Mañana", "Ayer", "Pasado mañana" → respecto al día de subida, en ámbar ("deducido").
 //  · Solo hora, sin día → día y hora vacíos y en ámbar ("falta_dia"): no puede haber hora sin día.
@@ -15,7 +16,10 @@
 
 export const ZONA = 'Europe/Madrid'
 
-export type MotivoFecha = 'deducido' | 'falta_dia' | 'no_entendida' | 'no_visible'
+export type MotivoFecha = 'deducido' | 'dia_semana' | 'falta_dia' | 'no_entendida' | 'no_visible'
+
+// Ventana para elegir el año cuando la fecha no lo trae: de 6 meses antes a 6 meses después de hoy.
+const VENTANA_MS = 183 * 86_400_000
 
 export type FechaEvento = {
   dia: string | null // "YYYY-MM-DD"
@@ -163,8 +167,9 @@ function sacarDia(t: string, hoy: Dia): { fecha: Dia; motivo?: MotivoFecha } | n
   if (!candidatos.length) return 'no_entendida'
   const cercano = (lista: Dia[]) => lista.reduce((a, b) => (distancia(b, hoy) < distancia(a, hoy) ? b : a))
   if (ds !== undefined) {
-    const cuadran = candidatos.filter((f) => diaSemana(f) === ds)
+    const cuadran = candidatos.filter((f) => diaSemana(f) === ds && distancia(f, hoy) <= VENTANA_MS)
     if (cuadran.length) return { fecha: cercano(cuadran) }
+    return { fecha: cercano(candidatos), motivo: 'dia_semana' }
   }
   return { fecha: cercano(candidatos), motivo: 'deducido' }
 }

@@ -323,8 +323,10 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
   "Dom 8 nov / 17:00", "Hoy 21:00"…) y **el código lo traduce** (`lib/apuestas/fecha-evento.ts`) con
   el día de la subida en Europe/Madrid. **La fecha de hoy NO se pasa a la IA** (así la IA no calcula,
   el resultado es comprobable y la caché no se toca). Reglas: año escrito → sin ámbar; con día de la
-  semana y sin año → el año cercano (anterior, actual o siguiente) en que ese día cae en ese día de la
-  semana, sin ámbar (si no cuadra con ninguno: el más cercano y "deducido"); sin día de la semana ni
+  semana y sin año → el año, **dentro de la ventana de 6 meses antes a 6 meses después de hoy**, en que
+  ese día cae en ese día de la semana, sin ámbar ("Dom 8 nov / 17:00" → 2026-11-08 17:00); si no cuadra
+  con ninguno de la ventana → el año más cercano a hoy, en ámbar "el día de la semana no coincide"
+  ("Sáb 15 nov" → 15/11/2026, que es domingo, en ámbar; nunca 2025 sin aviso); sin día de la semana ni
   año → el año más cercano a hoy, "deducido"; "Hoy", "Mañana", "Ayer", "Pasado mañana" → "deducido"
   (dependen de cuándo se hizo la captura); solo hora sin día → día y hora vacíos con "falta el día";
   formato no reconocido → vacíos con "formato no reconocido"; nada → vacíos "no visible". Cubre
@@ -550,7 +552,7 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | Modelo de reserva aparcado | Primero medir si los reintentos y la caché bastan |
 | 2026-11-04 | **IA más fiable y jugadores sustituidos fusionados en `main`** (rama `fase-1-ia-fiable`) | Verificados en el móvil; pruebas de GitHub Actions en verde; sin migración |
 | 2026-11-04 | Fecha del evento: la IA copia el texto y el código la traduce; la fecha de hoy NO va a la IA | Exacto y comprobable con pruebas; la IA no calcula; la caché no se toca. Antes casi nunca se rellenaba (1 de 93 selecciones) porque la IA no podía dar el año |
-| 2026-11-04 | Día de la semana decide el año; relativas y sin año en ámbar ("deducido"); hora sin día → "falta el día" | Nunca se inventa; lo dudoso se revisa |
+| 2026-11-04 | Día de la semana decide el año, solo dentro de ±6 meses de hoy; si no coincide, año más cercano en ámbar ("el día de la semana no coincide"); relativas y sin año en ámbar ("deducido"); hora sin día → "falta el día" | Nunca se inventa; lo dudoso se revisa; un día de la semana mal leído no debe saltar a otro año sin avisar |
 | 2026-11-04 | Apuesta válida = al menos una selección con pronóstico y no cortada, comprobado en el servidor | Las capturas de listas cortan apuestas arriba y abajo |
 | 2026-11-04 | Pantalla "¿Cuáles quieres guardar?" con 2+ válidas; ya registradas sin marcar; no elegidas = descartadas | Guardar solo lo que se quiere sin revisar una a una |
 | 2026-11-04 | Cola con Anterior/Siguiente; en colas de varias, capturas borradas al Terminar (no al guardar) | Poder volver atrás viendo la captura; lo sobrante lo recoge el borrado de las 2 h |

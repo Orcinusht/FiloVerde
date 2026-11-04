@@ -151,7 +151,7 @@ function normalizarDudoso(clave: string): string | null {
   return null
 }
 
-const MOTIVO_FECHA = { deducido: 'deducido', falta_dia: 'falta_dia', no_entendida: 'no_entendida', no_visible: 'no_visible' } as const
+const MOTIVO_FECHA = { deducido: 'deducido', dia_semana: 'dia_semana', falta_dia: 'falta_dia', no_entendida: 'no_entendida', no_visible: 'no_visible' } as const
 
 // ¿Es una apuesta de verdad? Al menos una selección legible con su pronóstico y no cortada.
 // Lo comprueba el SERVIDOR (no se fía solo de la IA).

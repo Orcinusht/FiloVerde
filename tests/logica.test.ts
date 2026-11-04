@@ -683,8 +683,9 @@ test('Fecha del evento: textos reales de las capturas', () => {
   assert.deepEqual(resolverFechaEvento('Hoy 21:00', SUBIDA), { dia: '2026-11-04', hora: '21:00', motivoDia: 'deducido', motivoHora: 'deducido' })
   assert.deepEqual(resolverFechaEvento('Mañana 18:30', SUBIDA), { dia: '2026-11-05', hora: '18:30', motivoDia: 'deducido', motivoHora: 'deducido' })
   assert.deepEqual(resolverFechaEvento('08/11 21:00', SUBIDA), { dia: '2026-11-08', hora: '21:00', motivoDia: 'deducido', motivoHora: 'deducido' }, 'sin año ni día de la semana: deducida')
-  // 15 nov 2026 es domingo; el sábado 15 nov más cercano es de 2025 → ese, sin ámbar.
-  assert.deepEqual(resolverFechaEvento('Sáb 15 nov, 9:00 PM', SUBIDA), { dia: '2025-11-15', hora: '21:00' })
+  // 15 nov 2026 cae en domingo y no hay ningún sábado 15 nov en la ventana de ±6 meses → 2026,
+  // en ámbar ("el día de la semana no coincide"), nunca 2025 sin aviso.
+  assert.deepEqual(resolverFechaEvento('Sáb 15 nov, 9:00 PM', SUBIDA), { dia: '2026-11-15', hora: '21:00', motivoDia: 'dia_semana', motivoHora: 'dia_semana' })
   assert.deepEqual(resolverFechaEvento('21:00', SUBIDA), { dia: null, hora: null, motivoDia: 'falta_dia', motivoHora: 'falta_dia' }, 'hora suelta sin día')
 })
 
@@ -697,7 +698,12 @@ test('Fecha del evento: año escrito, meses en español, 12 h, medianoche y form
   }
   assert.equal(resolverFechaEvento('Mar 10 nov 20:45', SUBIDA).dia, '2026-11-10', '«Mar» al principio es martes')
   assert.equal(resolverFechaEvento('Dom 8 nov', SUBIDA).motivoDia, undefined)
-  assert.equal(resolverFechaEvento('Mié 8 nov', new Date('2026-11-04T12:00Z')).motivoDia, 'deducido', 'el día de la semana no cuadra con ningún año cercano')
+  assert.equal(resolverFechaEvento('Mié 8 nov', new Date('2026-11-04T12:00Z')).motivoDia, 'dia_semana', 'el día de la semana no cuadra')
+  // Ventana ±6 meses: "Dom 9 nov" (domingo en 2025) subido el 4 nov 2026 está a casi un año → 2026, en ámbar.
+  assert.deepEqual(resolverFechaEvento('Dom 9 nov', SUBIDA), { dia: '2026-11-09', hora: null, motivoDia: 'dia_semana', motivoHora: 'no_visible' })
+  // Dentro de la ventana sí vale otro año: "Lun 5 ene" (lunes en 2026) subido el 20 dic 2025 → 2026, sin ámbar.
+  assert.equal(resolverFechaEvento('Lun 5 ene', new Date('2025-12-20T12:00Z')).dia, '2026-01-05')
+  assert.equal(resolverFechaEvento('Lun 5 ene', new Date('2025-12-20T12:00Z')).motivoDia, undefined)
   // "Hoy" a las 00:30 de Madrid (23:30 UTC del día anterior) ya es el día siguiente.
   assert.equal(resolverFechaEvento('Hoy 21:00', new Date('2026-11-04T23:30:00Z')).dia, '2026-11-05')
   assert.deepEqual(resolverFechaEvento('Próximamente', SUBIDA), { dia: null, hora: null, motivoDia: 'no_entendida', motivoHora: 'no_entendida' })
