@@ -26,18 +26,22 @@ archivo o panel ponerlas).
    apuesta" desplegable, guardar o borrar vuelve a la lista (con filtros, scroll y aviso breve),
    emojis de deporte y tarjeta de la lista con el resultado a la derecha.
    **Aviso de apuesta duplicada fusionado el 2026-11-03** (verificado en el móvil; sin migración).
-   **Promociones y selector de minutos** (rama `fase-1-promos`, 2026-11-04, pendiente de aplicar la
-   migración `20261105000001`, verificar en el móvil y fusionar).
+   **Promociones y selector de minutos fusionados el 2026-11-04** (verificados en el móvil;
+   migración `20261105000001` aplicada; RLS en vivo 46/46).
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-03, tras fusionar el aviso de duplicadas)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-04, tras fusionar las promociones)
 - **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
 - **API-Football** u otra fuente de datos deportivos (Fase 2 o 3).
+- **Exportación a CSV** de las apuestas.
 - **Análisis del coste y del modelo de IA**: revisar en Ajustes el coste medio real por captura
-  (por versión de instrucciones) y decidir si se mantiene `claude-sonnet-5-5` o se cambia.
+  (por versión de instrucciones, también la v4 de promociones) y decidir si se mantiene
+  `claude-sonnet-5-5` o se cambia.
+- **Seguimiento del saldo y la caducidad de los créditos** de promoción (fuera de la ronda de
+  promociones).
 
 ## Principios
 
@@ -459,3 +463,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | IA instrucciones v4: lee promociones sin calcular; lecturas antiguas completadas con null al retomarlas | La IA propone, el código calcula; no se pierden revisiones a medias |
 | 2026-11-04 | Hora y minuto con dos desplegables (paso de 5) en vez del control nativo; minutos raros se conservan | iOS Safari ignora el paso; nunca se cambia un dato sin que lo cambie el usuario |
 | 2026-11-04 | Migración `20261105000001` solo aditiva y repetible (el nombre no es una fecha real: solo marca el orden) | No rompe `main`; segura si se pega dos veces |
+| 2026-11-04 | **Promociones y selector de minutos fusionados en `main`** (rama `fase-1-promos`) | Verificados en el móvil; migración aplicada; RLS en vivo 46/46; pruebas de GitHub Actions en verde |
