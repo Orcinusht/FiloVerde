@@ -61,7 +61,7 @@ export type MotivoDuda = (typeof MOTIVOS_DUDA)[number]
 // En la revisión, además: "nueva" = deporte o liga que no está en tu catálogo · "falta" = dato
 // necesario que no se ve ni se puede calcular · "propuesta" = la IA lo ha leído y hay que confirmarlo
 // (tipo de promoción).
-export type MotivoRevision = MotivoDuda | 'nueva' | 'falta' | 'propuesta'
+export type MotivoRevision = MotivoDuda | 'nueva' | 'falta' | 'propuesta' | 'falta_dia' | 'no_entendida'
 export const NOMBRE_MOTIVO: Record<MotivoRevision, string> = {
   no_visible: 'no visible',
   borroso: 'borroso',
@@ -69,6 +69,8 @@ export const NOMBRE_MOTIVO: Record<MotivoRevision, string> = {
   nueva: 'nueva',
   falta: 'falta',
   propuesta: 'confírmalo',
+  falta_dia: 'falta el día',
+  no_entendida: 'formato no reconocido',
 }
 
 // Clases de color para la etiqueta de estado.

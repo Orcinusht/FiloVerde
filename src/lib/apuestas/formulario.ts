@@ -16,6 +16,30 @@ import {
   type TipoApuesta,
 } from './estados.ts'
 import { localAIso, validarDia, validarHora } from './fechas.ts'
+import { diaEnMadrid } from './fecha-evento.ts'
+
+const dos2 = (n: number) => String(n).padStart(2, '0')
+export function diaEnMadridTexto(instante: Date): string {
+  const d = diaEnMadrid(instante)
+  return `${d.y}-${dos2(d.m)}-${dos2(d.d)}`
+}
+
+// Hora de la apuesta (cuándo se hizo): NO se pide ni se muestra. Se guarda:
+//  · al editar sin cambiar el día → la fecha que ya tenía, tal cual;
+//  · día de hoy → la hora actual;
+//  · otro día (pasado o futuro) → las 12:00 de España.
+// Devuelve el ISO, o undefined si el día no es válido.
+export function fechaDeLaApuesta(dia: string, original: string | null | undefined, ahora: Date = new Date()): string | undefined {
+  const t = dia.trim().slice(0, 10)
+  const d = t === '' ? diaEnMadridTexto(ahora) : validarDia(t)
+  if (!d) return undefined
+  if (original) {
+    const o = new Date(original)
+    if (!Number.isNaN(o.getTime()) && diaEnMadridTexto(o) === d) return o.toISOString()
+  }
+  if (d === diaEnMadridTexto(ahora)) return ahora.toISOString()
+  return localAIso(`${d}T12:00`) ?? undefined
+}
 import { esMixto } from './catalogo.ts'
 import { calcularAumento, esBasePromo, esPromoAumento, esTipoPromo, type BasePromo, type TipoPromo } from './promociones.ts'
 import { cuotaATexto } from './cuotas.ts'
@@ -42,7 +66,8 @@ export type ValoresFormulario = {
   casa_id: string
   estrategia_id: string
   tipo: string
-  fecha: string // "2026-11-01T18:30" en hora de España, o ''
+  fecha: string // día de la apuesta "2026-11-01" (hora de España); '' = hoy. La hora no se pide.
+  fecha_original: string // al editar: la fecha guardada (ISO); si no se cambia el día, se conserva
   importe: string // euros: "10,50"
   cuota_total: string
   ganancia_potencial: string // retorno total en euros
@@ -151,7 +176,8 @@ export function valoresVacios(): ValoresFormulario {
     casa_id: '',
     estrategia_id: '',
     tipo: 'simple',
-    fecha: '',
+    fecha: diaEnMadridTexto(new Date()),
+    fecha_original: '',
     importe: '',
     cuota_total: '',
     ganancia_potencial: '',
@@ -243,9 +269,8 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
   const estado = texto(e.estado)
   if (!esEstadoApuesta(estado)) errores.estado = 'Elige el estado.'
 
-  const fecha = localAIso(texto(e.fecha))
-  if (texto(e.fecha).startsWith('T')) errores.fecha = 'Pon también el día de la apuesta (o quita la hora).'
-  else if (fecha === undefined) errores.fecha = 'Fecha no válida.'
+  const fecha = fechaDeLaApuesta(texto(e.fecha), texto(bruto.fecha_original) || null)
+  if (fecha === undefined) errores.fecha = 'Día no válido.'
 
   const importe = textoACentimos(texto(e.importe))
   if (importe == null) errores.importe = 'Escribe el importe apostado.'

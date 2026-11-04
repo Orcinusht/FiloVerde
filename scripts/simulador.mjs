@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 // Simulador LOCAL de Supabase (Auth + base de datos + Storage) y de la API de Claude,
 // para probar la app entera sin internet y sin tocar los datos reales.
 //
@@ -369,7 +370,7 @@ const sel = (evento, pronostico, cuota, extra = {}) => ({
 })
 const apuesta = (extra) => ({
   casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
-  estado: null, importe_cobrado: null, selecciones: [], dudosos: [],
+  estado: null, importe_cobrado: null, selecciones: [], dudosos: [], incompleta: false,
   promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null, ...extra,
 })
 const con = (...apuestas) => ({ hay_apuestas: true, motivo: null, apuestas })
@@ -458,7 +459,48 @@ APUESTAS.hora_rara = apuesta({
   casa: null, importe: 4, cuota_total: '1.70', ganancia_potencial: 6.8, fecha: '2026-11-01T09:07',
   selecciones: [sel('Alavés - Osasuna', 'Alavés', '1.70', { evento_hora: '14:32' })],
 })
+// Capturas reales de bet365 (casos de prueba de la v6): apuestas cortadas arriba y abajo.
+const cortada = (extra = {}) => apuesta({ casa: 'Bet365', importe: null, cuota_total: null, ganancia_potencial: null, incompleta: true, selecciones: [], ...extra })
+const selJugador = (pronostico, cuota, mercado, extra = {}) => ({
+  evento: null, liga: null, deporte: 'Fútbol', mercado, pronostico, cuota, estado: null, evento_fecha_texto: null, sustituto: null, ...extra,
+})
+APUESTAS.gueye = apuesta({
+  casa: 'Bet365', importe: 10, cuota_total: '1.57', ganancia_potencial: 15.72, estado: 'ganada', importe_cobrado: 15.72,
+  selecciones: [selJugador('Pape Gueye - Más de 0.5', '1.57', 'Jugador - Remates', { evento: 'Villarreal - PSG', estado: 'ganada' })],
+})
+APUESTAS.yilmaz = apuesta({
+  casa: 'Bet365', importe: 10, cuota_total: '1.83', ganancia_potencial: 18.3, estado: 'perdida', importe_cobrado: 0,
+  selecciones: [selJugador('Baris Yilmaz - Más de 0.5', '1.83', 'Jugador - Remates a puerta', { evento: 'Galatasaray SK - VfB Stuttgart', estado: 'perdida', sustituto: 'Rafael Leao' })],
+})
+APUESTAS.osimhen = apuesta({
+  casa: 'Bet365', importe: 10, cuota_total: '2.20', ganancia_potencial: null, estado: 'perdida', importe_cobrado: 0,
+  promo_tipo: 'superaumento', promo_cuota_original: '1.66',
+  selecciones: [selJugador('Victor Osimhen', '2.20', 'Anotará en cualquier momento', { estado: 'perdida' })],
+})
+APUESTAS.granada = apuesta({
+  casa: 'Bet365', importe: 30, cuota_total: '1.72', ganancia_potencial: 51.81,
+  selecciones: [selJugador('Granada', '1.72', 'Resultado final', { evento: 'Granada - Tenerife', evento_fecha_texto: 'Dom 8 nov / 17:00' })],
+})
+APUESTAS.fechas = apuesta({
+  casa: null, tipo: 'combinada', importe: 2, cuota_total: '20.00', ganancia_potencial: 40,
+  selecciones: [
+    selJugador('Local', '1.50', '1X2', { evento: 'Fecha - Hoy', evento_fecha_texto: 'Hoy 21:00' }),
+    selJugador('Local', '1.60', '1X2', { evento: 'Fecha - Mañana', evento_fecha_texto: 'Mañana 18:30' }),
+    selJugador('Local', '1.70', '1X2', { evento: 'Fecha - Numérica', evento_fecha_texto: '08/11 21:00' }),
+    selJugador('Local', '1.80', '1X2', { evento: 'Fecha - 12 h', evento_fecha_texto: 'Sáb 15 nov, 9:00 PM' }),
+    selJugador('Local', '1.90', '1X2', { evento: 'Fecha - Solo hora', evento_fecha_texto: '21:00' }),
+  ],
+})
 const RESPUESTAS = {
+  bet365_1: con(cortada(), APUESTAS.gueye, cortada({ tipo: 'mismo_partido', importe: 4.89, selecciones: [selJugador('Resultado final: Inter de', null, 'Crear apuesta')] })),
+  bet365_2: con(
+    cortada(),
+    cortada({ tipo: 'mismo_partido', importe: 15, selecciones: [selJugador('Villa…', null, 'Crear apuesta')] }),
+    APUESTAS.yilmaz,
+    APUESTAS.osimhen,
+  ),
+  bet365_3: con(APUESTAS.granada),
+  fechas: con(APUESTAS.fechas),
   sup_original: con(APUESTAS.sup_original),
   sup_aumento: con(APUESTAS.sup_aumento),
   sup_nada: con(APUESTAS.sup_nada),
@@ -481,6 +523,16 @@ const RESPUESTAS = {
   dos_iguales: con(APUESTAS.unica, APUESTAS.unica),
   dos_apuestas: con(APUESTAS.simple, apuesta({ ...APUESTAS.resuelta, casa: 'Bet365' })),
   no_apuesta: { hay_apuestas: false, motivo: 'Es una foto de un perro, no un resguardo de apuesta.', apuestas: [] },
+}
+// v6: la IA copia la fecha del evento como texto. Las respuestas de prueba antiguas (con
+// evento_fecha / evento_hora) se convierten al texto equivalente.
+for (const r of Object.values(RESPUESTAS)) {
+  for (const a of r.apuestas ?? []) {
+    a.incompleta ??= false
+    a.selecciones = a.selecciones.map(({ evento_fecha, evento_hora, ...s }) =>
+      'evento_fecha_texto' in s ? s : { ...s, evento_fecha_texto: [evento_fecha, evento_fecha ? evento_hora : null].filter(Boolean).join(' ') || null },
+    )
+  }
 }
 let cola = []
 let cacheCaliente = 0
@@ -552,6 +604,9 @@ createServer(async (req, res) => {
       t: Date.now(),
       instruccionSustituto: sistema.includes('NUNCA pongas al sustituto en "pronostico"'),
       cacheSistema: conCache,
+      // Huella de la parte cacheada (instrucciones + catálogo): si cambia entre lecturas, la caché se rompe.
+      prefijo: createHash('sha1').update(sistema + JSON.stringify(contenido.find((c) => c.type === 'text' && c.text.startsWith('<catalogo>'))?.text ?? '')).digest('hex').slice(0, 12),
+      textoPeticion: sistema + contenido.filter((c) => c.type === 'text').map((c) => c.text).join(' '),
       orden: contenido.map((c) => (c.type === 'image' ? 'imagen' : c.text.startsWith('<catalogo>') ? 'catalogo' : 'texto')).join(','),
       cacheCatalogo: !!contenido.find((c) => c.type === 'text' && c.text.startsWith('<catalogo>'))?.cache_control,
       reintentosSdk: req.headers['x-stainless-retry-count'] ?? null,

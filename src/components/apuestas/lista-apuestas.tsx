@@ -138,7 +138,7 @@ export async function ListaApuestas({ searchParams }: { searchParams: Busqueda }
                     </p>
                   )}
                   <p className="truncate text-sm text-muted">{a.primer_evento ?? '—'}</p>
-                  <p className="text-xs text-muted">{formatoFecha(a.fecha)}</p>
+                  <p className="text-xs text-muted">{formatoFecha(a.fecha, { conHora: false })}</p>
                   {/* Si no cabe, pasa a dos líneas: los números nunca se cortan. */}
                   <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                     <span className="shrink-0 font-semibold">{formatoImporte(a.importe, a.divisa)}</span>

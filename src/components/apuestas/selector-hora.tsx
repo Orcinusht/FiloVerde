@@ -67,15 +67,3 @@ export function SelectorHora({
     </div>
   )
 }
-
-// Fecha de la apuesta en el formulario: "YYYY-MM-DDTHH:MM", solo el día, solo la hora ("THH:MM",
-// a falta del día) o ''.
-export function partirFecha(f: string): { dia: string; hora: string } {
-  const [dia = '', hora = ''] = f.split('T')
-  return { dia, hora }
-}
-export function unirFecha(dia: string, hora: string): string {
-  if (dia && hora) return `${dia}T${hora}`
-  if (hora) return `T${hora}`
-  return dia
-}

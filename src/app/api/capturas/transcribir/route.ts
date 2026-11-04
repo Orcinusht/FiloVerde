@@ -4,7 +4,7 @@ import { BUCKET, detectarTipo, esRutaPropia, registrarError, usuarioActual } fro
 import { transcribirCaptura, VERSION_INSTRUCCIONES } from '@/lib/server/ia/transcribir'
 import { leerCatalogo } from '@/lib/server/catalogo'
 import { catalogoParaIA, catalogoVacio } from '@/lib/apuestas/catalogo'
-import { MAX_APUESTAS_POR_CAPTURA, propuestaARevisiones } from '@/lib/apuestas/propuesta'
+import { MAX_APUESTAS_POR_CAPTURA, revisionesDeCaptura } from '@/lib/apuestas/propuesta'
 import { MAX_INTENTOS, esTemporal } from '@/lib/apuestas/reintentos-ia'
 import { apuestasPendientes } from '@/lib/server/pendientes'
 
@@ -75,9 +75,10 @@ export async function POST(request: NextRequest) {
   })
   const r = await transcribirCaptura(bytes, tipo, catalogoParaIA(catalogo))
 
-  // Una captura = una transcripción = un coste, aunque traiga varias apuestas.
-  const revisiones = r.ok ? propuestaARevisiones(r.propuesta, catalogo) : []
-  const noEsApuesta = r.ok && revisiones.length === 0
+  // Una captura = una transcripción = un coste, aunque traiga varias apuestas. Solo cuentan las
+  // apuestas VÁLIDAS (selección legible con pronóstico); las cortadas se ignoran y se cuentan.
+  const { validas, ignoradas } = r.ok ? revisionesDeCaptura(r.propuesta, catalogo, new Date()) : { validas: [], ignoradas: 0 }
+  const noEsApuesta = r.ok && validas.length === 0
   let transcripcionId: string | null = null
   if (r.uso) {
     const propuesta = r.ok
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest) {
         tokens_salida: r.uso.tokensSalida,
         coste_usd: r.uso.costeUsd,
         duracion_ms: r.uso.duracionMs,
-        n_apuestas: r.ok ? revisiones.length : null,
+        n_apuestas: r.ok ? validas.length : null,
         version_instrucciones: VERSION_INSTRUCCIONES,
         // Lo que propuso la IA (con los campos dudosos y su motivo): para diagnosticar
         // y para retomar la revisión sin volver a pagar otra lectura.
@@ -114,10 +115,19 @@ export async function POST(request: NextRequest) {
     const motivo = (r.propuesta.motivo ?? '').trim().slice(0, 200)
     return responder(200, {
       codigo: 'no_es_apuesta',
-      error: `Esta imagen no parece una apuesta${motivo ? `: ${motivo}` : '.'} Puedes descartarla o rellenarla a mano.`,
+      error:
+        ignoradas > 0
+          ? `Solo he encontrado ${ignoradas === 1 ? 'una apuesta cortada o sin selección' : `${ignoradas} apuestas cortadas o sin selección`}. Haz la captura con la apuesta entera, o rellénala a mano.`
+          : `Esta imagen no parece una apuesta${motivo ? `: ${motivo}` : '.'} Puedes descartarla o rellenarla a mano.`,
     })
   }
-  return responder(200, { transcripcionId, revisiones })
+  return responder(200, {
+    transcripcionId,
+    revisiones: validas.map((v) => v.revision),
+    indices: validas.map((v) => v.indice),
+    total: validas.length,
+    ignoradas,
+  })
 }
 
 function responder(status: number, cuerpo: object) {

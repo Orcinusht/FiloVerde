@@ -31,6 +31,8 @@ archivo o panel ponerlas).
    **IA más fiable y jugadores sustituidos fusionados el 2026-11-04** (verificados en el móvil; sin
    migración): reintentos desde el móvil, 429 separado de la saturación, caché de Anthropic y regla
    del sustituto (instrucciones v5).
+   **Cola de revisión, elección de apuestas, día de la apuesta y fecha del evento** (rama
+   `fase-1-cola-lecturas`, 2026-11-04, sin migración; pendiente de verificar en el móvil y fusionar).
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
@@ -124,14 +126,16 @@ src/
     api/diagnostico/  comprueba la configuración de Supabase (sin mostrar claves)
     manifest.ts       datos de instalación de la PWA
   components/         piezas de interfaz reutilizables
-    apuestas/         formulario de revisión, flujo de capturas, lista, filtros, visor de captura,
-                      selector-hora.tsx (hora y minuto en dos desplegables)
+    apuestas/         formulario de revisión, flujo de capturas (registro-capturas.tsx: cola con
+                      Anterior/Siguiente y resumen), eleccion-apuestas.tsx ("¿Cuáles quieres
+                      guardar?"), lista, filtros, visor de captura, selector-hora.tsx
   lib/
     apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
                       cálculos, validación del formulario, esquema de la IA (propuesta.ts),
                     duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
                     asegurada y crédito: cálculos en céntimos), reintentos-ia.ts (errores de la
-                    IA: clasificación, cuáles se reintentan, esperas y mensajes)
+                    IA: clasificación, cuáles se reintentan, esperas y mensajes), fecha-evento.ts
+                    (traduce el texto de la fecha del evento), cola.ts (estados de la cola)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
@@ -206,7 +210,7 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   al editar; lo que mande el navegador se ignora.
 - `transcripciones.version_instrucciones`: versión de las instrucciones de la IA (vacía = 1, sin
   catálogo; 2 = con catálogo; 3 = ignora señales de directo; 4 = lee promociones; 5 = sustitutos y
-  caché). Ajustes compara el coste medio por versión. **Lecturas** = filas `ok` y `no_es_apuesta`;
+  caché; 6 = apuestas cortadas y fecha del evento como texto). Ajustes compara el coste medio por versión. **Lecturas** = filas `ok` y `no_es_apuesta`;
   las `error` (fallos que Anthropic sí cobra: rechazo, respuesta cortada, datos rotos) no cuentan
   como lectura ni entran en el coste medio: se muestran aparte ("Intentos fallidos cobrados"). Los
   intentos saturados o con límite no se cobran y no crean fila.
@@ -271,12 +275,16 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
     envía `promo_tipo` (null = sin promoción → vacía los cinco campos); si no llega (versión
     anterior), al crear queda sin promoción y al editar se conserva.
   - Lista: filtro "Con promoción" (`?promo=1`) y marcas PROMO y CRÉDITO en la tarjeta.
-- **Horas** (desde el 2026-11-04): hora del evento y hora de la apuesta con dos desplegables (hora
-  00-23 y minuto de 5 en 5; `selector-hora.tsx`), porque Safari de iPhone ignora el paso del control
-  nativo. Un minuto que no es múltiplo de 5 (leído por la IA o guardado) se muestra como una opción
-  más y **nunca se redondea solo**. La hora del evento admite "—" (sin hora) y no puede haber hora
-  sin día. La fecha de la apuesta: día con su control de siempre y hora aparte; vacía = la hora
-  exacta del guardado; con día y sin hora = 12:00; con hora y sin día, error.
+- **Hora del evento** (desde el 2026-11-04): dos desplegables (hora 00-23 y minuto de 5 en 5;
+  `selector-hora.tsx`), porque Safari de iPhone ignora el paso del control nativo. Un minuto que no
+  es múltiplo de 5 (leído por la IA o guardado) se muestra como una opción más y **nunca se redondea
+  solo**. Admite "—" (sin hora) y no puede haber hora sin día.
+- **Día de la apuesta** (cuándo se hizo; desde el 2026-11-04, v6): el formulario (revisión, a mano y
+  "Editar apuesta") pide **solo el día** (hoy por defecto). La hora NO se pide ni se muestra
+  (`fechaDeLaApuesta` en `formulario.ts`, en el servidor): día de hoy → la hora actual; otro día
+  (pasado o futuro) → 12:00 de España; al editar sin cambiar el día → se conserva lo guardado. Misma
+  columna `apuestas.fecha` (`timestamptz`), sin migración. Ninguna métrica la usa por la hora; la
+  lista ordena por `fecha` y desempata por `created_at`; duplicadas no la compara.
 - `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
   `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
@@ -311,8 +319,37 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
   (`{campo, motivo}`, motivo = `no_visible` · `borroso` · `deducido`). Solo se marca lo que no se
   ve, está borroso o se ha deducido; nunca lo que se lee bien. Copia las cuotas tal cual y el
   código las pasa a decimal. El texto de la imagen se trata como datos, nunca como instrucciones.
-- Fecha/hora del evento: solo si aparecen en la captura (nunca de memoria); si no, vacías y en
-  ámbar.
+- **Fecha/hora del evento (v6): la IA copia el texto tal cual** (`selecciones[].evento_fecha_texto`:
+  "Dom 8 nov / 17:00", "Hoy 21:00"…) y **el código lo traduce** (`lib/apuestas/fecha-evento.ts`) con
+  el día de la subida en Europe/Madrid. **La fecha de hoy NO se pasa a la IA** (así la IA no calcula,
+  el resultado es comprobable y la caché no se toca). Reglas: año escrito → sin ámbar; con día de la
+  semana y sin año → el año cercano (anterior, actual o siguiente) en que ese día cae en ese día de la
+  semana, sin ámbar (si no cuadra con ninguno: el más cercano y "deducido"); sin día de la semana ni
+  año → el año más cercano a hoy, "deducido"; "Hoy", "Mañana", "Ayer", "Pasado mañana" → "deducido"
+  (dependen de cuándo se hizo la captura); solo hora sin día → día y hora vacíos con "falta el día";
+  formato no reconocido → vacíos con "formato no reconocido"; nada → vacíos "no visible". Cubre
+  meses en español (abreviados y completos, "8 de noviembre"), "/" como separador, dd/mm(/aa), ISO,
+  24 h y 12 h (AM/PM). Las fechas completas del campo antiguo de la IA se ignoran; las lecturas
+  guardadas antes de la v6 se convierten a texto ISO y pasan por el mismo traductor.
+- **Apuestas válidas (v6):** el SERVIDOR solo admite una apuesta si tiene al menos una selección con
+  pronóstico y la IA no la marca `incompleta` (cortada en la captura); las demás se ignoran y se
+  cuentan ("He ignorado N apuestas cortadas o sin selección"). Los índices de la lectura no cambian
+  (`transcripcion_indice`). `n_apuestas` = válidas. La IA lee solo apuestas completas y no mezcla
+  datos entre apuestas.
+- **"¿Cuáles quieres guardar?" (v6):** con 2 o más apuestas válidas en una captura, antes de la
+  revisión (casa · tipo · selección · importe · estado y resultado). Marcadas por defecto las que no
+  son idénticas a una ya guardada (misma comparación que el aviso de duplicadas, con la sesión del
+  usuario); las idénticas salen sin marcar con "Ya registrada". Las no elegidas quedan como
+  `descartadas` (no vuelven a "sin revisar"). Sigue siendo una lectura por captura.
+- **Cola de revisión (v6):** "Apuesta X de N" con el estado de cada una (guardada, descartada,
+  pendiente…) y Anterior / Siguiente. Volver a una guardada la abre con lo guardado y "Guardar
+  cambios" ACTUALIZA esa apuesta (sin aviso de duplicadas); volver a una descartada → "Recuperar"
+  (sale de `descartadas`). En una cola de más de una apuesta las capturas **no se borran al guardar
+  sino al pulsar Terminar** en el resumen ("Has guardado N, descartado M", con "Revisar anteriores")
+  o al salir de la cola; con una sola apuesta, como antes (al guardar). Si se cierra la app a medias,
+  lo no revisado sigue en "Tienes N sin revisar" y las imágenes sobrantes las borra el reintento de
+  las 2 h. El estado de la cola se guarda en `sessionStorage` y solo se recupera al RECARGAR esa
+  pantalla (abrir "Nueva apuesta" empieza una cola nueva).
 - Deporte y liga de CADA selección: leídos o deducidos por equipos/jugadores/competición
   ("deducido"); si no se pueden, vacíos y "no visible". La IA recibe el catálogo del usuario
   como DATOS (bloque `<catalogo>` en el mensaje, JSON compacto, tope 4.000 caracteres) y elige
@@ -512,3 +549,10 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | Instrucciones v5: en mercados de jugador, el pronóstico es el jugador tachado; el sustituto, a las notas | La captura muestra a los dos; el usuario eligió al tachado |
 | 2026-11-04 | Modelo de reserva aparcado | Primero medir si los reintentos y la caché bastan |
 | 2026-11-04 | **IA más fiable y jugadores sustituidos fusionados en `main`** (rama `fase-1-ia-fiable`) | Verificados en el móvil; pruebas de GitHub Actions en verde; sin migración |
+| 2026-11-04 | Fecha del evento: la IA copia el texto y el código la traduce; la fecha de hoy NO va a la IA | Exacto y comprobable con pruebas; la IA no calcula; la caché no se toca. Antes casi nunca se rellenaba (1 de 93 selecciones) porque la IA no podía dar el año |
+| 2026-11-04 | Día de la semana decide el año; relativas y sin año en ámbar ("deducido"); hora sin día → "falta el día" | Nunca se inventa; lo dudoso se revisa |
+| 2026-11-04 | Apuesta válida = al menos una selección con pronóstico y no cortada, comprobado en el servidor | Las capturas de listas cortan apuestas arriba y abajo |
+| 2026-11-04 | Pantalla "¿Cuáles quieres guardar?" con 2+ válidas; ya registradas sin marcar; no elegidas = descartadas | Guardar solo lo que se quiere sin revisar una a una |
+| 2026-11-04 | Cola con Anterior/Siguiente; en colas de varias, capturas borradas al Terminar (no al guardar) | Poder volver atrás viendo la captura; lo sobrante lo recoge el borrado de las 2 h |
+| 2026-11-04 | Estado de la cola en `sessionStorage`, recuperado solo al recargar | Sobrevive a una recarga sin datos nuevos en la BD; nada importante vive solo en el móvil |
+| 2026-11-04 | Día de la apuesta sin hora: hoy = hora actual, otro día = 12:00, al editar sin cambiar el día se conserva | La hora no se usa; misma columna, sin migración |

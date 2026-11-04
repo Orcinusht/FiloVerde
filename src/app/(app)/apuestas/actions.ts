@@ -27,6 +27,8 @@ export async function guardarApuesta(entrada: {
   // De qué lectura de la IA y qué apuesta de la captura viene (si viene de una).
   transcripcionId?: string | null
   indice?: number | null
+  // En una cola de varias apuestas, la imagen se conserva hasta «Terminar» (para poder volver).
+  conservarImagen?: boolean
 }): Promise<ResultadoGuardar> {
   try {
     const supabase = await createClient()
@@ -71,7 +73,7 @@ export async function guardarApuesta(entrada: {
     revalidatePath('/apuestas')
     // Guardado OK → se borra la captura (si ya no queda ninguna apuesta suya por revisar).
     // Va después de responder; si falla, no se avisa: se reintenta más tarde.
-    if (imagen) {
+    if (imagen && entrada?.conservarImagen !== true) {
       after(async () => {
         try {
           await limpiarImagenSiNoSeUsa(await createClient(), imagen)
@@ -125,12 +127,14 @@ export async function descartarCaptura(entrada: {
   ruta?: string | null
   transcripcionId?: string | null
   indice?: number | null
+  conservarImagen?: boolean
 }): Promise<{ ok: boolean }> {
   try {
     const supabase = await createClient()
     const userId = await usuarioActual(supabase)
     if (!userId) return { ok: false }
     const { ruta, transcripcionId, indice } = entrada ?? {}
+    const conservar = entrada?.conservarImagen === true
 
     if (transcripcionId != null) {
       if (typeof transcripcionId !== 'string' || !UUID.test(transcripcionId)) return { ok: false }
@@ -139,12 +143,56 @@ export async function descartarCaptura(entrada: {
     }
     if (ruta != null) {
       if (!esRutaPropia(ruta, userId)) return { ok: false }
-      await limpiarImagenSiNoSeUsa(supabase, ruta)
+      if (!conservar) await limpiarImagenSiNoSeUsa(supabase, ruta)
     }
     revalidatePath('/apuestas')
     return { ok: true }
   } catch (e) {
     registrarError('capturas:descartar', e)
+    return { ok: false }
+  }
+}
+
+// Volver a una apuesta descartada en la cola: deja de estar descartada (vuelve a "sin revisar").
+export async function recuperarDescartada(entrada: { transcripcionId?: unknown; indice?: unknown }): Promise<{ ok: boolean }> {
+  try {
+    const supabase = await createClient()
+    if (!(await usuarioActual(supabase))) return { ok: false }
+    const { transcripcionId, indice } = entrada ?? {}
+    if (typeof transcripcionId !== 'string' || !UUID.test(transcripcionId)) return { ok: false }
+    if (!(Number.isInteger(indice) && (indice as number) >= 0 && (indice as number) < 50)) return { ok: false }
+    const { data, error } = await supabase.from('transcripciones').select('descartadas').eq('id', transcripcionId).maybeSingle()
+    if (error || !data) return { ok: false }
+    const descartadas = (data.descartadas ?? []).filter((x: number) => x !== indice)
+    const { error: e2 } = await supabase.from('transcripciones').update({ descartadas }).eq('id', transcripcionId)
+    if (e2) registrarError('transcripciones:recuperar', e2)
+    return { ok: !e2 }
+  } catch (e) {
+    registrarError('transcripciones:recuperar', e)
+    return { ok: false }
+  }
+}
+
+// Fin de una cola de varias apuestas («Terminar» o salir): se borran las capturas que ya no
+// usa nadie (las que aún tienen apuestas sin revisar se conservan). Si algo falla, el borrado
+// automático de las 2 horas lo recoge.
+export async function terminarCola(rutas: unknown): Promise<{ ok: boolean }> {
+  try {
+    const supabase = await createClient()
+    const userId = await usuarioActual(supabase)
+    if (!userId || !Array.isArray(rutas)) return { ok: false }
+    const propias = [...new Set(rutas)].filter((r): r is string => esRutaPropia(r, userId)).slice(0, 20)
+    for (const r of propias) {
+      try {
+        await limpiarImagenSiNoSeUsa(supabase, r)
+      } catch (e) {
+        registrarError('capturas:borrar-al-terminar', e)
+      }
+    }
+    revalidatePath('/apuestas')
+    return { ok: true }
+  } catch (e) {
+    registrarError('capturas:terminar-cola', e)
     return { ok: false }
   }
 }

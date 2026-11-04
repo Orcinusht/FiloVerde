@@ -29,7 +29,7 @@ import {
   calcularAumento,
   esPromoAumento,
 } from '@/lib/apuestas/promociones'
-import { SelectorHora, partirFecha, unirFecha } from './selector-hora'
+import { SelectorHora } from './selector-hora'
 import {
   CAMPOS_COMUNES,
   ajustarPorTipo,
@@ -68,7 +68,9 @@ type Props = {
   apuestaId?: string | null
   resultadoManual?: boolean
   textoGuardar?: string
-  onGuardada: (id: string) => void
+  onGuardada: (id: string, valores: ValoresFormulario) => void
+  // En una cola de varias apuestas: la imagen se borra al terminar la cola, no al guardar.
+  conservarImagen?: boolean
   onOpcionCreada?: (tipo: 'casa' | 'estrategia', o: Opcion) => void
   catalogo: Catalogo
   onCatalogoCambiado?: (c: Catalogo) => void
@@ -491,13 +493,14 @@ export function FormularioApuesta(props: Props) {
         imagen: imagen ?? null,
         transcripcionId: props.transcripcionId ?? null,
         indice: props.indice ?? null,
+        conservarImagen: props.conservarImagen === true,
       })
       if (!r.ok) {
         setErrores(r.errores ?? {})
         setErrorGeneral(r.error)
         return
       }
-      onGuardada(r.id)
+      onGuardada(r.id, aGuardar)
     })
   }
 
@@ -668,33 +671,8 @@ export function FormularioApuesta(props: Props) {
           <Entrada inputMode="decimal" placeholder={sugerirGanancia(valores)} value={valores.ganancia_potencial} onChange={(v) => cambiar('ganancia_potencial', v)} marca={dudosos.ganancia_potencial} conError={!!errores.ganancia_potencial} />
         </Campo>
 
-        <Campo
-          etiqueta="Fecha de la apuesta"
-          ayuda={
-            !valores.fecha
-              ? 'Cuándo la hiciste. Si la dejas vacía, se guarda la de ahora.'
-              : !partirFecha(valores.fecha).hora
-                ? 'Cuándo la hiciste. Sin hora, se guarda a las 12:00.'
-                : 'Cuándo la hiciste.'
-          }
-          {...p('fecha')}
-        >
-          <Entrada
-            type="date"
-            value={partirFecha(valores.fecha).dia}
-            onChange={(d) => cambiar('fecha', unirFecha(d, partirFecha(valores.fecha).hora))}
-            marca={dudosos.fecha}
-            conError={!!errores.fecha}
-          />
-        </Campo>
-        <Campo etiqueta="Hora de la apuesta">
-          <SelectorHora
-            valor={partirFecha(valores.fecha).hora}
-            onCambio={(h) => cambiar('fecha', unirFecha(partirFecha(valores.fecha).dia, h))}
-            etiquetaMinuto="Minuto de la apuesta"
-            marcado={!!dudosos.fecha}
-            conError={!!errores.fecha}
-          />
+        <Campo etiqueta="Día de la apuesta" ayuda="Cuándo la hiciste (hoy, si lo dejas vacío)." {...p('fecha')}>
+          <Entrada type="date" value={valores.fecha.slice(0, 10)} onChange={(d) => cambiar('fecha', d)} marca={dudosos.fecha} conError={!!errores.fecha} />
         </Campo>
 
         <Campo etiqueta="Estrategia (opcional)" {...p('estrategia_id')}>
@@ -1063,7 +1041,7 @@ function AvisoDuplicada({
       <p className="font-semibold">Parece que esta apuesta ya está registrada</p>
       {r && (
         <p className="text-sm">
-          {formatoFecha(r.fecha)} · {NOMBRE_ESTADO[r.estado as keyof typeof NOMBRE_ESTADO] ?? r.estado} ·{' '}
+          {formatoFecha(r.fecha, { conHora: false })} · {NOMBRE_ESTADO[r.estado as keyof typeof NOMBRE_ESTADO] ?? r.estado} ·{' '}
           {r.casa ?? 'Sin casa'} · {formatoImporte(r.importe, r.divisa)} · @ {cuotaATexto(r.cuota) || '—'}
         </p>
       )}

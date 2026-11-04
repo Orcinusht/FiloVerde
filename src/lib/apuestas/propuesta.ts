@@ -13,7 +13,7 @@ import {
   type MotivoRevision,
 } from './estados.ts'
 import { buscarDeporte, buscarLiga, esMixto, type Catalogo } from './catalogo.ts'
-import { isoALocal, localAIso, validarDia, validarHora } from './fechas.ts'
+import { isoALocal, localAIso } from './fechas.ts'
 import {
   ajustarPorTipo,
   MAX_SELECCIONES,
@@ -24,6 +24,7 @@ import {
 } from './formulario.ts'
 import { resultadoPropuesto } from './calculos.ts'
 import { TIPOS_PROMO, esPromoAumento } from './promociones.ts'
+import { resolverFechaEvento } from './fecha-evento.ts'
 
 const textoONulo = z.string().nullable()
 
@@ -35,8 +36,9 @@ export const esquemaSeleccionIA = z.object({
   pronostico: textoONulo.describe('Lo elegido, p. ej. "Real Madrid", "Más de 2.5"'),
   cuota: textoONulo.describe('Cuota de ESTA selección EXACTAMENTE como aparece ("1.85", "6/4", "+150"); null si no tiene cuota propia'),
   estado: z.enum(ESTADOS_SELECCION as [string, ...string[]]).nullable().describe('Solo si la captura muestra el resultado de la selección'),
-  evento_fecha: textoONulo.describe('Día del evento "YYYY-MM-DD" SOLO si aparece en la captura'),
-  evento_hora: textoONulo.describe('Hora de inicio "HH:MM" SOLO si aparece en la captura'),
+  evento_fecha_texto: textoONulo.describe(
+    'Día y/o hora de inicio del evento COPIADOS TAL CUAL como aparecen ("Dom 8 nov / 17:00", "Hoy 21:00", "08/11 21:00"); null si no aparecen',
+  ),
   sustituto: textoONulo.describe('Mercado de jugador: nombre del SUSTITUTO si aparece junto al jugador tachado; null si no hay'),
 })
 
@@ -63,6 +65,7 @@ export const esquemaApuestaIA = z.object({
   promo_credito: z.number().nullable().describe('Apuesta asegurada: crédito que devuelven si se pierde, si aparece escrito'),
   selecciones: z.array(esquemaSeleccionIA),
   dudosos: z.array(esquemaDudaIA).describe('SOLO los campos no visibles, borrosos o deducidos. Nunca lo que se lee con claridad'),
+  incompleta: z.boolean().describe('true si la apuesta está cortada en la captura (sin ninguna selección con su pronóstico completo)'),
 })
 
 export const esquemaPropuestaIA = z.object({
@@ -87,12 +90,20 @@ export function completarPropuestaAntigua(p: unknown): unknown {
             promo_cuota_original: null,
             promo_aumento: null,
             promo_credito: null,
+            incompleta: false,
             ...a,
             // Lecturas anteriores a la v5: sin campo "sustituto" en las selecciones.
             selecciones: Array.isArray((a as { selecciones?: unknown }).selecciones)
-              ? ((a as { selecciones: unknown[] }).selecciones).map((s) =>
-                  s && typeof s === 'object' ? { sustituto: null, ...s } : s,
-                )
+              ? ((a as { selecciones: unknown[] }).selecciones).map((s) => {
+                  if (!s || typeof s !== 'object') return s
+                  const o = s as Record<string, unknown>
+                  if ('evento_fecha_texto' in o) return { sustituto: null, ...o }
+                  // Antes de la v6 la IA daba "YYYY-MM-DD" y "HH:MM": se convierten a texto y pasan
+                  // por el mismo traductor (una fecha ISO completa no sale en ámbar).
+                  const { evento_fecha, evento_hora, ...resto } = o
+                  const texto = [evento_fecha, evento_fecha ? evento_hora : null].filter((x) => typeof x === 'string' && x).join(' ')
+                  return { sustituto: null, ...resto, evento_fecha_texto: texto || null }
+                })
               : (a as { selecciones?: unknown }).selecciones,
           }
         : a,
@@ -114,6 +125,7 @@ export type ApuestaPendiente = {
   transcripcionId: string
   indice: number
   total: number
+  posicion?: number // 1.ª, 2.ª… entre las apuestas válidas de la captura
   ruta: string | null
   revision: Revision
 }
@@ -134,12 +146,22 @@ function normalizarDudoso(clave: string): string | null {
   if (c === 'casa') return 'casa_id'
   if (c === 'importe_cobrado') return 'resultado_economico'
   if (CAMPOS_VALIDOS.has(c)) return c
-  const m = /^selecciones\.(\d+)\.(\w+)$/.exec(c)
+  const m = /^selecciones\.(\d+)\.(\w+)$/.exec(c.replace(/\.evento_fecha_texto$/, '.evento_fecha'))
   if (m && CAMPOS_SELECCION.has(m[2]) && Number(m[1]) < MAX_SELECCIONES) return c
   return null
 }
 
-export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo): Revision {
+const MOTIVO_FECHA = { deducido: 'deducido', falta_dia: 'falta_dia', no_entendida: 'no_entendida', no_visible: 'no_visible' } as const
+
+// ¿Es una apuesta de verdad? Al menos una selección legible con su pronóstico y no cortada.
+// Lo comprueba el SERVIDOR (no se fía solo de la IA).
+export function esApuestaValida(a: ApuestaIA): boolean {
+  if (a.incompleta === true) return false
+  return (a.selecciones ?? []).some((s) => (s.pronostico ?? '').trim().length >= 1)
+}
+
+// `referencia` = cuándo se subió la captura (para "Hoy", "Mañana" y las fechas sin año).
+export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo, referencia: Date = new Date()): Revision {
   const valores = valoresVacios()
   const dudosos: Record<string, MotivoRevision> = {}
   const marcar = (campo: string, motivo: MotivoRevision) => {
@@ -157,7 +179,7 @@ export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo): Revision {
   // Fecha de la apuesta: solo si es válida; si no, vacía (= ahora).
   if (p.fecha) {
     const iso = localAIso(p.fecha)
-    if (iso) valores.fecha = isoALocal(iso)
+    if (iso) valores.fecha = isoALocal(iso).slice(0, 10) // solo el día (la hora la pone el servidor)
     else marcar('fecha', 'borroso')
   }
 
@@ -176,11 +198,12 @@ export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo): Revision {
     ? sels.map((s, i) => {
         const cuota = cuotaADecimal(s.cuota)
         if (s.cuota && cuota === undefined) marcar(`selecciones.${i}.cuota`, 'borroso')
-        const dia = validarDia(s.evento_fecha ?? '')
-        const hora = dia ? validarHora(s.evento_hora ?? '') : null
-        // Fecha y hora del evento: si no aparecen, vacías y a revisar.
-        if (!dia) marcar(`selecciones.${i}.evento_fecha`, s.evento_fecha ? 'borroso' : 'no_visible')
-        if (!hora) marcar(`selecciones.${i}.evento_hora`, s.evento_hora ? 'borroso' : 'no_visible')
+        // Fecha y hora del evento: la IA copia el texto y el código lo traduce (nunca la IA).
+        const f = resolverFechaEvento(s.evento_fecha_texto, referencia)
+        const dia = f.dia
+        const hora = f.hora
+        if (f.motivoDia) marcar(`selecciones.${i}.evento_fecha`, MOTIVO_FECHA[f.motivoDia])
+        if (f.motivoHora) marcar(`selecciones.${i}.evento_hora`, MOTIVO_FECHA[f.motivoHora])
         return {
           evento: recortar(s.evento),
           liga: recortar(s.liga),
@@ -265,7 +288,19 @@ export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo): Revision {
   return { valores: ajustarPorTipo(valores), dudosos, casaDetectada: recortar(p.casa) || null }
 }
 
-export function propuestaARevisiones(p: PropuestaIA, catalogo?: Catalogo): Revision[] {
-  if (!p.hay_apuestas) return []
-  return p.apuestas.slice(0, MAX_APUESTAS_POR_CAPTURA).map((a) => apuestaARevision(a, catalogo))
+export type RevisionesCaptura = {
+  validas: { indice: number; revision: Revision }[] // indice = posición en la lectura (no cambia)
+  ignoradas: number // apuestas cortadas o sin selección con pronóstico
+}
+
+export function revisionesDeCaptura(p: PropuestaIA, catalogo?: Catalogo, referencia: Date = new Date()): RevisionesCaptura {
+  if (!p.hay_apuestas) return { validas: [], ignoradas: 0 }
+  const apuestas = p.apuestas.slice(0, MAX_APUESTAS_POR_CAPTURA)
+  const validas = apuestas.flatMap((a, indice) => (esApuestaValida(a) ? [{ indice, revision: apuestaARevision(a, catalogo, referencia) }] : []))
+  return { validas, ignoradas: apuestas.length - validas.length }
+}
+
+// Solo las válidas, en orden (compatibilidad).
+export function propuestaARevisiones(p: PropuestaIA, catalogo?: Catalogo, referencia: Date = new Date()): Revision[] {
+  return revisionesDeCaptura(p, catalogo, referencia).validas.map((v) => v.revision)
 }

@@ -8,7 +8,7 @@ import { cuotaADecimal, cuotaATexto } from '../src/lib/apuestas/cuotas.ts'
 import { centimosATexto, textoACentimos } from '../src/lib/apuestas/dinero.ts'
 import { isoALocal, localAIso } from '../src/lib/apuestas/fechas.ts'
 import { avisosCoherencia, resultadoPropuesto } from '../src/lib/apuestas/calculos.ts'
-import { ajustarPorTipo, seleccionVacia, validarFormulario, valoresVacios } from '../src/lib/apuestas/formulario.ts'
+import { ajustarPorTipo, fechaDeLaApuesta, seleccionVacia, validarFormulario, valoresVacios } from '../src/lib/apuestas/formulario.ts'
 import { esquemaPropuestaIA, propuestaARevisiones } from '../src/lib/apuestas/propuesta.ts'
 import { validarDia, validarHora } from '../src/lib/apuestas/fechas.ts'
 
@@ -153,9 +153,9 @@ test('ajustarPorTipo: la simple guarda la cuota total en su selección', () => {
 
 const apuestaIA = (extra = {}) => ({
   casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
-  estado: null, importe_cobrado: null, dudosos: [],
+  estado: null, importe_cobrado: null, dudosos: [], incompleta: false,
   promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null,
-  selecciones: [{ evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1.85', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00', sustituto: null }],
+  selecciones: [{ evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1.85', estado: null, evento_fecha_texto: '2026-11-08 21:00', sustituto: null }],
   ...extra,
 })
 
@@ -167,8 +167,8 @@ test('IA: varias apuestas en una captura, cuotas convertidas, dudosos con motivo
       apuestaIA({
         tipo: 'combinada', importe: 5, cuota_total: '+300', ganancia_potencial: 20, estado: 'ganada', importe_cobrado: 20,
         selecciones: [
-          { evento: 'A - B', liga: null, deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1/1', estado: 'ganada', evento_fecha: null, evento_hora: null , sustituto: null },
-          { evento: 'C - D', liga: 'Serie A', deporte: 'Fútbol', mercado: '1X2', pronostico: 'C', cuota: '???', estado: 'ganada', evento_fecha: '2026-10-31', evento_hora: null , sustituto: null },
+          { evento: 'A - B', liga: null, deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1/1', estado: 'ganada', evento_fecha_texto: null , sustituto: null },
+          { evento: 'C - D', liga: 'Serie A', deporte: 'Fútbol', mercado: '1X2', pronostico: 'C', cuota: '???', estado: 'ganada', evento_fecha_texto: '2026-10-31' , sustituto: null },
         ],
         dudosos: [{ campo: 'selecciones[1].liga', motivo: 'deducido' }, { campo: 'cualquier cosa', motivo: 'borroso' }],
       }),
@@ -199,8 +199,8 @@ test('IA: mismo partido sin cuotas por selección', () => {
     apuestas: [apuestaIA({
       tipo: 'mismo_partido', cuota_total: '5.50', importe: 10, ganancia_potencial: 55,
       selecciones: [
-        { evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: 'Resultado', pronostico: 'A', cuota: null, estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
-        { evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: 'Más/menos goles', pronostico: 'Más de 2.5', cuota: null, estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
+        { evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: 'Resultado', pronostico: 'A', cuota: null, estado: null, evento_fecha_texto: '2026-11-08 21:00' , sustituto: null },
+        { evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: 'Más/menos goles', pronostico: 'Más de 2.5', cuota: null, estado: null, evento_fecha_texto: '2026-11-08 21:00' , sustituto: null },
       ],
     })],
   })
@@ -265,10 +265,10 @@ test('IA + catálogo: nombre del catálogo, "nueva", "no visible" y "deducido"',
       apuestaIA({
         tipo: 'combinada', cuota_total: '3.00',
         selecciones: [
-          { evento: 'Alcaraz - Sinner', liga: 'atp', deporte: 'tenis', mercado: 'Ganador', pronostico: 'Alcaraz', cuota: '1.5', estado: null, evento_fecha: '2026-11-08', evento_hora: '15:00' , sustituto: null },
-          { evento: 'Betis - Sevilla', liga: 'Liga Portugal', deporte: 'Fútbol', mercado: '1X2', pronostico: 'Betis', cuota: '2', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
-          { evento: 'A - B', liga: null, deporte: 'Pádel', mercado: 'Ganador', pronostico: 'A', cuota: '1', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
-          { evento: 'C - D', liga: 'WTA', deporte: null, mercado: 'Ganador', pronostico: 'C', cuota: '1', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
+          { evento: 'Alcaraz - Sinner', liga: 'atp', deporte: 'tenis', mercado: 'Ganador', pronostico: 'Alcaraz', cuota: '1.5', estado: null, evento_fecha_texto: '2026-11-08 15:00' , sustituto: null },
+          { evento: 'Betis - Sevilla', liga: 'Liga Portugal', deporte: 'Fútbol', mercado: '1X2', pronostico: 'Betis', cuota: '2', estado: null, evento_fecha_texto: '2026-11-08 21:00' , sustituto: null },
+          { evento: 'A - B', liga: null, deporte: 'Pádel', mercado: 'Ganador', pronostico: 'A', cuota: '1', estado: null, evento_fecha_texto: '2026-11-08 21:00' , sustituto: null },
+          { evento: 'C - D', liga: 'WTA', deporte: null, mercado: 'Ganador', pronostico: 'C', cuota: '1', estado: null, evento_fecha_texto: '2026-11-08 21:00' , sustituto: null },
         ],
         dudosos: [{ campo: 'selecciones.0.deporte', motivo: 'deducido' }],
       }),
@@ -588,11 +588,20 @@ test('Retomar una lectura antigua (sin campos de promoción) sigue funcionando',
   assert.equal(r.success, true)
 })
 
-test('Hora de la apuesta: el minuto exacto se conserva; sin día no vale', () => {
-  assert.equal(isoALocal(localAIso('2026-11-04T15:24')), '2026-11-04T15:24')
-  const v = validarFormulario({ ...valoresVacios(), importe: '1', cuota_total: '2', selecciones: [sel()], fecha: 'T15:24' })
-  assert.equal(v.ok, false)
-  if (!v.ok) assert.match(v.errores.fecha, /día/)
+test('Hora de la apuesta: no se pide; hoy = hora actual, otro día = 12:00, al editar se conserva', () => {
+  const ahora = new Date('2026-11-04T15:24:37Z') // 16:24 en Madrid
+  assert.equal(fechaDeLaApuesta('2026-11-04', null, ahora), ahora.toISOString(), 'hoy → la hora actual')
+  assert.equal(fechaDeLaApuesta('', null, ahora), ahora.toISOString(), 'vacío → hoy, ahora')
+  assert.equal(fechaDeLaApuesta('2026-10-30', null, ahora), '2026-10-30T11:00:00.000Z', 'otro día → 12:00 de España (UTC+1)')
+  assert.equal(fechaDeLaApuesta('2026-08-15', null, ahora), '2026-08-15T10:00:00.000Z', 'en verano 12:00 = 10:00 UTC')
+  assert.equal(fechaDeLaApuesta('2026-12-01', null, ahora), '2026-12-01T11:00:00.000Z', 'futuro: no se bloquea')
+  const original = '2026-10-30T19:47:12.000Z'
+  assert.equal(fechaDeLaApuesta('2026-10-30', original, ahora), original, 'mismo día al editar → se conserva la hora guardada')
+  assert.equal(fechaDeLaApuesta('2026-10-31', original, ahora), '2026-10-31T11:00:00.000Z', 'cambia el día → 12:00')
+  assert.equal(fechaDeLaApuesta('31/10', null, ahora), undefined, 'formato no válido')
+  // Cerca de medianoche: las 00:30 en Madrid ya son el día siguiente.
+  const noche = new Date('2026-11-04T23:30:00Z')
+  assert.equal(fechaDeLaApuesta('2026-11-05', null, noche), noche.toISOString())
   assert.equal(validarHora('14:32'), '14:32')
 })
 
@@ -640,7 +649,7 @@ test('IA: 3 intentos en total, esperas de ~2 y ~5 s con azar y respetando retry-
 })
 
 test('IA v5: el sustituto va a las notas (el pronóstico es el jugador elegido)', () => {
-  const sel = { evento: 'Galatasaray SK - VfB Stuttgart', liga: null, deporte: 'Fútbol', mercado: 'Jugador - Remates a puerta', pronostico: 'Baris Yilmaz - Más de 1,5', cuota: '6.00', estado: 'perdida', evento_fecha: null, evento_hora: null }
+  const sel = { evento: 'Galatasaray SK - VfB Stuttgart', liga: null, deporte: 'Fútbol', mercado: 'Jugador - Remates a puerta', pronostico: 'Baris Yilmaz - Más de 1,5', cuota: '6.00', estado: 'perdida', evento_fecha_texto: null }
   const p = esquemaPropuestaIA.parse({
     hay_apuestas: true,
     motivo: null,
@@ -660,4 +669,100 @@ test('IA v5: el sustituto va a las notas (el pronóstico es el jugador elegido)'
   void sustituto
   const antigua = { hay_apuestas: true, motivo: null, apuestas: [{ ...apuestaIA(), selecciones: [vieja] }] }
   assert.equal(esquemaPropuestaIA.safeParse(completarPropuestaAntigua(antigua)).success, true)
+})
+
+// ---------- v6: fecha del evento, apuestas válidas y cola ----------
+import { resolverFechaEvento } from '../src/lib/apuestas/fecha-evento.ts'
+import { esApuestaValida, revisionesDeCaptura } from '../src/lib/apuestas/propuesta.ts'
+import { estadoCola, marcadasPorDefecto, resumenCola, siguientePendiente } from '../src/lib/apuestas/cola.ts'
+
+const SUBIDA = new Date('2026-11-04T15:00:00Z') // miércoles 4 nov 2026, 16:00 en Madrid
+
+test('Fecha del evento: textos reales de las capturas', () => {
+  assert.deepEqual(resolverFechaEvento('Dom 8 nov / 17:00', SUBIDA), { dia: '2026-11-08', hora: '17:00' }, 'domingo 8 nov = 2026, sin ámbar')
+  assert.deepEqual(resolverFechaEvento('Hoy 21:00', SUBIDA), { dia: '2026-11-04', hora: '21:00', motivoDia: 'deducido', motivoHora: 'deducido' })
+  assert.deepEqual(resolverFechaEvento('Mañana 18:30', SUBIDA), { dia: '2026-11-05', hora: '18:30', motivoDia: 'deducido', motivoHora: 'deducido' })
+  assert.deepEqual(resolverFechaEvento('08/11 21:00', SUBIDA), { dia: '2026-11-08', hora: '21:00', motivoDia: 'deducido', motivoHora: 'deducido' }, 'sin año ni día de la semana: deducida')
+  // 15 nov 2026 es domingo; el sábado 15 nov más cercano es de 2025 → ese, sin ámbar.
+  assert.deepEqual(resolverFechaEvento('Sáb 15 nov, 9:00 PM', SUBIDA), { dia: '2025-11-15', hora: '21:00' })
+  assert.deepEqual(resolverFechaEvento('21:00', SUBIDA), { dia: null, hora: null, motivoDia: 'falta_dia', motivoHora: 'falta_dia' }, 'hora suelta sin día')
+})
+
+test('Fecha del evento: año escrito, meses en español, 12 h, medianoche y formatos raros', () => {
+  assert.deepEqual(resolverFechaEvento('8 de noviembre de 2026', SUBIDA), { dia: '2026-11-08', hora: null, motivoHora: 'no_visible' })
+  assert.deepEqual(resolverFechaEvento('08/11/26 12:30 AM', SUBIDA), { dia: '2026-11-08', hora: '00:30' })
+  assert.equal(resolverFechaEvento('Sáb 7 nov 12:00 PM', SUBIDA).hora, '12:00')
+  for (const [t, m] of [['3 ene', 1], ['3 feb', 2], ['3 abr', 4], ['3 may', 5], ['3 jun', 6], ['3 jul', 7], ['3 ago', 8], ['3 sep', 9], ['3 sept', 9], ['3 oct', 10], ['3 dic', 12], ['3 marzo', 3]] as const) {
+    assert.equal(Number(resolverFechaEvento(t, SUBIDA).dia?.slice(5, 7)), m, t)
+  }
+  assert.equal(resolverFechaEvento('Mar 10 nov 20:45', SUBIDA).dia, '2026-11-10', '«Mar» al principio es martes')
+  assert.equal(resolverFechaEvento('Dom 8 nov', SUBIDA).motivoDia, undefined)
+  assert.equal(resolverFechaEvento('Mié 8 nov', new Date('2026-11-04T12:00Z')).motivoDia, 'deducido', 'el día de la semana no cuadra con ningún año cercano')
+  // "Hoy" a las 00:30 de Madrid (23:30 UTC del día anterior) ya es el día siguiente.
+  assert.equal(resolverFechaEvento('Hoy 21:00', new Date('2026-11-04T23:30:00Z')).dia, '2026-11-05')
+  assert.deepEqual(resolverFechaEvento('Próximamente', SUBIDA), { dia: null, hora: null, motivoDia: 'no_entendida', motivoHora: 'no_entendida' })
+  assert.deepEqual(resolverFechaEvento(null, SUBIDA), { dia: null, hora: null, motivoDia: 'no_visible', motivoHora: 'no_visible' })
+  assert.deepEqual(resolverFechaEvento('2026-11-08 21:00', SUBIDA), { dia: '2026-11-08', hora: '21:00' }, 'lecturas antiguas (ISO)')
+})
+
+test('IA v6: solo cuentan las apuestas con selección legible; los índices no cambian', () => {
+  const s0 = { evento: 'Villarreal - PSG', liga: null, deporte: 'Fútbol', mercado: 'Jugador - Remates', pronostico: 'Pape Gueye - Más de 0.5', cuota: '1.57', estado: 'ganada', evento_fecha_texto: null, sustituto: null }
+  const p = esquemaPropuestaIA.parse({
+    hay_apuestas: true,
+    motivo: null,
+    apuestas: [
+      apuestaIA({ incompleta: true, selecciones: [] }), // cortada arriba
+      apuestaIA({ importe: 10, cuota_total: '1.57', selecciones: [s0] }),
+      apuestaIA({ selecciones: [{ ...s0, pronostico: '' }] }), // sin pronóstico
+      apuestaIA({ incompleta: true, selecciones: [{ ...s0, pronostico: 'Resultado final: Inter de…' }] }), // texto cortado
+    ],
+  })
+  const r = revisionesDeCaptura(p, undefined, SUBIDA)
+  assert.equal(r.validas.length, 1)
+  assert.equal(r.validas[0].indice, 1, 'conserva su posición en la lectura')
+  assert.equal(r.ignoradas, 3)
+  assert.equal(esApuestaValida(p.apuestas[1]), true)
+  // La fecha completa por el campo antiguo se ignora: solo vale el texto traducido.
+  const conCampoViejo = esquemaPropuestaIA.parse({
+    hay_apuestas: true,
+    motivo: null,
+    apuestas: [apuestaIA({ selecciones: [{ ...s0, evento_fecha: '2030-01-01', evento_hora: '10:00', evento_fecha_texto: 'Dom 8 nov / 17:00' }] })],
+  })
+  const v = revisionesDeCaptura(conCampoViejo, undefined, SUBIDA).validas[0].revision
+  assert.deepEqual([v.valores.selecciones[0].evento_fecha, v.valores.selecciones[0].evento_hora], ['2026-11-08', '17:00'])
+  assert.equal(v.dudosos['selecciones.0.evento_fecha'], undefined, 'absoluta y clara: sin ámbar')
+  // Hoy/Mañana: en ámbar como deducida.
+  const rel = revisionesDeCaptura(
+    esquemaPropuestaIA.parse({ hay_apuestas: true, motivo: null, apuestas: [apuestaIA({ selecciones: [{ ...s0, evento_fecha_texto: 'Mañana 18:30' }] })] }),
+    undefined,
+    SUBIDA,
+  ).validas[0].revision
+  assert.equal(rel.dudosos['selecciones.0.evento_fecha'], 'deducido')
+  // Lecturas anteriores a la v6 (evento_fecha/evento_hora, sin "incompleta") se retoman igual.
+  const antigua = {
+    hay_apuestas: true,
+    motivo: null,
+    apuestas: [{ ...apuestaIA(), incompleta: undefined, selecciones: [{ evento: 'A - B', liga: null, deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1.85', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' }] }],
+  }
+  const ant = esquemaPropuestaIA.safeParse(completarPropuestaAntigua(JSON.parse(JSON.stringify(antigua))))
+  assert.ok(ant.success)
+  if (ant.success) {
+    const rv = revisionesDeCaptura(ant.data, undefined, SUBIDA).validas[0].revision
+    assert.deepEqual([rv.valores.selecciones[0].evento_fecha, rv.valores.selecciones[0].evento_hora], ['2026-11-08', '21:00'])
+  }
+})
+
+test('Cola: estados, siguiente pendiente, resumen y marcadas por defecto', () => {
+  assert.equal(estadoCola({ paso: 'lista' }), 'pendiente')
+  assert.equal(estadoCola({ paso: 'lista', estado: 'guardada' }), 'guardada')
+  assert.equal(estadoCola({ paso: 'leyendo' }), 'leyendo')
+  assert.equal(estadoCola({ paso: 'eligiendo' }), 'eligiendo')
+  assert.equal(estadoCola({ paso: 'error' }), 'error')
+  const e = ['guardada', 'pendiente', 'descartada', 'pendiente'] as const
+  assert.equal(siguientePendiente([...e], 1), 3)
+  assert.equal(siguientePendiente([...e], 3), 1, 'si no hay después, vuelve a la primera sin terminar')
+  assert.equal(siguientePendiente([...e], 3, { soloDespues: true }), null)
+  assert.equal(siguientePendiente(['guardada', 'descartada'], 1), null, 'todo hecho → resumen')
+  assert.deepEqual(resumenCola([...e]), { guardadas: 1, descartadas: 1, pendientes: 2 })
+  assert.deepEqual(marcadasPorDefecto([{ indice: 1, yaRegistrada: false }, { indice: 4, yaRegistrada: true }, { indice: 5, yaRegistrada: false }]), [1, 5])
 })

@@ -63,6 +63,7 @@ const NOMBRE_VERSION: Record<number, string> = {
   3: 'ignora señales de directo',
   4: 'lee promociones',
   5: 'sustitutos y caché',
+  6: 'apuestas cortadas y fechas',
 }
 
 // Coste medio antes y después de cambiar las instrucciones de la IA (p. ej. con el catálogo).

@@ -46,7 +46,9 @@ async function Detalle({ params }: { params: PageProps<'/apuestas/[id]'>['params
     casa_id: apuesta.casa_id ?? '',
     estrategia_id: apuesta.estrategia_id ?? '',
     tipo: apuesta.tipo,
-    fecha: isoALocal(apuesta.fecha),
+    // Solo el día; la hora guardada se conserva si no se cambia el día.
+    fecha: isoALocal(apuesta.fecha).slice(0, 10),
+    fecha_original: apuesta.fecha,
     importe: centimosATexto(apuesta.importe),
     cuota_total: cuotaATexto(apuesta.cuota_total),
     ganancia_potencial: centimosATexto(apuesta.ganancia_potencial),
