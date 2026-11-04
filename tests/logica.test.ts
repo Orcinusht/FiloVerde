@@ -142,7 +142,7 @@ test('fecha y hora del evento', () => {
   assert.equal(validarHora('9:05'), '09:05')
   assert.equal(validarHora('21:00:00'), '21:00')
   assert.equal(validarHora('25:00'), undefined)
-  const r = validarFormulario({ ...valoresVacios(), importe: '1', cuota_total: '2', selecciones: [sel({ evento_hora: '20:00' })] })
+  const r = validarFormulario({ ...valoresVacios(), importe: '1', cuota_total: '2', selecciones: [sel({ evento_hora: '20:00' , sustituto: null })] })
   assert.ok(!r.ok && r.errores['selecciones.0.evento_hora'], 'hora sin día')
 })
 
@@ -155,7 +155,7 @@ const apuestaIA = (extra = {}) => ({
   casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
   estado: null, importe_cobrado: null, dudosos: [],
   promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null,
-  selecciones: [{ evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1.85', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' }],
+  selecciones: [{ evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1.85', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00', sustituto: null }],
   ...extra,
 })
 
@@ -167,8 +167,8 @@ test('IA: varias apuestas en una captura, cuotas convertidas, dudosos con motivo
       apuestaIA({
         tipo: 'combinada', importe: 5, cuota_total: '+300', ganancia_potencial: 20, estado: 'ganada', importe_cobrado: 20,
         selecciones: [
-          { evento: 'A - B', liga: null, deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1/1', estado: 'ganada', evento_fecha: null, evento_hora: null },
-          { evento: 'C - D', liga: 'Serie A', deporte: 'Fútbol', mercado: '1X2', pronostico: 'C', cuota: '???', estado: 'ganada', evento_fecha: '2026-10-31', evento_hora: null },
+          { evento: 'A - B', liga: null, deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1/1', estado: 'ganada', evento_fecha: null, evento_hora: null , sustituto: null },
+          { evento: 'C - D', liga: 'Serie A', deporte: 'Fútbol', mercado: '1X2', pronostico: 'C', cuota: '???', estado: 'ganada', evento_fecha: '2026-10-31', evento_hora: null , sustituto: null },
         ],
         dudosos: [{ campo: 'selecciones[1].liga', motivo: 'deducido' }, { campo: 'cualquier cosa', motivo: 'borroso' }],
       }),
@@ -199,8 +199,8 @@ test('IA: mismo partido sin cuotas por selección', () => {
     apuestas: [apuestaIA({
       tipo: 'mismo_partido', cuota_total: '5.50', importe: 10, ganancia_potencial: 55,
       selecciones: [
-        { evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: 'Resultado', pronostico: 'A', cuota: null, estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' },
-        { evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: 'Más/menos goles', pronostico: 'Más de 2.5', cuota: null, estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' },
+        { evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: 'Resultado', pronostico: 'A', cuota: null, estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
+        { evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: 'Más/menos goles', pronostico: 'Más de 2.5', cuota: null, estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
       ],
     })],
   })
@@ -265,10 +265,10 @@ test('IA + catálogo: nombre del catálogo, "nueva", "no visible" y "deducido"',
       apuestaIA({
         tipo: 'combinada', cuota_total: '3.00',
         selecciones: [
-          { evento: 'Alcaraz - Sinner', liga: 'atp', deporte: 'tenis', mercado: 'Ganador', pronostico: 'Alcaraz', cuota: '1.5', estado: null, evento_fecha: '2026-11-08', evento_hora: '15:00' },
-          { evento: 'Betis - Sevilla', liga: 'Liga Portugal', deporte: 'Fútbol', mercado: '1X2', pronostico: 'Betis', cuota: '2', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' },
-          { evento: 'A - B', liga: null, deporte: 'Pádel', mercado: 'Ganador', pronostico: 'A', cuota: '1', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' },
-          { evento: 'C - D', liga: 'WTA', deporte: null, mercado: 'Ganador', pronostico: 'C', cuota: '1', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' },
+          { evento: 'Alcaraz - Sinner', liga: 'atp', deporte: 'tenis', mercado: 'Ganador', pronostico: 'Alcaraz', cuota: '1.5', estado: null, evento_fecha: '2026-11-08', evento_hora: '15:00' , sustituto: null },
+          { evento: 'Betis - Sevilla', liga: 'Liga Portugal', deporte: 'Fútbol', mercado: '1X2', pronostico: 'Betis', cuota: '2', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
+          { evento: 'A - B', liga: null, deporte: 'Pádel', mercado: 'Ganador', pronostico: 'A', cuota: '1', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
+          { evento: 'C - D', liga: 'WTA', deporte: null, mercado: 'Ganador', pronostico: 'C', cuota: '1', estado: null, evento_fecha: '2026-11-08', evento_hora: '21:00' , sustituto: null },
         ],
         dudosos: [{ campo: 'selecciones.0.deporte', motivo: 'deducido' }],
       }),
@@ -594,4 +594,70 @@ test('Hora de la apuesta: el minuto exacto se conserva; sin día no vale', () =>
   assert.equal(v.ok, false)
   if (!v.ok) assert.match(v.errores.fecha, /día/)
   assert.equal(validarHora('14:32'), '14:32')
+})
+
+// ---------- IA: reintentos y errores ----------
+import {
+  MAX_INTENTOS,
+  clasificarErrorApi,
+  esTemporal,
+  esperaAntesDeReintentar,
+  leerRetryAfter,
+  pausaLoteTrasLimite,
+} from '../src/lib/apuestas/reintentos-ia.ts'
+
+test('IA: clasifica los errores (saturada, límite, sin crédito, permanentes)', () => {
+  assert.equal(clasificarErrorApi({ status: 529, tipo: 'overloaded_error' }), 'saturado')
+  assert.equal(clasificarErrorApi({ status: 503 }), 'saturado')
+  assert.equal(clasificarErrorApi({ status: 429, tipo: 'rate_limit_error' }), 'limite')
+  assert.equal(clasificarErrorApi({ status: 429, codigoDetalle: 'enforced_spend_limit_reached' }), 'sin_credito')
+  assert.equal(clasificarErrorApi({ status: 400, mensaje: 'You have reached your specified API usage limits' }), 'sin_credito')
+  assert.equal(clasificarErrorApi({ status: 401 }), 'clave_invalida')
+  assert.equal(clasificarErrorApi({ status: 400, mensaje: 'Could not process image' }), 'imagen_invalida')
+  assert.equal(clasificarErrorApi({ esTimeout: true }), 'timeout')
+  assert.equal(clasificarErrorApi({ esConexion: true }), 'conexion')
+  for (const c of ['saturado', 'limite', 'timeout', 'conexion']) assert.equal(esTemporal(c), true, c)
+  for (const c of ['clave_invalida', 'sin_credito', 'imagen_invalida', 'json_invalido', 'rechazo', 'desconocido']) assert.equal(esTemporal(c), false, c)
+})
+
+test('IA: 3 intentos en total, esperas de ~2 y ~5 s con azar y respetando retry-after', () => {
+  assert.equal(MAX_INTENTOS, 3)
+  assert.equal(esperaAntesDeReintentar({ intento: 1, azar: 0.5 }), 2000)
+  assert.equal(esperaAntesDeReintentar({ intento: 1, azar: 0 }), 1500)
+  assert.equal(esperaAntesDeReintentar({ intento: 1, azar: 1 }), 2500)
+  assert.equal(esperaAntesDeReintentar({ intento: 2, azar: 0.5 }), 5000)
+  assert.equal(esperaAntesDeReintentar({ intento: 3, azar: 0.5 }), null, 'tras el 3.º, no hay 4.º')
+  assert.equal(esperaAntesDeReintentar({ intento: 1, retryAfterS: 8, azar: 0.5 }), 8000, 'retry-after manda si es mayor')
+  assert.equal(esperaAntesDeReintentar({ intento: 2, retryAfterS: 1, azar: 0.5 }), 5000)
+  assert.equal(esperaAntesDeReintentar({ intento: 1, retryAfterS: 120 }), null, 'si pide esperar demasiado, se avisa')
+  assert.equal(leerRetryAfter('7'), 7)
+  assert.equal(leerRetryAfter(null), null)
+  assert.equal(leerRetryAfter('basura'), null)
+  assert.equal(leerRetryAfter(new Date(Date.UTC(2026, 0, 1, 0, 0, 30)).toUTCString(), Date.UTC(2026, 0, 1)), 30)
+  assert.equal(pausaLoteTrasLimite(12), 12000)
+  assert.equal(pausaLoteTrasLimite(null), 10000)
+  assert.equal(pausaLoteTrasLimite(300), 60000)
+})
+
+test('IA v5: el sustituto va a las notas (el pronóstico es el jugador elegido)', () => {
+  const sel = { evento: 'Galatasaray SK - VfB Stuttgart', liga: null, deporte: 'Fútbol', mercado: 'Jugador - Remates a puerta', pronostico: 'Baris Yilmaz - Más de 1,5', cuota: '6.00', estado: 'perdida', evento_fecha: null, evento_hora: null }
+  const p = esquemaPropuestaIA.parse({
+    hay_apuestas: true,
+    motivo: null,
+    apuestas: [
+      apuestaIA({ importe: 4.88, cuota_total: '6.00', ganancia_potencial: 29.28, estado: 'perdida', importe_cobrado: 0, selecciones: [{ ...sel, sustituto: 'Rafael Leao' }] }),
+      apuestaIA({ selecciones: [{ ...sel, sustituto: null }] }),
+    ],
+  })
+  const [con, sin] = propuestaARevisiones(p)
+  assert.equal(con.valores.notas, 'Sustituto: Rafael Leao')
+  assert.equal(con.valores.selecciones[0].pronostico, 'Baris Yilmaz - Más de 1,5')
+  assert.equal(con.valores.resultado_economico, '-4,88')
+  assert.equal(con.dudosos['selecciones.0.pronostico'], undefined, 'sin ámbar si se lee bien')
+  assert.equal(sin.valores.notas, '')
+  // Lecturas anteriores a la v5 (sin "sustituto") se retoman igual.
+  const { sustituto, ...vieja } = { ...sel, sustituto: null }
+  void sustituto
+  const antigua = { hay_apuestas: true, motivo: null, apuestas: [{ ...apuestaIA(), selecciones: [vieja] }] }
+  assert.equal(esquemaPropuestaIA.safeParse(completarPropuestaAntigua(antigua)).success, true)
 })

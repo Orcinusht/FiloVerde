@@ -242,10 +242,11 @@ assert.equal(await pag.locator('main ul li').count(), 2)
 bien('Lista con las 2 guardadas, la más reciente primero')
 
 paso('Fallo de la IA → reintentar')
-await cola(['error500', 'error500', 'simple'])
+await cola(['error500', 'error500', 'error500', 'simple'])
 await pag.goto(`${APP}/apuestas/nueva`, { waitUntil: 'networkidle' })
 await pag.locator('input[type=file][multiple]').setInputFiles([capSimple])
-await pag.getByText(/saturada/).waitFor({ timeout: 60000 })
+await pag.getByText(/saturada/).first().waitFor({ timeout: 60000 })
+await pag.getByText('Pendiente de reintentar').waitFor({ timeout: 60000 })
 await foto('07-error-ia')
 bien('Mensaje claro en español; la imagen sigue visible')
 await pag.getByRole('button', { name: 'Reintentar' }).click()
@@ -1247,6 +1248,146 @@ await pag.waitForURL(`${APP}/apuestas`)
 const hm = (await sql(`select s.evento_hora::text h, s.evento_fecha::text d, to_char(a.fecha at time zone 'Europe/Madrid', 'YYYY-MM-DD HH24:MI') f from selecciones s join apuestas a on a.id = s.apuesta_id where s.evento = 'Hora - Prueba'`))[0]
 assert.deepEqual(hm, { h: null, d: '2026-11-09', f: '2026-11-04 15:25' })
 bien('Día sin hora guardado sin hora; hora de la apuesta 15:25 exacta')
+
+// ======================= IA MÁS FIABLE: REINTENTOS =======================
+const llamadasIAs = async () => (await fetch('http://localhost:54322/__llamadas')).json()
+const nTrans = async () => (await sql(`select count(*)::int n from transcripciones`))[0].n
+const nTransError = async () => (await sql(`select count(*)::int n from transcripciones where resultado = 'error'`))[0].n
+const subirIA = async (modos, archivosSubir = [capSimple]) => {
+  await cola(modos)
+  const aceptar = (d) => d.accept().catch(() => {}) // salir con una captura sin guardar
+  pag.on('dialog', aceptar)
+  await pag.goto(`${APP}/apuestas/nueva`, { waitUntil: 'networkidle' })
+  pag.off('dialog', aceptar)
+  await pag.locator('input[type=file][multiple]').setInputFiles(archivosSubir)
+}
+const formListo = () => pag.getByRole('button', { name: /^Guardar/ }).waitFor({ timeout: 60000 })
+
+paso('IA saturada que se resuelve al 2.º intento: «Reintentando…» y sin error')
+let ll0 = (await llamadasIAs()).length
+let tr0 = await nTrans()
+await subirIA(['error500', 'unica'])
+await pag.getByText('Reintentando… (2 de 3)').waitFor({ timeout: 20000 })
+assert.ok(await pag.getByText('La IA está saturada: lo intento de nuevo.').isVisible())
+await foto('37-reintentando')
+await formListo()
+assert.equal(await pag.getByText('Pendiente de reintentar').count(), 0)
+assert.equal((await llamadasIAs()).length - ll0, 2, '2 llamadas: la fallida y la buena')
+assert.equal((await nTrans()) - tr0, 1, 'una sola lectura (el intento saturado no cuenta)')
+// Doble petición de la MISMA captura ya leída: se reutiliza la lectura (ni otra llamada ni otra fila).
+const rutaIA = decodeURIComponent((await pag.getByRole('img', { name: 'Captura de la apuesta' }).first().getAttribute('src')).split('ruta=')[1])
+const otra = await (await pag.request.post(`${APP}/api/capturas/transcribir`, { data: { ruta: rutaIA, intento: 1 } })).json()
+assert.equal(otra.reutilizada, true)
+assert.equal((await llamadasIAs()).length - ll0, 2, 'sin otra llamada a la IA')
+assert.equal((await nTrans()) - tr0, 1, 'sin fila duplicada')
+const r4 = await pag.request.post(`${APP}/api/capturas/transcribir`, { data: { ruta: rutaIA, intento: 4 } })
+assert.equal(r4.status(), 400, 'más de 3 intentos seguidos: el servidor no llama a la IA')
+await guardarRevision('Guardar')
+await pag.waitForURL(`${APP}/apuestas`)
+bien('Se reintenta sola; cuenta como UNA lectura; reintentar la misma captura no la vuelve a pagar ni duplica filas')
+
+paso('IA saturada que se resuelve al 3.er intento')
+ll0 = (await llamadasIAs()).length
+await subirIA(['error500', 'error500', 'credito'])
+await pag.getByText('Reintentando… (3 de 3)').waitFor({ timeout: 30000 })
+await formListo()
+const tiempos = (await llamadasIAs()).slice(ll0).map((l) => l.t)
+assert.equal(tiempos.length, 3)
+const esperas = [tiempos[1] - tiempos[0], tiempos[2] - tiempos[1]]
+assert.ok(esperas[0] >= 1400 && esperas[0] < 4000, `1.ª espera ~2 s (${esperas[0]} ms)`)
+assert.ok(esperas[1] >= 3700 && esperas[1] < 8000, `2.ª espera ~5 s (${esperas[1]} ms)`)
+await guardarRevision('Guardar')
+await pag.waitForURL(`${APP}/apuestas`)
+bien(`Esperas crecientes: ${(esperas[0] / 1000).toFixed(1)} s y ${(esperas[1] / 1000).toFixed(1)} s`)
+
+paso('IA saturada que no se resuelve: exactamente 3 intentos y mensaje claro; no suma coste')
+ll0 = (await llamadasIAs()).length
+tr0 = await nTrans()
+const err0 = await nTransError()
+await subirIA(['error500', 'error500', 'error500', 'aumento'])
+await pag.getByText('Pendiente de reintentar').waitFor({ timeout: 30000 })
+assert.match(await pag.getByRole('alert').first().innerText(), /saturada/)
+const tras = (await llamadasIAs()).slice(ll0)
+assert.equal(tras.length, 3, 'exactamente 3 intentos (la librería no reintenta por su cuenta)')
+assert.ok(tras.every((l) => l.reintentosSdk === '0' || l.reintentosSdk == null), 'sin reintentos de la librería')
+assert.equal((await nTrans()) - tr0, 0, 'los intentos fallidos no cuentan como lectura')
+assert.equal((await nTransError()) - err0, 0, 'ni como fallo cobrado')
+assert.ok(await pag.getByRole('button', { name: 'Rellenar a mano' }).isVisible())
+assert.ok(await pag.getByRole('img', { name: 'Captura de la apuesta' }).isVisible(), 'la captura sigue ahí')
+await foto('38-saturada-tras-3')
+// Doble toque en «Reintentar»: una sola lectura.
+await pag.getByRole('button', { name: 'Reintentar' }).dblclick()
+await formListo()
+assert.equal((await llamadasIAs()).length - ll0, 4, 'el doble toque no lanza dos lecturas')
+await guardarRevision('Guardar')
+await pag.waitForURL(`${APP}/apuestas`)
+bien('3 intentos, «Pendiente de reintentar» con la captura, Reintentar y Rellenar a mano; doble toque = 1 lectura')
+
+paso('Límite 429 con retry-after: espera lo que pide y lo distingue de «saturada»')
+ll0 = (await llamadasIAs()).length
+await subirIA(['error429:3', 'asegurada'])
+await pag.getByText('Límite de lecturas por minuto: espero y lo intento de nuevo.').waitFor({ timeout: 10000 })
+await formListo()
+const t429 = (await llamadasIAs()).slice(ll0).map((l) => l.t)
+assert.ok(t429[1] - t429[0] >= 2900, `respeta retry-after de 3 s (${t429[1] - t429[0]} ms)`)
+await guardarRevision('Guardar')
+await pag.waitForURL(`${APP}/apuestas`)
+await subirIA(['error429:1', 'error429:1', 'error429:1'])
+await pag.getByText('Pendiente de reintentar').waitFor({ timeout: 30000 })
+assert.match(await pag.getByRole('alert').first().innerText(), /Has alcanzado el límite de lecturas de la IA por minuto/)
+assert.doesNotMatch(await pag.getByRole('alert').first().innerText(), /saturada/)
+bien('429: espera el retry-after; si no se resuelve, «Has alcanzado el límite… espera un minuto»')
+
+paso('Error permanente (clave inválida): sin reintentos')
+ll0 = (await llamadasIAs()).length
+await subirIA(['error401', 'simple'])
+await pag.getByText(/La clave de la IA no es válida/).waitFor({ timeout: 15000 })
+assert.equal((await llamadasIAs()).length - ll0, 1, 'una sola llamada')
+assert.equal(await pag.getByText('Pendiente de reintentar').count(), 0)
+bien('Clave inválida: una llamada, mensaje propio, sin reintentar')
+
+paso('Lote de 5 con un fallo intermedio: las demás siguen y la fallida queda pendiente de reintentar')
+ll0 = (await llamadasIAs()).length
+const capsLote = [capSimple, capCombinada, capResuelta, capSimple, capCombinada]
+const tLote = Date.now()
+await subirIA(['sup_original', 'error500', 'error500', 'error500', 'sup_aumento', 'hora_rara', 'aumento'], capsLote)
+await pag.getByText('Apuesta 1 de 5').waitFor({ timeout: 60000 })
+await formListo()
+// Espera a que el lote termine de leerse (las 7 llamadas).
+assert.ok(await esperar(async () => (await llamadasIAs()).length - ll0 >= 7, 60000), 'el lote sigue tras el fallo')
+const tl = (await llamadasIAs()).slice(ll0).map((l) => l.t)
+const duracionLote = ((tl.at(-1) - tLote) / 1000).toFixed(1)
+await guardarRevision('Guardar y seguir')
+await pag.getByText('Apuesta 2 de 5').waitFor()
+await pag.getByText('Pendiente de reintentar').waitFor()
+await foto('39-lote-fallo-intermedio')
+await cola(['liga_nueva'])
+await pag.getByRole('button', { name: 'Reintentar' }).click()
+await formListo()
+for (let i = 2; i <= 5; i++) {
+  await guardarRevision(i < 5 ? 'Guardar y seguir' : 'Guardar')
+  if (i < 5) await pag.getByText(`Apuesta ${i + 1} de 5`).waitFor({ timeout: 30000 })
+}
+await pag.waitForURL(`${APP}/apuestas`)
+bien(`Lote de 5 leído de una en una (con 2 reintentos de la 2.ª) en ${duracionLote} s; la fallida se reintentó y se guardaron las 5`)
+
+paso('Lote: ante un 429 que agota los intentos, espera el retry-after antes de la siguiente captura')
+ll0 = (await llamadasIAs()).length
+await subirIA(['error429:2', 'error429:2', 'error429:2', 'unica'], [capSimple, capCombinada])
+await pag.getByText('Apuesta 1 de 2').waitFor({ timeout: 60000 })
+assert.ok(await esperar(async () => (await llamadasIAs()).length - ll0 >= 4, 60000))
+const tp = (await llamadasIAs()).slice(ll0).map((l) => l.t)
+assert.ok(tp[3] - tp[2] >= 1900, `pausa del lote tras el 429 (${tp[3] - tp[2]} ms)`)
+bien(`Pausa de ${((tp[3] - tp[2]) / 1000).toFixed(1)} s antes de la siguiente captura`)
+
+paso('Instrucciones v5 y caché en CADA lectura')
+const todas = await llamadasIAs()
+assert.ok(todas.every((l) => l.instruccionSustituto), 'la regla del sustituto va en todas')
+assert.ok(todas.every((l) => l.cacheSistema && l.cacheCatalogo), 'caché en instrucciones y catálogo')
+assert.ok(todas.every((l) => l.orden === 'catalogo,imagen,texto'), 'orden: parte fija, catálogo, imagen')
+const v = await sql(`select distinct version_instrucciones v from transcripciones where created_at > now() - interval '1 hour'`)
+assert.deepEqual(v.map((x) => x.v), [5])
+bien(`${todas.length} llamadas: todas con la v5, la caché y el orden fijo → catálogo → imagen`)
 
 const rellenarRayo = async (p) => {
   await p.goto(`${APP}/apuestas/nueva?manual=1`, { waitUntil: 'networkidle' })

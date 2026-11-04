@@ -28,6 +28,8 @@ archivo o panel ponerlas).
    **Aviso de apuesta duplicada fusionado el 2026-11-03** (verificado en el móvil; sin migración).
    **Promociones y selector de minutos fusionados el 2026-11-04** (verificados en el móvil;
    migración `20261105000001` aplicada; RLS en vivo 46/46).
+   **IA más fiable y jugadores sustituidos** (rama `fase-1-ia-fiable`, 2026-11-04, sin migración;
+   pendiente de verificar en el móvil y fusionar).
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
@@ -42,6 +44,11 @@ archivo o panel ponerlas).
   `claude-sonnet-5-5` o se cambia.
 - **Seguimiento del saldo y la caducidad de los créditos** de promoción (fuera de la ronda de
   promociones).
+- **Modelo de reserva** (aparcado el 2026-11-04): SOLO si, tras los reintentos y la caché, siguen
+  saliendo 529/429 en Vercel → Logs (`[ia:transcribir]`). Opción preferida: `claude-opus-5-5`
+  (≈ 2× el coste, solo en esos casos; tiene su propio límite por minuto) con un aviso en la revisión
+  "Leída con el modelo de reserva"; `claude-haiku-5-5` es mucho más barato pero lee peor capturas
+  complejas. No choca con el plan B de rechazos (`fallbacks: "default"`).
 
 ## Principios
 
@@ -122,7 +129,8 @@ src/
     apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
                       cálculos, validación del formulario, esquema de la IA (propuesta.ts),
                     duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
-                    asegurada y crédito: cálculos en céntimos)
+                    asegurada y crédito: cálculos en céntimos), reintentos-ia.ts (errores de la
+                    IA: clasificación, cuáles se reintentan, esperas y mensajes)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
@@ -196,8 +204,11 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   si hay varios, "Mixto". Lo calcula SIEMPRE `guardar_apuesta` (`deporte_resumen()`), al crear y
   al editar; lo que mande el navegador se ignora.
 - `transcripciones.version_instrucciones`: versión de las instrucciones de la IA (vacía = 1, sin
-  catálogo; 2 = con catálogo; 3 = ignora señales de directo; 4 = lee promociones). Ajustes compara el
-  coste medio por versión.
+  catálogo; 2 = con catálogo; 3 = ignora señales de directo; 4 = lee promociones; 5 = sustitutos y
+  caché). Ajustes compara el coste medio por versión. **Lecturas** = filas `ok` y `no_es_apuesta`;
+  las `error` (fallos que Anthropic sí cobra: rechazo, respuesta cortada, datos rotos) no cuentan
+  como lectura ni entran en el coste medio: se muestran aparte ("Intentos fallidos cobrados"). Los
+  intentos saturados o con límite no se cobran y no crean fila.
 - **Conducta** (la marca SIEMPRE el usuario, nunca la IA): `apuestas.en_directo` y
   `viendo_partido` (solo si en directo), `precipitada` y `recuperar_perdidas` (solo si
   precipitada). Booleanos no nulos, falso por defecto: sin marcar = pre-partido y normal (así
@@ -313,6 +324,34 @@ ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
   guardadas antes (v1-v3) se retoman igual (`completarPropuestaAntigua`). Coste extra estimado:
   ~450 tokens de entrada + ~20 de salida por apuesta ≈ +0,001 $ por captura con Sonnet 5.5
   (≈ +9 %); medirlo en Ajustes (v4).
+- **Jugador sustituido (instrucciones v5):** en mercados de jugador, si la captura muestra dos nombres,
+  uno TACHADO y otro como sustituto ("Sustituto", "Sustituto+" o similar, en cualquier casa), el
+  pronóstico es el TACHADO (el que eligió el usuario); nunca el sustituto. Si solo hay un nombre sin
+  tachar, ese. La IA lo devuelve en `selecciones[].sustituto` y el código escribe
+  "Sustituto: <nombre>" en las notas SOLO al crear desde la lectura (nunca pisa notas del usuario);
+  sin ámbar si se lee bien. Estado y resultado se leen como siempre (la casa ya los calcula con el
+  sustituto). Las lecturas anteriores se retoman igual (`completarPropuestaAntigua`).
+- **Reintentos** (`lib/apuestas/reintentos-ia.ts`): **3 intentos en total por captura**, solo en errores
+  temporales — 529/5xx (`saturado`), 429 de Anthropic (`limite`, distinto del tope propio de 60/h,
+  `tope_hora`), tiempo agotado y conexión —, con esperas de ~2 y ~5 s (±25 % al azar) o lo que pida
+  `retry-after` (si pide más de 60 s, no se reintenta solo). La librería de Anthropic va con
+  `maxRetries: 0` (si no, serían 3 × 2). Nunca en errores permanentes (clave, saldo, tope de gasto
+  —también llega como 429—, imagen o petición mala). **Los reintentos los hace el móvil**, uno por
+  petición (cada intento ≤ 60 s; `maxDuration` 120 s), mostrando "Reintentando… (2 de 3)". Cada
+  intento reutiliza la captura ya subida; el servidor rechaza un `intento` > 3, y si la captura ya
+  se leyó bien devuelve esa lectura (sin volver a pagar ni duplicar filas). El lote se lee de una
+  en una; si una falla, las demás siguen y la fallida queda "Pendiente de reintentar" (Reintentar /
+  Rellenar a mano); tras un 429 que agota los intentos, el lote espera el `retry-after` (o 10 s)
+  antes de la siguiente. El error real va a Vercel → Logs como `[ia:transcribir]` (código, status,
+  tipo, retry-after, request id; sin datos personales).
+- **Caché de Anthropic** (desde la v5): orden de la petición = instrucciones (+ esquema) con
+  `cache_control` → catálogo del usuario con `cache_control` → imagen → frase final. Mínimo
+  cacheable en Sonnet 5.5: 512 tokens; duración 5 min, se renueva con cada lectura. Según la
+  documentación oficial de límites (consultada el 2026-11-04), los tokens LEÍDOS de la caché no
+  cuentan para el límite de tokens de entrada por minuto (salvo Haiku 3.5); los escritos sí.
+  Precio: escribir 1,25 × la entrada; leer 0,20 $/M en Sonnet 5.5 (10 %). `precios.ts` calcula cada
+  tipo a su precio. En Vercel → Logs, `[ia:uso]` muestra `sinCache` (imagen + final), `escritos` y
+  `leidos` por lectura.
 - Directo: la IA tiene orden expresa de IGNORAR "En juego", marcador y minuto (reflejan el
   momento de la captura, no el de apostar). No hay campos de directo/precipitada en su esquema.
 - Clasificación: varios partidos distintos = combinada; un partido con varias condiciones sin
@@ -464,3 +503,10 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | Hora y minuto con dos desplegables (paso de 5) en vez del control nativo; minutos raros se conservan | iOS Safari ignora el paso; nunca se cambia un dato sin que lo cambie el usuario |
 | 2026-11-04 | Migración `20261105000001` solo aditiva y repetible (el nombre no es una fecha real: solo marca el orden) | No rompe `main`; segura si se pega dos veces |
 | 2026-11-04 | **Promociones y selector de minutos fusionados en `main`** (rama `fase-1-promos`) | Verificados en el móvil; migración aplicada; RLS en vivo 46/46; pruebas de GitHub Actions en verde |
+| 2026-11-04 | 429 de Anthropic separado de la saturación (529/5xx): mensajes distintos | Antes, el límite de la cuenta se mostraba como "la IA está saturada" |
+| 2026-11-04 | Reintentos desde el móvil (3 intentos en total, ~2 y ~5 s o `retry-after`), librería sin reintentos | "Reintentando…" real; cada intento cabe en el límite de Vercel; exactamente 3, no 3 × 2 |
+| 2026-11-04 | Reintentar reutiliza la captura subida y la lectura ya hecha; el servidor limita a 3 intentos | Sin subidas, filas ni pagos duplicados |
+| 2026-11-04 | Ajustes: lecturas y coste medio solo con lecturas buenas; fallos cobrados aparte | Coste medio real; el gasto total sigue completo. Sin migración (`resultado` ya existía) |
+| 2026-11-04 | Caché de Anthropic en instrucciones y catálogo; imagen al final | En un lote, de la 2.ª captura en adelante la parte fija cuesta un 10 % y no cuenta para el límite por minuto |
+| 2026-11-04 | Instrucciones v5: en mercados de jugador, el pronóstico es el jugador tachado; el sustituto, a las notas | La captura muestra a los dos; el usuario eligió al tachado |
+| 2026-11-04 | Modelo de reserva aparcado | Primero medir si los reintentos y la caché bastan |

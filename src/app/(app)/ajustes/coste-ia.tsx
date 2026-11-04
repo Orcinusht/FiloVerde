@@ -20,7 +20,9 @@ export async function CosteIA() {
         <Fila nombre="Este mes" valor={`${usd(r.mesUsd)} · ${r.mesLecturas} ${r.mesLecturas === 1 ? 'lectura' : 'lecturas'}`} />
         <Fila nombre="Coste medio por captura" valor={r.medioUsd == null ? '—' : usd(r.medioUsd)} />
         <Fila nombre="Total desde el principio" valor={`${usd(r.totalUsd)} · ${r.totalLecturas}`} />
-        {r.fallidas > 0 && <Fila nombre="Lecturas fallidas" valor={String(r.fallidas)} />}
+        {r.fallidas > 0 && (
+          <Fila nombre="Intentos fallidos cobrados (aparte)" valor={`${r.fallidas} · ${usd(r.fallidasUsd)}`} />
+        )}
         {r.porVersion.length > 1 && <ComparativaVersiones porVersion={r.porVersion} usd={usd} />}
         <Fila nombre="Modelo actual" valor={getAnthropicModel()} />
         {r.modelos.length > 0 && <Fila nombre="Modelos usados" valor={r.modelos.join(', ')} />}
@@ -60,6 +62,7 @@ const NOMBRE_VERSION: Record<number, string> = {
   2: 'con catálogo',
   3: 'ignora señales de directo',
   4: 'lee promociones',
+  5: 'sustitutos y caché',
 }
 
 // Coste medio antes y después de cambiar las instrucciones de la IA (p. ej. con el catálogo).

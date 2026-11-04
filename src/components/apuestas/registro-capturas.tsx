@@ -9,6 +9,7 @@ import type { ApuestaPendiente, Revision } from '@/lib/apuestas/propuesta'
 import type { Catalogo } from '@/lib/apuestas/catalogo'
 import { ErrorImagen, reducirImagen } from '@/lib/navegador/reducir-imagen'
 import { FormularioApuesta } from './formulario-apuesta'
+import { MAX_INTENTOS, esperaAntesDeReintentar, pausaLoteTrasLimite } from '@/lib/apuestas/reintentos-ia'
 import { VisorCaptura } from './visor-captura'
 
 export const MAX_LOTE = 5
@@ -27,7 +28,12 @@ type Item = {
   indice?: number // posición de la apuesta dentro de la captura (0, 1…)
   total?: number // cuántas apuestas trae la captura
   error?: string
+  intento?: number // intento de lectura en curso (1-3)
+  motivoReintento?: string // por qué se está reintentando
+  temporal?: boolean // el último fallo fue temporal (saturación, límite…): queda pendiente de reintentar
 }
+
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const TEXTO_PASO: Partial<Record<Paso, string>> = {
   esperando: 'En cola…',
@@ -69,6 +75,8 @@ export function RegistroCapturas({
   const [catalogo, setCatalogo] = useState(catalogoInicial)
   const itemsRef = useRef<Item[]>(items)
   const enMarcha = useRef(false)
+  // Retry-after (s) del último 429 que agotó los intentos (-1 = sin cabecera); null = ninguno.
+  const ultimoLimite = useRef<number | null>(null)
 
   function actualizar(clave: string, cambios: Partial<Item>) {
     itemsRef.current = itemsRef.current.map((it) => (it.clave === clave ? { ...it, ...cambios } : it))
@@ -86,6 +94,7 @@ export function RegistroCapturas({
 
   async function procesar(item: Item) {
     let ruta = item.ruta
+    let codigoFallo: 'temporal' | 'otro' | undefined
     try {
       if (!ruta) {
         actualizar(item.clave, { paso: 'reduciendo', error: undefined })
@@ -100,24 +109,59 @@ export function RegistroCapturas({
         ruta = j.ruta as string
         actualizar(item.clave, { ruta })
       }
-      actualizar(item.clave, { paso: 'leyendo', error: undefined })
-      const r = await fetch('/api/capturas/transcribir', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ruta }),
-      })
-      const j = await r.json().catch(() => ({}))
-      const revisiones = j.revisiones as Revision[] | undefined
-      if (!r.ok || !revisiones?.length) throw new Error(j.error ?? 'No se ha podido leer la captura.')
+      // Lectura con hasta 3 intentos: solo se reintentan los errores temporales (saturación, límite
+      // por minuto, tiempo agotado, conexión), con espera creciente o la que pida Anthropic.
+      // Cada intento es una petición nueva con la MISMA captura ya subida (no se sube otra vez).
+      let j: Record<string, unknown> = {}
+      for (let intento = 1; ; intento++) {
+        actualizar(item.clave, { paso: 'leyendo', error: undefined, intento })
+        let temporal = false
+        let reintentarEnS: number | null = null
+        try {
+          const r = await fetch('/api/capturas/transcribir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ruta, intento }),
+          })
+          j = await r.json().catch(() => ({ codigo: r.status >= 500 ? 'timeout' : 'desconocido' }))
+          if (r.ok && Array.isArray(j.revisiones) && j.revisiones.length) break
+          temporal = j.temporal === true || (!r.ok && r.status >= 500)
+          reintentarEnS = typeof j.reintentarEnS === 'number' ? j.reintentarEnS : null
+          if (!r.ok && r.status >= 500 && !j.error) j = { ...j, codigo: 'timeout', error: 'La lectura ha tardado demasiado. Pulsa «Reintentar» o rellénala a mano.' }
+        } catch {
+          // Sin respuesta (red): también es temporal.
+          temporal = true
+          j = { codigo: 'conexion', error: 'Sin conexión. Comprueba internet y pulsa «Reintentar».' }
+        }
+        const espera = temporal ? esperaAntesDeReintentar({ intento, retryAfterS: reintentarEnS }) : null
+        if (espera == null) {
+          if (j.codigo === 'limite') ultimoLimite.current = reintentarEnS ?? -1
+          codigoFallo = temporal ? 'temporal' : 'otro'
+          throw new Error((j.error as string) ?? 'No se ha podido leer la captura.')
+        }
+        actualizar(item.clave, {
+          intento: intento + 1,
+          motivoReintento:
+            j.codigo === 'limite'
+              ? 'Límite de lecturas por minuto: espero y lo intento de nuevo.'
+              : j.codigo === 'saturado'
+                ? 'La IA está saturada: lo intento de nuevo.'
+                : 'Lo intento de nuevo.',
+        })
+        await esperar(espera)
+      }
+      const revisiones = j.revisiones as Revision[]
+      const indices = Array.isArray(j.indices) ? (j.indices as number[]) : null
+      const total = typeof j.total === 'number' ? j.total : revisiones.length
       // Una entrada en la cola por cada apuesta encontrada, todas con la misma imagen.
-      const nuevos: Item[] = revisiones.map((revision, indice) => ({
-        clave: `${item.clave}-${indice}`,
+      const nuevos: Item[] = revisiones.map((revision, i) => ({
+        clave: `${item.clave}-${indices?.[i] ?? i}`,
         paso: 'lista',
         ruta,
         revision,
-        transcripcionId: j.transcripcionId ?? null,
-        indice,
-        total: revisiones.length,
+        transcripcionId: (j.transcripcionId as string) ?? null,
+        indice: indices?.[i] ?? i,
+        total,
       }))
       itemsRef.current = itemsRef.current.flatMap((it) => (it.clave === item.clave ? nuevos : [it]))
       setItems(itemsRef.current)
@@ -128,7 +172,7 @@ export function RegistroCapturas({
             ? 'Sin conexión. Comprueba internet y pulsa «Reintentar».'
             : e.message
           : 'Algo ha fallado. Pulsa «Reintentar».'
-      actualizar(item.clave, { paso: 'error', error: mensaje, ruta })
+      actualizar(item.clave, { paso: 'error', error: mensaje, ruta, intento: undefined, motivoReintento: undefined, temporal: codigoFallo === 'temporal' })
     }
   }
 
@@ -139,7 +183,12 @@ export function RegistroCapturas({
       for (;;) {
         const siguiente = itemsRef.current.find((it) => it.paso === 'esperando')
         if (!siguiente) break
+        ultimoLimite.current = null
         await procesar(siguiente)
+        // Si una captura acabó en el límite por minuto (429), el lote espera antes de la siguiente.
+        if (ultimoLimite.current != null && itemsRef.current.some((it) => it.paso === 'esperando')) {
+          await esperar(pausaLoteTrasLimite(ultimoLimite.current >= 0 ? ultimoLimite.current : null))
+        }
       }
     } finally {
       enMarcha.current = false
@@ -273,8 +322,19 @@ export function RegistroCapturas({
       {TEXTO_PASO[item.paso] && (
         <div className="mx-4 flex flex-col items-center gap-3 rounded-2xl border border-border bg-surface p-8 text-center" aria-live="polite">
           <span className="size-8 animate-spin rounded-full border-4 border-brand/30 border-t-brand" aria-hidden="true" />
-          <p className="font-medium">{TEXTO_PASO[item.paso]}</p>
-          {item.paso === 'leyendo' && <p className="text-sm text-muted">Suele tardar entre 5 y 20 segundos.</p>}
+          {item.paso === 'leyendo' && (item.intento ?? 1) > 1 ? (
+            <>
+              <p className="font-medium">
+                Reintentando… ({item.intento} de {MAX_INTENTOS})
+              </p>
+              {item.motivoReintento && <p className="text-sm text-muted">{item.motivoReintento}</p>}
+            </>
+          ) : (
+            <>
+              <p className="font-medium">{TEXTO_PASO[item.paso]}</p>
+              {item.paso === 'leyendo' && <p className="text-sm text-muted">Suele tardar entre 5 y 20 segundos.</p>}
+            </>
+          )}
         </div>
       )}
 
@@ -282,7 +342,8 @@ export function RegistroCapturas({
         <div className="space-y-3 px-4">
           {item.ruta && <VisorCaptura ruta={item.ruta} />}
           <div role="alert" className="rounded-2xl border border-red-500/40 bg-red-500/5 p-4 text-sm">
-            {item.error}
+            {item.temporal && <p className="font-semibold">Pendiente de reintentar</p>}
+            <p>{item.error}</p>
           </div>
           <button
             type="button"

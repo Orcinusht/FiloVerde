@@ -179,7 +179,8 @@ export type ResumenCosteIA = {
   mesLecturas: number
   mesUsd: number
   medioUsd: number | null
-  fallidas: number
+  fallidas: number // fallos que sí se cobraron (no cuentan como lecturas)
+  fallidasUsd: number
   modelos: string[]
   // Coste medio por versión de las instrucciones (1 = antes del catálogo de deportes).
   porVersion: { version: number; lecturas: number; medioUsd: number | null }[]
@@ -193,20 +194,26 @@ export async function resumenCosteIA(): Promise<ResumenCosteIA> {
     .order('created_at', { ascending: false })
     .limit(5000)
   if (error) throw error
-  const filas = data ?? []
+  const todas = data ?? []
+  // Lecturas = las que la IA llegó a hacer bien (también "no es una apuesta"). Los fallos que
+  // Anthropic SÍ cobra (respuesta cortada, rechazo, datos rotos) se cuentan aparte; los intentos
+  // saturados o con límite no se cobran ni se guardan.
+  const filas = todas.filter((f) => f.resultado !== 'error')
+  const fallos = todas.filter((f) => f.resultado === 'error')
   const ahora = new Date()
   const inicioMes = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth(), 1)).toISOString()
   const coste = (f: { coste_usd: unknown }) => Number(f.coste_usd ?? 0)
   const delMes = filas.filter((f) => f.created_at >= inicioMes)
   const conCoste = filas.filter((f) => f.coste_usd != null)
-  const totalUsd = filas.reduce((s, f) => s + coste(f), 0)
+  const totalUsd = todas.reduce((s, f) => s + coste(f), 0)
   return {
     totalLecturas: filas.length,
     totalUsd,
     mesLecturas: delMes.length,
-    mesUsd: delMes.reduce((s, f) => s + coste(f), 0),
+    mesUsd: todas.filter((f) => f.created_at >= inicioMes).reduce((s, f) => s + coste(f), 0),
     medioUsd: conCoste.length ? conCoste.reduce((s, f) => s + coste(f), 0) / conCoste.length : null,
-    fallidas: filas.filter((f) => f.resultado === 'error').length,
+    fallidas: fallos.length,
+    fallidasUsd: fallos.reduce((s, f) => s + coste(f), 0),
     modelos: [...new Set(filas.slice(0, 50).map((f) => f.modelo))],
     porVersion: [...new Set(filas.map((f) => f.version_instrucciones ?? 1))]
       .sort((a, b) => a - b)

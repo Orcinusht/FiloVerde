@@ -37,6 +37,7 @@ export const esquemaSeleccionIA = z.object({
   estado: z.enum(ESTADOS_SELECCION as [string, ...string[]]).nullable().describe('Solo si la captura muestra el resultado de la selección'),
   evento_fecha: textoONulo.describe('Día del evento "YYYY-MM-DD" SOLO si aparece en la captura'),
   evento_hora: textoONulo.describe('Hora de inicio "HH:MM" SOLO si aparece en la captura'),
+  sustituto: textoONulo.describe('Mercado de jugador: nombre del SUSTITUTO si aparece junto al jugador tachado; null si no hay'),
 })
 
 export const esquemaDudaIA = z.object({
@@ -81,7 +82,19 @@ export function completarPropuestaAntigua(p: unknown): unknown {
     ...o,
     apuestas: o.apuestas.map((a) =>
       a && typeof a === 'object'
-        ? { promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null, ...a }
+        ? {
+            promo_tipo: null,
+            promo_cuota_original: null,
+            promo_aumento: null,
+            promo_credito: null,
+            ...a,
+            // Lecturas anteriores a la v5: sin campo "sustituto" en las selecciones.
+            selecciones: Array.isArray((a as { selecciones?: unknown }).selecciones)
+              ? ((a as { selecciones: unknown[] }).selecciones).map((s) =>
+                  s && typeof s === 'object' ? { sustituto: null, ...s } : s,
+                )
+              : (a as { selecciones?: unknown }).selecciones,
+          }
         : a,
     ),
   }
@@ -201,6 +214,11 @@ export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo): Revision {
       else marcar(kl, 'no_visible')
     })
   }
+
+  // Jugador sustituido: el pronóstico es el jugador elegido (tachado); el sustituto se anota en las
+  // notas. Solo aquí, al crear desde la lectura: las notas que escriba el usuario no se tocan.
+  const sustitutos = [...new Set(sels.map((s) => recortar(s.sustituto)).filter(Boolean))]
+  if (sustitutos.length) valores.notas = sustitutos.map((n) => `Sustituto: ${n}`).join('\n')
 
   // En una simple, si no se leyó la cuota total, vale la de su selección.
   if (valores.tipo === 'simple' && !valores.cuota_total && valores.selecciones[0].cuota) {

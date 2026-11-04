@@ -5,8 +5,10 @@ import { transcribirCaptura, VERSION_INSTRUCCIONES } from '@/lib/server/ia/trans
 import { leerCatalogo } from '@/lib/server/catalogo'
 import { catalogoParaIA, catalogoVacio } from '@/lib/apuestas/catalogo'
 import { MAX_APUESTAS_POR_CAPTURA, propuestaARevisiones } from '@/lib/apuestas/propuesta'
+import { MAX_INTENTOS, esTemporal } from '@/lib/apuestas/reintentos-ia'
+import { apuestasPendientes } from '@/lib/server/pendientes'
 
-// La IA puede tardar: margen de 2 minutos.
+// Una petición = UN intento (máximo 60 s de IA); los reintentos los pide el móvil. Margen: 2 min.
 export const maxDuration = 120
 
 // Tope de seguridad para no disparar el gasto (p. ej. por un fallo que reintente sin parar).
@@ -22,6 +24,28 @@ export async function POST(request: NextRequest) {
   const cuerpo = await request.json().catch(() => null)
   const ruta = cuerpo?.ruta
   if (!esRutaPropia(ruta, userId)) return responder(400, { error: 'Captura no válida.' })
+  // Número de intento (1-3) para esta captura: más allá no se llama a la IA.
+  const intento = cuerpo?.intento ?? 1
+  if (!Number.isInteger(intento) || intento < 1 || intento > MAX_INTENTOS) {
+    return responder(400, { codigo: 'demasiados_intentos', error: 'Demasiados intentos seguidos. Pulsa «Reintentar» más tarde o rellénala a mano.' })
+  }
+
+  // Si esta captura ya se leyó bien (p. ej. se perdió la respuesta y el móvil reintenta), se
+  // devuelve esa lectura: ni se vuelve a pagar ni se crea otra fila.
+  const { data: previa } = await supabase
+    .from('transcripciones')
+    .select('id')
+    .eq('imagen', ruta)
+    .eq('resultado', 'ok')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (previa?.id) {
+    const pendientes = (await apuestasPendientes(supabase).catch(() => [])).filter((p) => p.transcripcionId === previa.id)
+    if (pendientes.length) {
+      return responder(200, { transcripcionId: previa.id, revisiones: pendientes.map((p) => p.revision), indices: pendientes.map((p) => p.indice), total: pendientes[0].total, reutilizada: true })
+    }
+  }
 
   const haceUnaHora = new Date(Date.now() - 3600_000).toISOString()
   const { count } = await supabase
@@ -30,7 +54,7 @@ export async function POST(request: NextRequest) {
     .gte('created_at', haceUnaHora)
   if ((count ?? 0) >= MAX_POR_HORA) {
     return responder(429, {
-      codigo: 'limite',
+      codigo: 'tope_hora',
       error: `Has llegado al máximo de ${MAX_POR_HORA} lecturas por hora. Espera un poco o rellénala a mano.`,
     })
   }
@@ -82,7 +106,10 @@ export async function POST(request: NextRequest) {
     transcripcionId = data?.id ?? null
   }
 
-  if (!r.ok) return responder(200, { codigo: r.codigo, error: r.mensaje })
+  // Los errores temporales (saturación, límite, tiempo, conexión) se reintentan desde el móvil.
+  if (!r.ok) {
+    return responder(200, { codigo: r.codigo, error: r.mensaje, temporal: esTemporal(r.codigo), reintentarEnS: r.retryAfterS ?? null })
+  }
   if (noEsApuesta) {
     const motivo = (r.propuesta.motivo ?? '').trim().slice(0, 200)
     return responder(200, {

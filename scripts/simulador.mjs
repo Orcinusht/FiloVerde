@@ -365,7 +365,7 @@ createServer(async (req, res) => {
 
 const sel = (evento, pronostico, cuota, extra = {}) => ({
   evento, liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico, cuota, estado: null,
-  evento_fecha: '2026-11-08', evento_hora: '21:00', ...extra,
+  evento_fecha: '2026-11-08', evento_hora: '21:00', sustituto: null, ...extra,
 })
 const apuesta = (extra) => ({
   casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
@@ -483,6 +483,7 @@ const RESPUESTAS = {
   no_apuesta: { hay_apuestas: false, motivo: 'Es una foto de un perro, no un resguardo de apuesta.', apuestas: [] },
 }
 let cola = []
+let cacheCaliente = 0
 export const llamadasIA = []
 
 createServer(async (req, res) => {
@@ -543,12 +544,21 @@ createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/v1/messages')) {
     const b = JSON.parse(cuerpo)
-    const img = b.messages?.[0]?.content?.find((c) => c.type === 'image')
+    const contenido = b.messages?.[0]?.content ?? []
+    const img = contenido.find((c) => c.type === 'image')
+    const sistema = Array.isArray(b.system) ? b.system.map((x) => x.text).join('') : String(b.system ?? '')
+    const conCache = Array.isArray(b.system) && b.system.some((x) => x.cache_control)
     llamadasIA.push({
+      t: Date.now(),
+      instruccionSustituto: sistema.includes('NUNCA pongas al sustituto en "pronostico"'),
+      cacheSistema: conCache,
+      orden: contenido.map((c) => (c.type === 'image' ? 'imagen' : c.text.startsWith('<catalogo>') ? 'catalogo' : 'texto')).join(','),
+      cacheCatalogo: !!contenido.find((c) => c.type === 'text' && c.text.startsWith('<catalogo>'))?.cache_control,
+      reintentosSdk: req.headers['x-stainless-retry-count'] ?? null,
       model: b.model, beta: req.headers['anthropic-beta'] ?? null, fallbacks: b.fallbacks ?? null, effort: b.output_config?.effort,
       formato: b.output_config?.format?.type, bytesImagen: img ? Buffer.from(img.source.data, 'base64').length : 0,
       clave: req.headers['x-api-key'] ? 'presente' : 'falta', maxTokens: b.max_tokens,
-      instruccionDirecto: String(b.system ?? '').includes('indican solo el momento en que se hizo la CAPTURA'),
+      instruccionDirecto: sistema.includes('indican solo el momento en que se hizo la CAPTURA'),
       catalogo: (b.messages?.[0]?.content?.find((c) => c.type === 'text' && c.text.startsWith('<catalogo>'))?.text ?? ''),
     })
     const modo = cola.shift() ?? 'simple'
@@ -556,13 +566,26 @@ createServer(async (req, res) => {
       res.writeHead(529, { 'Content-Type': 'application/json' })
       return res.end(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }))
     }
+    // "error429:3" = límite por minuto con retry-after de 3 s · "error401" = clave mala (permanente).
+    if (modo.startsWith('error429')) {
+      const ra = modo.split(':')[1]
+      res.writeHead(429, { 'Content-Type': 'application/json', ...(ra ? { 'retry-after': ra } : {}) })
+      return res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'Number of request tokens has exceeded your per-minute rate limit' } }))
+    }
+    if (modo === 'error401') {
+      res.writeHead(401, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }))
+    }
     const texto = modo === 'json_malo' ? '{"hay_apuestas": "quizá"' : JSON.stringify(RESPUESTAS[modo])
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(
       JSON.stringify({
         id: `msg_${Date.now()}`, type: 'message', role: 'assistant', model: b.model,
         content: [{ type: 'text', text: texto }], stop_reason: 'end_turn', stop_sequence: null,
-        usage: { input_tokens: 2350, output_tokens: modo === 'dos_apuestas' ? 950 : 480, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        // Caché simulada: la 1.ª lectura escribe la parte fija; las siguientes la leen.
+        usage: conCache
+          ? { input_tokens: 1700, output_tokens: modo === 'dos_apuestas' ? 950 : 480, ...(cacheCaliente++ ? { cache_creation_input_tokens: 0, cache_read_input_tokens: 5300 } : { cache_creation_input_tokens: 5300, cache_read_input_tokens: 0 }) }
+          : { input_tokens: 2350, output_tokens: modo === 'dos_apuestas' ? 950 : 480, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
       }),
     )
   }
