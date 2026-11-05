@@ -51,17 +51,27 @@ archivo o panel ponerlas).
    **aplicada** en Supabase): movimientos (depósito, retirada, ajuste y traspaso entre casas), saldo
    global y por casa, en juego, disponible y ROI sobre bankroll; CSV de movimientos. **Verificada en
    el móvil con la cuenta de email.** Falta verificarla en producción con la cuenta de Google (35
-   apuestas). La segunda ronda está sin empezar (ver Pendiente).
+   apuestas). **Segunda ronda, parte 1: gestión de casas y estrategias** (rama
+   `fase-3-casas-estrategias`, desde el 2026-11-05; migración `20261107000001`, pendiente de pegar en
+   Supabase): Ajustes → "Casas de apuestas" y "Estrategias" (crear, renombrar, archivar y borrar sin
+   uso). Pendiente de verificar en el móvil y de fusionar. El resto de la segunda ronda, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar la Fase 3, primera ronda)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, al empezar la gestión de casas y estrategias)
 - **Verificar el Bankroll en producción con la cuenta de Google** (35 apuestas): saldos por casa y
   global con calculadora, traspaso, ajuste, editar y borrar, y el CSV de bankroll.
-- **Fase 3, segunda ronda:** evolución en el tiempo (beneficio acumulado, evolución del saldo, por
-  mes y día de la semana, drawdown), **gestión de casas y estrategias** en Ajustes (renombrar y
-  borrar) e **importación** (de CSV). Al borrar una
-  casa: impedirlo si tiene apuestas o movimientos ("Esta casa tiene N apuestas y M movimientos: no se
-  puede borrar. Puedes renombrarla"); renombrar es seguro (todo va por id). Hoy la BD ya impide
-  borrar una casa con movimientos (`on delete restrict`); con apuestas la dejaría en "Sin casa".
+- **Fase 3, segunda ronda (lo que queda):** evolución en el tiempo (beneficio acumulado, evolución
+  del saldo, por mes y día de la semana, drawdown) e **importación** (de CSV). La gestión de casas y
+  estrategias está en la rama `fase-3-casas-estrategias`.
+- **Deportes y ligas (tarea propia, después de casas y estrategias):** en el catálogo, "Renombrar
+  también en mis apuestas" con aviso previo ("Afecta a N selecciones en M apuestas") y confirmación;
+  cambio de una vez con una función de la BD (todo o nada), solo dentro del mismo deporte para las
+  ligas y recalculando el deporte resumen si cambia un deporte. Ojo: "LaLiga" y "LaLiga Hypermotion"
+  son competiciones distintas (no se unen); el mismo partido con ligas distintas es un fallo de una
+  apuesta concreta (se corrige abriéndola desde Análisis → Liga). Posible aviso "mismo partido con
+  ligas distintas".
+- **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
+  de una a otra en una función de la BD; cuidado con los traspasos entre las dos. Solo si aparece un
+  duplicado real (la regla de nombre único evita los de mayúsculas, tildes y espacios).
 - **Verificar el Análisis en producción con la cuenta de Google** (35 apuestas): cifras a mano con
   calculadora, filtro de fechas, "Muestra pequeña" y "En juego"; y los retoques (aciertos por liga,
   detalle de cada fila con el mismo recuento y vuelta al mismo sitio).
@@ -151,6 +161,8 @@ src/
         actions.ts      guardar, borrar, crear casa/estrategia, descartar captura (Server Actions)
       ajustes/          tema, coste de la IA (coste-ia.tsx), capturas guardadas (recuento y borrado),
                         copia de seguridad (copia-seguridad.tsx: descarga de los CSV),
+                        casas/ y estrategias/ (gestión: crear, renombrar, archivar y borrar sin uso;
+                        opciones/ = pantalla común pagina-opciones.tsx + gestion-opciones.tsx),
                         deportes/ (catálogo: renombrar y borrar), cuenta
       analisis/         pantalla Análisis (Fase 2): analisis.tsx (servidor: lee y calcula),
                         controles.tsx (periodo, segmento, orden, tipo y Mercado/Liga; todo en la
@@ -176,6 +188,8 @@ src/
   lib/
     apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
                       cálculos, validación del formulario, esquema de la IA (propuesta.ts),
+                      opciones.ts (casas y estrategias: nombres válidos, reservados, uso, borrado,
+                      archivadas y reconocer el nombre leído por la IA),
                       duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
                       asegurada y crédito: cálculos en céntimos), reintentos-ia.ts (errores de la
                       IA: clasificación, cuáles se reintentan, esperas y mensajes), fecha-evento.ts
@@ -193,13 +207,14 @@ src/
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
                       capturas.ts (bucket), datos.ts (lecturas de la BD), catalogo.ts y
-                      acciones-catalogo.ts (deportes y ligas), pendientes.ts (sin revisar),
+                      acciones-catalogo.ts (deportes y ligas), acciones-opciones.ts (Server Actions de
+                      casas y estrategias) y opciones.ts (sus lecturas y su uso), pendientes.ts (sin revisar),
                       limpieza.ts (capturas temporales: reintento y borrado de las antiguas)
   proxy.ts            renueva sesión y protege rutas
 supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
 tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts) + copia en CSV (exportar.test.ts)
-                      + análisis (analisis.test.ts) + bankroll (bankroll.test.ts)
+                      + análisis (analisis.test.ts) + bankroll (bankroll.test.ts) + casas y estrategias (opciones.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -222,6 +237,25 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 - `divisa` en apuestas y movimientos: si no se indica, toma la del perfil (trigger).
 - Estados y tipos con `CHECK` (no enums). Para añadir un estado: nueva migración que cambie el `CHECK`.
 - Movimientos (`movimientos_bankroll`, ampliada en la Fase 3): ver la sección "Bankroll (Fase 3)".
+- **Casas y estrategias** (migración `20261107000001`, solo aditiva y repetible): columna `archivada`
+  (no por defecto); **nombre único** por usuario sin mayúsculas, tildes ni espacios (índices
+  `casas_nombre_unico` / `estrategias_nombre_unico` con `normalizar_nombre`); **reservados** Sin casa,
+  Sin estrategia, Sin dato, Varios y Mixto (CHECK); **no se borran con apuestas** (disparador
+  `opcion_sin_apuestas`, SECURITY DEFINER solo para mirar si la cuenta sigue existiendo: al borrar la
+  CUENTA entera no bloquea nada); las casas con movimientos ya estaban protegidas (`on delete restrict`).
+  Antes de esta migración, borrar una casa o estrategia con apuestas las dejaba en "Sin casa" / "Sin
+  estrategia". Todo se enlaza por id: renombrar cambia el nombre en toda la app sin tocar cifras.
+- **Gestión en Ajustes** (`/ajustes/casas`, `/ajustes/estrategias`): lista con su uso ("N apuestas · M
+  movimientos" en casas), crear, Renombrar, Archivar / Recuperar y Borrar (solo sin uso y con
+  confirmación; si se usa: "Esta casa tiene N apuestas y M movimientos: no se puede borrar. Puedes
+  renombrarla o archivarla."). Server Actions con la sesión; el servidor valida (vacío, > 80, repetido,
+  reservado) y cuenta el uso antes de borrar; la BD lo repite. Errores en español y `[casas:…]` /
+  `[estrategias:…]` al log.
+- **Archivadas:** no salen en los desplegables para apuestas o movimientos NUEVOS; sí la que ya está
+  elegida (editar algo antiguo), como "Nombre (archivada)" con "Recuperar". Siguen contando igual en
+  Análisis, Bankroll (su tarjeta sigue visible con la etiqueta ARCHIVADA) y CSV. Una casa archivada
+  leída por la IA en una captura se reconoce como existente (`buscarPorNombre`) y se ofrece recuperarla;
+  crear una con el nombre de otra (también archivada) devuelve la existente.
 - `guardar_apuesta(p_id, p_apuesta, p_selecciones)`: guarda apuesta + selecciones de una vez
   (todo o nada). Corre con los permisos del usuario (RLS aplica). Al editar sustituye las selecciones.
 - `selecciones.orden`: orden en el resguardo. `apuestas.imagen_origen` solo puede apuntar a la
@@ -628,7 +662,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -794,3 +828,12 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-05 | `comprobar_rls_en_vivo.sql` con 9 comprobaciones nuevas de bankroll (55 en total) | Desde la fusión (2026-11-05), la versión de `main` ya es la nueva (55 comprobaciones; crea movimientos con casa) |
 | 2026-11-05 | El nombre `20261106000001` de la migración de bankroll no es una fecha real (se hizo el 2026-11-05) | Solo marca el orden; ya está aplicada y no se renombra |
 | 2026-11-05 | **Fase 3, primera ronda (Bankroll), fusionada en `main`** (rama `fase-3-bankroll`, PR #4) | Migración aplicada en Supabase; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google (35 apuestas) |
+| 2026-11-05 | **Fase 3, segunda ronda, parte 1: gestión de casas y estrategias** en la rama `fase-3-casas-estrategias` | Hoy solo se creaban al vuelo y una creada por error se quedaba para siempre |
+| 2026-11-05 | Borrar solo sin uso (0 apuestas y, en casas, 0 movimientos), en servidor y en la BD (disparador) | Borrar una en uso movería su beneficio a "Sin casa"/"Sin estrategia" y cambiaría saldos y Análisis sin avisar |
+| 2026-11-05 | El disparador no bloquea el borrado de la cuenta entera (mira si la cuenta sigue existiendo) | Borrar una cuenta con casas, estrategias, apuestas y movimientos debe seguir funcionando (probado) |
+| 2026-11-05 | Nombre único sin mayúsculas, tildes ni espacios y nombres reservados, también en la BD | Evita duplicados como "Bet365"/"bet365" y choques con las etiquetas de Análisis y Bankroll |
+| 2026-11-05 | **Archivar** (columna `archivada`) como alternativa a borrar | Ocultar de los desplegables sin perder histórico ni cifras |
+| 2026-11-05 | Las listas de casas y estrategias de los formularios incluyen las archivadas (marcadas) y el desplegable las filtra | La revisión reconoce una casa archivada leída por la IA (y ofrece recuperarla) en vez de intentar crear otra |
+| 2026-11-05 | Fusionar duplicadas: aparcado | Hoy no hay duplicados y la regla de nombre único evita los nuevos; mover datos tiene riesgo |
+| 2026-11-05 | Deportes y ligas con "renombrar también en mis apuestas": tarea propia después de esta | Las selecciones guardan el texto; requiere aviso previo y cambio todo o nada |
+| 2026-11-05 | `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (63 en total) | Nombres repetidos y reservados, borrado con apuestas y que otra cuenta no renombre, archive ni borre |

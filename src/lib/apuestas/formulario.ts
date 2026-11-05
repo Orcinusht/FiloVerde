@@ -44,7 +44,7 @@ import { esMixto } from './catalogo.ts'
 import { calcularAumento, esBasePromo, esPromoAumento, esTipoPromo, type BasePromo, type TipoPromo } from './promociones.ts'
 import { cuotaATexto } from './cuotas.ts'
 
-export type Opcion = { id: string; nombre: string }
+export type Opcion = { id: string; nombre: string; archivada?: boolean }
 
 export const MAX_SELECCIONES = 30
 export const MAX_TEXTO = 200

@@ -75,14 +75,14 @@ const num = (v: unknown) => (v == null ? null : Number(v))
 
 export async function listarCasas(): Promise<Opcion[]> {
   const supabase = await createClient()
-  const { data, error } = await supabase.from('casas_apuestas').select('id, nombre').order('nombre')
+  const { data, error } = await supabase.from('casas_apuestas').select('id, nombre, archivada').order('nombre')
   if (error) throw error
   return data ?? []
 }
 
 export async function listarEstrategias(): Promise<Opcion[]> {
   const supabase = await createClient()
-  const { data, error } = await supabase.from('estrategias').select('id, nombre').order('nombre')
+  const { data, error } = await supabase.from('estrategias').select('id, nombre, archivada').order('nombre')
   if (error) throw error
   return data ?? []
 }

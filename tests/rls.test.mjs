@@ -710,3 +710,101 @@ test('La migración de bankroll se puede pegar dos veces sin errores', async () 
   assert.ok(!nombres.includes('movimientos_bankroll_tipo_check') && !nombres.includes('movimientos_bankroll_check'), 'las reglas de la Fase 0 se sustituyen')
   await como(ANA, async (tx) => assert.equal((await tx.query(`select count(*)::int n from movimientos_bankroll`)).rows[0].n, 1))
 })
+
+// ---------- Fase 3 · Gestión de casas y estrategias ----------
+
+async function intentaComo(userId, sql, params = []) {
+  try {
+    await como(userId, (tx) => tx.query(sql, params))
+    return 'ok'
+  } catch (e) {
+    return e.message
+  }
+}
+
+test('Casas y estrategias: nombre único sin mayúsculas, tildes ni espacios; reservados prohibidos', async () => {
+  // Ana ya tiene "Casa de Ana" y "Estrategia de Ana".
+  assert.match(await intentaComo(ANA, `insert into casas_apuestas (nombre) values ('  CASA de   ana ')`), /casas_nombre_unico/)
+  assert.match(await intentaComo(ANA, `insert into estrategias (nombre) values ('Estrategía de ANA')`), /estrategias_nombre_unico/)
+  for (const r of ['Sin casa', 'sin ESTRATEGIA', 'Sin dato', 'Varios', 'Mixto', 'Sín cása']) {
+    assert.match(await intentaComo(ANA, `insert into casas_apuestas (nombre) values ($1)`, [r]), /casas_nombre_no_reservado/, r)
+    assert.match(await intentaComo(ANA, `insert into estrategias (nombre) values ($1)`, [r]), /estrategias_nombre_no_reservado/, r)
+  }
+  assert.match(await intentaComo(ANA, `update casas_apuestas set nombre = 'Varios' where id = $1`, [ids.casa]), /no_reservado/, 'tampoco al renombrar')
+  // Beto puede usar el mismo nombre que Ana (es por usuario).
+  assert.equal(await intentaComo(BETO, `insert into estrategias (nombre) values ('Estrategia de Ana')`), 'ok')
+  await como(BETO, (tx) => tx.query(`delete from estrategias where nombre = 'Estrategia de Ana'`))
+})
+
+test('Casas y estrategias: no se borran con apuestas (ni casas con movimientos); sin uso, sí', async () => {
+  assert.match(await intentaComo(ANA, `delete from casas_apuestas where id = $1`, [ids.casa]), /tiene apuestas/)
+  assert.match(await intentaComo(ANA, `delete from estrategias where id = $1`, [ids.estrategia]), /tiene apuestas/)
+  await como(ANA, async (tx) => {
+    const soloMov = (await tx.query(`insert into casas_apuestas (nombre) values ('Solo movimientos') returning id`)).rows[0].id
+    await tx.query(`insert into movimientos_bankroll (tipo, importe, casa_id) values ('deposito', 100, $1)`, [soloMov])
+    await tx.query('savepoint s')
+    await assert.rejects(tx.query(`delete from casas_apuestas where id = $1`, [soloMov]), /foreign key|violates/)
+    await tx.query('rollback to savepoint s')
+    await tx.query(`delete from movimientos_bankroll where casa_id = $1`, [soloMov])
+    await tx.query(`delete from casas_apuestas where id = $1`, [soloMov])
+    const libre = (await tx.query(`insert into estrategias (nombre) values ('Libre') returning id`)).rows[0].id
+    assert.equal((await tx.query(`delete from estrategias where id = $1 returning 1`, [libre])).rows.length, 1)
+  })
+  await como(ANA, async (tx) => {
+    const { rows } = await tx.query(`select casa_id, estrategia_id from apuestas where id = $1`, [ids.apuesta])
+    assert.deepEqual([rows[0].casa_id, rows[0].estrategia_id], [ids.casa, ids.estrategia], 'la apuesta conserva su casa y su estrategia')
+  })
+})
+
+test('Casas y estrategias: archivar no cambia nada más; Beto no renombra, archiva ni borra las de Ana', async () => {
+  await como(ANA, async (tx) => {
+    await tx.query(`update casas_apuestas set archivada = true where id = $1`, [ids.casa])
+    const { rows } = await tx.query(`select count(*)::int n from apuestas where casa_id = $1`, [ids.casa])
+    assert.ok(rows[0].n >= 1, 'sus apuestas siguen enlazadas')
+    await tx.query(`update casas_apuestas set archivada = false where id = $1`, [ids.casa])
+  })
+  await como(BETO, async (tx) => {
+    for (const [sql, p] of [
+      [`update casas_apuestas set nombre = 'Hackeada' where id = $1 returning 1`, [ids.casa]],
+      [`update casas_apuestas set archivada = true where id = $1 returning 1`, [ids.casa]],
+      [`delete from casas_apuestas where id = $1 returning 1`, [ids.casa]],
+      [`update estrategias set nombre = 'Hackeada' where id = $1 returning 1`, [ids.estrategia]],
+      [`update estrategias set archivada = true where id = $1 returning 1`, [ids.estrategia]],
+      [`delete from estrategias where id = $1 returning 1`, [ids.estrategia]],
+    ]) assert.equal((await tx.query(sql, p)).rows.length, 0, sql)
+  })
+  await como(ANA, async (tx) => {
+    const { rows } = await tx.query(`select nombre, archivada from casas_apuestas where id = $1`, [ids.casa])
+    assert.deepEqual(rows[0], { nombre: 'Casa de Ana', archivada: false })
+  })
+})
+
+test('Borrar una CUENTA entera con casas, estrategias, apuestas y movimientos sigue funcionando', async () => {
+  const CARLA = '00000000-0000-0000-0000-00000000000c'
+  await db.query(`insert into auth.users (id, email) values ($1, 'carla@test')`, [CARLA])
+  await como(CARLA, async (tx) => {
+    const c1 = (await tx.query(`insert into casas_apuestas (nombre) values ('C1') returning id`)).rows[0].id
+    const c2 = (await tx.query(`insert into casas_apuestas (nombre) values ('C2') returning id`)).rows[0].id
+    const e = (await tx.query(`insert into estrategias (nombre) values ('E') returning id`)).rows[0].id
+    const a = (await tx.query(`insert into apuestas (casa_id, estrategia_id, importe) values ($1, $2, 1000) returning id`, [c1, e])).rows[0].id
+    await tx.query(`insert into selecciones (apuesta_id, evento) values ($1, 'X')`, [a])
+    await tx.query(`insert into movimientos_bankroll (tipo, importe, casa_id, casa_destino_id) values ('traspaso', 100, $1, $2)`, [c1, c2])
+    await tx.query(`insert into movimientos_bankroll (tipo, importe, casa_id) values ('deposito', 100, $1)`, [c2])
+  })
+  await db.query(`delete from auth.users where id = $1`, [CARLA])
+  const { rows } = await db.query(
+    `select (select count(*) from casas_apuestas where user_id = $1)::int c, (select count(*) from estrategias where user_id = $1)::int e,
+            (select count(*) from apuestas where user_id = $1)::int a, (select count(*) from movimientos_bankroll where user_id = $1)::int m`,
+    [CARLA],
+  )
+  assert.deepEqual(rows[0], { c: 0, e: 0, a: 0, m: 0 })
+})
+
+test('La migración de casas y estrategias se puede pegar dos veces sin errores', async () => {
+  const sql = readFileSync(join(ROOT, 'supabase/migrations/20261107000001_fase3_casas_estrategias.sql'), 'utf8')
+  await db.exec(sql)
+  await db.exec(sql)
+  const { rows } = await db.query(`select count(*)::int n from pg_trigger where tgname in ('casas_sin_apuestas', 'estrategias_sin_apuestas')`)
+  assert.equal(rows[0].n, 2)
+  await como(ANA, async (tx) => assert.equal((await tx.query(`select count(*)::int n from casas_apuestas where archivada`)).rows[0].n, 0))
+})

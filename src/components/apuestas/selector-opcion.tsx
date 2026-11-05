@@ -1,13 +1,15 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { crearCasa, crearEstrategia } from '@/app/(app)/apuestas/actions'
+import { crearCasa, crearEstrategia, recuperarOpcion } from '@/app/(app)/apuestas/actions'
 import type { Opcion } from '@/lib/apuestas/formulario'
 import { useIdCampo } from './id-campo'
 
 const NUEVA = '__nueva__'
 
-// Desplegable de casas o estrategias con opción de crear una nueva al momento.
+// Desplegable de casas o estrategias con opción de crear una nueva al momento. Las ARCHIVADAS no
+// salen, salvo la que ya esté elegida (apuesta antigua o casa leída por la IA): esa se ve con
+// "(archivada)" y un botón para recuperarla.
 export function SelectorOpcion({
   tipo,
   opciones,
@@ -32,6 +34,22 @@ export function SelectorOpcion({
   const [error, setError] = useState<string | null>(null)
   const [pendiente, iniciar] = useTransition()
   const { id } = useIdCampo()
+  const [recuperadas, setRecuperadas] = useState<Set<string>>(new Set())
+  const lista = opciones.map((o) => (recuperadas.has(o.id) ? { ...o, archivada: false } : o))
+  const visibles = lista.filter((o) => !o.archivada || o.id === valor)
+  const elegidaArchivada = lista.find((o) => o.id === valor && o.archivada)
+
+  function recuperar(o: Opcion) {
+    setError(null)
+    iniciar(async () => {
+      const r = await recuperarOpcion(tipo, o.id)
+      if (!r.ok) {
+        setError(r.error)
+        return
+      }
+      setRecuperadas((s) => new Set(s).add(o.id))
+    })
+  }
 
   function crear(n: string) {
     setError(null)
@@ -66,9 +84,10 @@ export function SelectorOpcion({
           className={clase}
         >
           <option value="">{vacio ?? (tipo === 'casa' ? 'Sin casa' : 'Sin estrategia')}</option>
-          {opciones.map((o) => (
+          {visibles.map((o) => (
             <option key={o.id} value={o.id}>
               {o.nombre}
+              {o.archivada ? ' (archivada)' : ''}
             </option>
           ))}
           <option value={NUEVA}>+ {tipo === 'casa' ? 'Nueva casa…' : 'Nueva estrategia…'}</option>
@@ -117,6 +136,21 @@ export function SelectorOpcion({
         >
           La IA ha leído «{sugerencia}». <strong>Crear y usar</strong>
         </button>
+      )}
+      {!creando && elegidaArchivada && (
+        <div className="flex items-center justify-between gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300" role="status">
+          <span className="min-w-0">
+            «{elegidaArchivada.nombre}» está archivada (no sale para apuestas nuevas).
+          </span>
+          <button
+            type="button"
+            disabled={pendiente}
+            onClick={() => recuperar(elegidaArchivada)}
+            className="h-11 shrink-0 rounded-xl border border-amber-600/50 px-3 font-semibold disabled:opacity-50"
+          >
+            {pendiente ? '…' : 'Recuperar'}
+          </button>
+        </div>
       )}
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
     </div>

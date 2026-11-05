@@ -111,7 +111,7 @@ async function Bankroll({ searchParams }: { searchParams: Busqueda }) {
         ) : (
           <ul className="space-y-2">
             {casas.map((c) => (
-              <TarjetaCasa key={c.id} href={`/bankroll/casa/${c.id}`} nombre={c.nombre} c={b.porCasa.get(c.id)!} />
+              <TarjetaCasa key={c.id} href={`/bankroll/casa/${c.id}`} nombre={c.nombre} c={b.porCasa.get(c.id)!} archivada={c.archivada} />
             ))}
             {b.sinCasa && <TarjetaCasa href={`/bankroll/casa/${SIN_CASA}`} nombre="Sin casa" c={b.sinCasa} />}
           </ul>
