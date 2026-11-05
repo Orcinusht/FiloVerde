@@ -33,12 +33,12 @@ archivo o panel ponerlas).
    del sustituto (instrucciones v5).
    **Cola de revisión, elección de apuestas, día de la apuesta y fecha del evento fusionados el
    2026-11-04** (verificados en el móvil; sin migración; instrucciones v6).
-   **Copia de seguridad en CSV** (rama `exportar-csv`, 2026-11-04; sin migración): adelantada antes
-   de la Fase 2. Pendiente de verificar en el móvil y de fusionar.
+   **Copia de seguridad en CSV fusionada el 2026-11-05** (rama `exportar-csv`, hecha y probada el
+   2026-11-04; pruebas de GitHub Actions en verde; sin migración): adelantada antes de la Fase 2.
 2. Gráficas y métricas.
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-04, tras fusionar la cola de revisión)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar la copia de seguridad en CSV)
 - **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
@@ -600,3 +600,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | Protección contra fórmulas solo en texto libre, nunca en números | Un resultado negativo debe seguir siendo un número en Excel |
 | 2026-11-04 | Lectura en tandas de 1000; el simulador local también corta en 1000 | Supabase devuelve como mucho 1000 filas por consulta; la prueba local lo reproduce (1205 apuestas) |
 | 2026-11-04 | Sin cambios en `comprobar_rls_en_vivo.sql` | No hay tablas, permisos ni funciones nuevas: la exportación solo lee con la sesión del usuario, ya cubierto por RLS |
+| 2026-11-05 | **Copia de seguridad en CSV fusionada en `main`** (rama `exportar-csv`, PR #1) | Pruebas de GitHub Actions en verde; producción desplegada en Vercel; sin migración |
