@@ -24,12 +24,21 @@ export default function Page() {
         <CopiaSeguridad />
         <section>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">Catálogo</h2>
-          <Link
-            href="/ajustes/deportes"
-            className="flex h-12 items-center justify-between rounded-xl border border-border bg-surface px-4 text-sm font-medium"
-          >
-            Deportes y ligas <span aria-hidden="true">→</span>
-          </Link>
+          <div className="space-y-2">
+            {[
+              ['/ajustes/casas', 'Casas de apuestas'],
+              ['/ajustes/estrategias', 'Estrategias'],
+              ['/ajustes/deportes', 'Deportes y ligas'],
+            ].map(([href, texto]) => (
+              <Link
+                key={href}
+                href={href}
+                className="flex h-12 items-center justify-between rounded-xl border border-border bg-surface px-4 text-sm font-medium"
+              >
+                {texto} <span aria-hidden="true">→</span>
+              </Link>
+            ))}
+          </div>
         </section>
         <AccountSection />
       </div>

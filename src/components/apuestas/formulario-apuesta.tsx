@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { buscarPorNombre } from '@/lib/apuestas/opciones'
 import { buscarDuplicadas, guardarApuesta, type ResultadoDuplicadas } from '@/app/(app)/apuestas/actions'
 import { formatoImporte } from '@/lib/apuestas/dinero'
 import { cuotaATexto } from '@/lib/apuestas/cuotas'
@@ -110,7 +111,7 @@ export function FormularioApuesta(props: Props) {
   const [propios, setPropios] = useState<ValoresFormulario>(() => {
     const v = { ...props.inicial }
     if (!v.casa_id && props.casaDetectada) {
-      const igual = casasIniciales.find((c) => normalizar(c.nombre) === normalizar(props.casaDetectada!))
+      const igual = buscarPorNombre(casasIniciales, props.casaDetectada)
       if (igual) v.casa_id = igual.id
     }
     // Promoción leída por la IA: el dato que falte (aumento o cuota original) se calcula ya.
@@ -145,7 +146,7 @@ export function FormularioApuesta(props: Props) {
 
   // Comprobación al abrir y ~0,6 s después de cada cambio. Las respuestas antiguas se ignoran.
   const casaPendiente =
-    !valores.casa_id && !!props.casaDetectada && !casas.some((c) => normalizar(c.nombre) === normalizar(props.casaDetectada!))
+    !valores.casa_id && !!props.casaDetectada && !buscarPorNombre(casas, props.casaDetectada)
   useEffect(() => {
     if (!comprobarDuplicadas) return
     const id = ++consulta.current
@@ -513,7 +514,7 @@ export function FormularioApuesta(props: Props) {
     return { motivo: i >= 0 ? dudosos[`selecciones.${i}.${c}`] : undefined, error: errores[`selecciones.0.${c}`] }
   }
   const casaSinCrear =
-    props.casaDetectada && !casas.some((c) => normalizar(c.nombre) === normalizar(props.casaDetectada!))
+    props.casaDetectada && !buscarPorNombre(casas, props.casaDetectada)
       ? props.casaDetectada
       : null
   const varias = valores.selecciones.length > 1
@@ -1462,13 +1463,6 @@ function nombreComun(c: string) {
   return { evento: 'partido', liga: 'liga', deporte: 'deporte', evento_fecha: 'día', evento_hora: 'hora' }[c] ?? c
 }
 
-function normalizar(s: string) {
-  return s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]/gi, '')
-    .toLowerCase()
-}
 
 function porNombre(a: Opcion, b: Opcion) {
   return a.nombre.localeCompare(b.nombre, 'es')

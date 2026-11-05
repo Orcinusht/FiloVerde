@@ -9,6 +9,7 @@ import { esRutaPropia, registrarError, usuarioActual } from '@/lib/server/captur
 import { limpiarImagenSiNoSeUsa } from '@/lib/server/pendientes'
 import * as catalogo from '@/lib/server/acciones-catalogo'
 import type { Opcion } from '@/lib/apuestas/formulario'
+import { archivarOpcion, crearOpcion as crearOpcionGestion } from '@/lib/server/acciones-opciones'
 
 // Acciones de servidor: TODO lo que llega del navegador se vuelve a validar aquí.
 
@@ -211,36 +212,27 @@ async function marcarDescartada(
   return !e2
 }
 
-async function crearOpcion(tabla: 'casas_apuestas' | 'estrategias', nombre: unknown) {
-  const limpio = typeof nombre === 'string' ? nombre.trim().replace(/\s+/g, ' ') : ''
-  if (limpio.length < 1 || limpio.length > 80) return { ok: false as const, error: 'Escribe un nombre (máx. 80 letras).' }
-  try {
-    const supabase = await createClient()
-    const userId = await usuarioActual(supabase)
-    if (!userId) return { ok: false as const, error: SIN_SESION }
-
-    // Si ya existe (sin mirar mayúsculas), se usa la existente.
-    const { data: existentes } = await supabase.from(tabla).select('id, nombre').ilike('nombre', limpio.replace(/[%_\\]/g, '\\$&'))
-    if (existentes?.length) return { ok: true as const, opcion: existentes[0] as Opcion }
-
-    const { data, error } = await supabase.from(tabla).insert({ nombre: limpio }).select('id, nombre').single()
-    if (error) {
-      registrarError(`${tabla}:crear`, error)
-      return { ok: false as const, error: 'No se ha podido crear. Inténtalo de nuevo.' }
-    }
-    return { ok: true as const, opcion: data as Opcion }
-  } catch (e) {
-    registrarError(`${tabla}:crear`, e)
-    return { ok: false as const, error: 'No se ha podido crear. Inténtalo de nuevo.' }
-  }
+// Crear al vuelo desde el formulario (apuesta o movimiento) con las mismas reglas que Ajustes.
+// Si ya existe con ese nombre (sin mayúsculas, tildes ni espacios), se usa la existente, también
+// si está archivada (el desplegable ofrece recuperarla).
+async function crearAlVuelo(tipo: 'casa' | 'estrategia', nombre: unknown) {
+  const r = await crearOpcionGestion(tipo, nombre)
+  if (r.ok) return { ok: true as const, opcion: r.dato as Opcion }
+  if (r.existente) return { ok: true as const, opcion: r.existente as Opcion }
+  return { ok: false as const, error: r.error }
 }
 
 export async function crearCasa(nombre: string) {
-  return crearOpcion('casas_apuestas', nombre)
+  return crearAlVuelo('casa', nombre)
 }
 
 export async function crearEstrategia(nombre: string) {
-  return crearOpcion('estrategias', nombre)
+  return crearAlVuelo('estrategia', nombre)
+}
+
+// Recuperar (desarchivar) desde el desplegable de un formulario.
+export async function recuperarOpcion(tipo: 'casa' | 'estrategia', id: string) {
+  return archivarOpcion(tipo, id, false)
 }
 
 // ---------- Catálogo de deportes y ligas (desde el formulario) ----------

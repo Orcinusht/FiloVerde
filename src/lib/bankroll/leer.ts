@@ -6,13 +6,13 @@ import type { ApuestaBankroll, Movimiento } from './calculos.ts'
 // servidor (RLS aplica) y, además, filtra por su id, que sale de la sesión (nunca del navegador).
 // Todo en tandas de 1000 con orden fijo.
 
-export type Casa = { id: string; nombre: string }
+export type Casa = { id: string; nombre: string; archivada?: boolean }
 
 export const COLS_MOVIMIENTO = 'id, fecha, tipo, importe, casa_id, casa_destino_id, notas, created_at, updated_at'
 
 export async function leerCasas(supabase: SupabaseClient, userId: string): Promise<Casa[]> {
   const filas = await leerTodo<Casa>(async (desde, hasta) => {
-    const { data, error } = await supabase.from('casas_apuestas').select('id, nombre').eq('user_id', userId).order('id').range(desde, hasta)
+    const { data, error } = await supabase.from('casas_apuestas').select('id, nombre, archivada').eq('user_id', userId).order('id').range(desde, hasta)
     if (error) throw error
     return data ?? []
   })

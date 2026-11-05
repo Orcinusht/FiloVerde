@@ -1977,7 +1977,7 @@ for (const ancho of [320, 375, 390, 430]) {
     const ctx = await navegador.newContext({ ...movil, viewport: { width: ancho, height: 800 }, colorScheme: tema })
     await ctx.addCookies([cookieSesion(ANA)])
     const p = await ctx.newPage()
-    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/bankroll', '/bankroll/nuevo']) {
+    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/bankroll', '/bankroll/nuevo', '/ajustes/casas', '/ajustes/estrategias']) {
       await p.goto(`${APP}${ruta}`, { waitUntil: 'networkidle' })
       const ancho2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
       assert.ok(ancho2 <= 0, `${ruta} a ${ancho}px (${tema}): scroll horizontal de ${ancho2}px`)
@@ -2089,6 +2089,7 @@ bien('Fecha futura: «La fecha no puede ser futura…» y no se guarda')
 
 // Editar y borrar (con confirmación): las cifras se recalculan.
 await pag.goto(`${APP}/bankroll?tipo=retirada`)
+await pag.locator('[data-lista="movimientos"]:visible > li').first().waitFor()
 assert.equal(await pag.locator('[data-lista="movimientos"]:visible > li').count(), 1, 'filtro por tipo')
 await pag.locator('[data-lista="movimientos"]:visible > li a').first().click()
 await pag.getByLabel('Importe (€)').fill('25')
@@ -2113,6 +2114,7 @@ bien('Editar (retirada 20 → 25 €) y borrar (con confirmación) recalculan lo
 await pag.locator(`[data-casa="${casaBk.nombre}"]`).click()
 await pag.waitForURL(new RegExp(`/bankroll/casa/${casaBk.id}$`))
 await comprobarBk(pag, `[data-bloque="${casaBk.nombre}"]`, await esperadoBk(ANA.id, casaBk.id))
+await pag.locator('[data-lista="movimientos"]:visible > li').first().waitFor()
 assert.equal(await pag.locator('[data-lista="movimientos"]:visible > li').count(), 3, 'depósito, retirada y traspaso enviado')
 await pag.locator('[data-lista="movimientos"]:visible').getByText(`−30,00 €`).or(pag.locator('[data-lista="movimientos"]:visible').getByText('-30,00 €')).first().waitFor()
 assert.equal(await pag.getByRole('link', { name: 'Ver sus apuestas →' }).getAttribute('href'), `/apuestas?casa=${casaBk.id}`)
@@ -2157,6 +2159,111 @@ assert.equal(csvCarlaBk.filas.length, 1150)
 assert.equal(csvCarlaBk.filas[0].notas, "'@importe", 'protección de fórmulas')
 await ctxCarla2.close()
 bien('Carla: 1150 movimientos (más de 1000), saldos como en la BD y CSV completo')
+
+// ---------- Fase 3 · Gestión de casas y estrategias ----------
+paso('Ajustes: casas y estrategias (crear, repetidos, reservados, renombrar, archivar y borrar)')
+const filaOp = (p, nombre) => p.locator(`[data-opcion="${nombre}"]:visible`)
+await pag.goto(`${APP}/ajustes`)
+await pag.getByRole('link', { name: /Casas de apuestas/ }).click()
+await pag.waitForURL(`${APP}/ajustes/casas`)
+await pag.waitForLoadState('networkidle')
+const [usoBk] = await sql(`select (select count(*) from apuestas where casa_id = '${casaBk.id}')::int ap,
+  (select count(*) from movimientos_bankroll where casa_id = '${casaBk.id}' or casa_destino_id = '${casaBk.id}')::int mov`)
+assert.equal(
+  await filaOp(pag, casaBk.nombre).locator('[data-uso]').innerText(),
+  `${usoBk.ap} ${usoBk.ap === 1 ? 'apuesta' : 'apuestas'} · ${usoBk.mov} ${usoBk.mov === 1 ? 'movimiento' : 'movimientos'}`,
+)
+await foto('93-ajustes-casas')
+// Crear, repetido (otras mayúsculas/tildes/espacios) y reservado.
+const crearEnAjustes = async (nombre) => {
+  await pag.getByPlaceholder('Nombre de la casa').fill(nombre)
+  await pag.getByRole('button', { name: 'Crear', exact: true }).click()
+}
+await crearEnAjustes('Casa Prueba')
+await pag.getByText('«Casa Prueba» creada.').waitFor()
+await filaOp(pag, 'Casa Prueba').waitFor()
+await crearEnAjustes('  CÁSA   prueba ')
+await pag.getByText('Ya tienes una casa llamada «Casa Prueba».').waitFor()
+await crearEnAjustes('sin casa')
+await pag.getByText('«sin casa» está reservado', { exact: false }).waitFor()
+assert.equal((await sql(`select count(*)::int n from casas_apuestas where user_id = '${ANA.id}' and nombre ilike '%prueba%'`))[0].n, 1)
+bien(`Lista con su uso (${usoBk.ap} apuestas · ${usoBk.mov} movimientos); crear «Casa Prueba»; «CÁSA prueba» y «sin casa» rechazadas`)
+
+// Renombrar una casa en uso: el nombre cambia en Análisis y Bankroll sin tocar ninguna cifra.
+await pag.goto(`${APP}/analisis?seg=casa`)
+const filaAnalisisAntes = await pag.locator('[data-tabla="segmentos"]:visible > li', { hasText: casaBk.nombre }).first().locator('dl').innerText()
+await pag.goto(`${APP}/bankroll`)
+const bkAntes = await pag.locator(`[data-casa="${casaBk.nombre}"]:visible dl`).innerText()
+const globalAntesR = await pag.locator('[data-bloque="global"]:visible dl').innerText()
+await pag.goto(`${APP}/ajustes/casas`, { waitUntil: 'networkidle' })
+await filaOp(pag, casaBk.nombre).getByRole('button', { name: 'Renombrar' }).click()
+await pag.getByLabel(`Nuevo nombre de ${casaBk.nombre}`).fill('Casa Renombrada')
+await pag.getByRole('button', { name: 'Guardar', exact: true }).click()
+await pag.getByText('Ahora se llama «Casa Renombrada».').waitFor()
+await pag.goto(`${APP}/analisis?seg=casa`)
+assert.equal(await pag.locator('[data-tabla="segmentos"]:visible > li', { hasText: 'Casa Renombrada' }).first().locator('dl').innerText(), filaAnalisisAntes, 'Análisis: mismas cifras')
+assert.equal(await pag.locator('[data-tabla="segmentos"]:visible > li', { hasText: casaBk.nombre }).count(), 0, 'el nombre viejo ya no sale')
+await pag.goto(`${APP}/bankroll`)
+assert.equal(await pag.locator('[data-casa="Casa Renombrada"]:visible dl').innerText(), bkAntes, 'Bankroll: mismas cifras')
+assert.equal(await pag.locator('[data-bloque="global"]:visible dl').innerText(), globalAntesR)
+bien(`«${casaBk.nombre}» → «Casa Renombrada»: mismo nombre nuevo en Análisis y Bankroll, mismas cifras`)
+
+// Borrar: en uso no; sin uso, tras confirmar.
+await pag.goto(`${APP}/ajustes/casas`, { waitUntil: 'networkidle' })
+await filaOp(pag, 'Casa Renombrada').getByRole('button', { name: 'Borrar' }).click()
+await filaOp(pag, 'Casa Renombrada').getByText(`Esta casa tiene ${usoBk.ap} apuestas y`, { exact: false }).waitFor()
+await filaOp(pag, 'Casa Prueba').getByRole('button', { name: 'Borrar' }).click()
+await pag.getByRole('alertdialog', { name: 'Borrar Casa Prueba' }).waitFor()
+await pag.getByRole('button', { name: 'Sí, borrar' }).click()
+await pag.getByText('«Casa Prueba» borrada.').waitFor()
+assert.equal((await sql(`select count(*)::int n from casas_apuestas where user_id = '${ANA.id}' and nombre = 'Casa Prueba'`))[0].n, 0)
+assert.equal((await sql(`select count(*)::int n from casas_apuestas where id = '${casaBk.id}'`))[0].n, 1, 'la casa en uso sigue')
+bien('Borrar una casa en uso: «Esta casa tiene N apuestas y M movimientos…»; la de prueba se borra tras confirmar')
+
+// Archivar: fuera de los desplegables nuevos; sigue en Bankroll (con su saldo) y en Análisis.
+await filaOp(pag, 'Casa Nueva').getByRole('button', { name: 'Archivar' }).click()
+await pag.getByText('«Casa Nueva» archivada.').waitFor()
+await pag.locator('[data-lista="archivadas"]:visible [data-opcion="Casa Nueva"]').waitFor()
+await pag.goto(`${APP}/bankroll`)
+await pag.locator('[data-casa="Casa Nueva"]:visible').getByText('Archivada').waitFor()
+assert.equal(await pag.locator('[data-casa="Casa Nueva"]:visible [data-cifra="Saldo"] dd').innerText(), eur(3000), 'sigue con su saldo')
+await pag.goto(`${APP}/bankroll/nuevo`, { waitUntil: 'networkidle' })
+assert.equal(await pag.getByLabel('Casa', { exact: true }).locator('option', { hasText: 'Casa Nueva' }).count(), 0, 'no sale para un movimiento nuevo')
+const [traspasoCN] = await sql(`select id from movimientos_bankroll where casa_destino_id = '${casaNueva.id}' limit 1`)
+await pag.goto(`${APP}/bankroll/${traspasoCN.id}`, { waitUntil: 'networkidle' })
+await pag.getByLabel('Casa de destino', { exact: true }).locator('option:checked', { hasText: 'Casa Nueva (archivada)' }).waitFor({ state: 'attached' })
+bien('Archivada: en Bankroll con su saldo y etiqueta; fuera del desplegable de un movimiento nuevo; visible al editar el traspaso que la usa')
+
+// Estrategias: misma pantalla.
+await pag.goto(`${APP}/ajustes/estrategias`, { waitUntil: 'networkidle' })
+await pag.getByPlaceholder('Nombre de la estrategia').fill('Valor')
+await pag.getByRole('button', { name: 'Crear', exact: true }).click()
+await pag.getByText('«Valor» creada.').waitFor()
+await pag.getByPlaceholder('Nombre de la estrategia').fill('VÁLOR')
+await pag.getByRole('button', { name: 'Crear', exact: true }).click()
+await pag.getByText('Ya tienes una estrategia llamada «Valor».').waitFor()
+await filaOp(pag, 'Valor').getByRole('button', { name: 'Borrar' }).click()
+await pag.getByRole('button', { name: 'Sí, borrar' }).click()
+await pag.getByText('«Valor» borrada.').waitFor()
+bien('Estrategias: crear, repetida rechazada y borrar sin uso')
+
+// Una casa ARCHIVADA leída por la IA: la revisión la reconoce (no intenta crear otra) y ofrece recuperarla.
+await pag.goto(`${APP}/ajustes/casas`, { waitUntil: 'networkidle' })
+await filaOp(pag, 'Codere').getByRole('button', { name: 'Archivar' }).click()
+await pag.getByText('«Codere» archivada.').waitFor()
+await cola(['combinada'])
+await pag.goto(`${APP}/apuestas/nueva`, { waitUntil: 'networkidle' })
+await pag.locator('input[type=file][multiple]').setInputFiles([capCombinada])
+await pag.getByRole('button', { name: 'Guardar', exact: true }).waitFor({ timeout: 30000 })
+await pag.getByLabel('Casa de apuestas').locator('option:checked', { hasText: 'Codere (archivada)' }).waitFor({ state: 'attached' })
+assert.equal(await pag.getByText('Crear y usar').count(), 0, 'no ofrece crear otra «Codere»')
+await pag.getByText('«Codere» está archivada').waitFor()
+await foto('94-revision-casa-archivada')
+await pag.getByRole('button', { name: 'Recuperar', exact: true }).click()
+await pag.getByText('«Codere» está archivada').waitFor({ state: 'detached' })
+assert.equal((await sql(`select archivada from casas_apuestas where user_id = '${ANA.id}' and nombre = 'Codere'`))[0].archivada, false)
+assert.equal((await sql(`select count(*)::int n from casas_apuestas where user_id = '${ANA.id}' and nombre ilike 'codere%'`))[0].n, 1, 'no se creó otra')
+bien('Captura con una casa archivada: la revisión la reconoce como «Codere (archivada)», ofrece «Recuperar» y no crea otra')
 
 // Sin sesión: no hay archivo.
 const sinSesionCsv = await (await navegador.newContext()).request.get(`${APP}/api/exportar/apuestas`, { maxRedirects: 0 })

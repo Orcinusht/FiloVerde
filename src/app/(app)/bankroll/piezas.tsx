@@ -40,12 +40,15 @@ export function BloqueCifras({ c, titulo }: { c: Cifras; titulo?: string }) {
 }
 
 // Tarjeta de una casa en la pantalla principal: abre su detalle.
-export function TarjetaCasa({ href, nombre, c }: { href: string; nombre: string; c: Cifras }) {
+export function TarjetaCasa({ href, nombre, c, archivada = false }: { href: string; nombre: string; c: Cifras; archivada?: boolean }) {
   return (
     <li>
       <Link href={href} className="flex items-center gap-2 rounded-2xl border border-border bg-surface p-3 active:bg-background" data-casa={nombre}>
         <div className="min-w-0 flex-1 space-y-2">
-          <p className="break-words text-sm font-semibold">{nombre}</p>
+          <p className="break-words text-sm font-semibold">
+            {nombre}
+            {archivada && <span className="ml-1.5 inline-block rounded bg-border/60 px-1.5 py-px align-[1px] text-[10px] font-bold uppercase tracking-wide text-muted">Archivada</span>}
+          </p>
           <dl className="grid grid-cols-3 gap-x-2 gap-y-1.5 text-xs">
             {c.saldo != null && <Dato n="Saldo" v={eur(c.saldo)} />}
             <Dato n="En juego" v={eur(c.enJuego)} />

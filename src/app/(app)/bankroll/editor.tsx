@@ -63,9 +63,11 @@ export async function EditorMovimiento({ id, sp }: { id: string | null; sp: Busq
     )
   }
 
-  const ids = new Set(casas.map((c) => c.id))
+  // Para un movimiento nuevo solo se preselecciona una casa NO archivada.
+  const activas = casas.filter((c) => !c.archivada)
+  const ids = new Set(activas.map((c) => c.id))
   const pedida = uno(sp.casa)
-  const casaInicial = ids.has(pedida) ? pedida : ultimaCasa && ids.has(ultimaCasa) ? ultimaCasa : casas.length === 1 ? casas[0].id : ''
+  const casaInicial = ids.has(pedida) ? pedida : ultimaCasa && ids.has(ultimaCasa) ? ultimaCasa : activas.length === 1 ? activas[0].id : ''
   const hoy = diaEspana(new Date())
   const inicial: ValoresMovimiento = mov
     ? {

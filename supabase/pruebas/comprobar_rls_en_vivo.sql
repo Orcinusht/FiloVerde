@@ -247,6 +247,45 @@ exception when others then
     case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
 end $$;
 
+-- Gestión de casas y estrategias (Fase 3, segunda ronda)
+with x as (insert into estrategias (nombre) values ('PRUEBA-RLS-E') returning id)
+  insert into ids select 'estrategia', id from x;
+with x as (insert into apuestas (estrategia_id, importe, cuota_total, notas)
+           select v, 1000, 2, 'PRUEBA-RLS' from ids where k = 'estrategia' returning id)
+  insert into ids select 'apuesta_e', id from x;
+do $$
+begin
+  insert into casas_apuestas (nombre) values ('  prueba-rls ');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (56, 'A crea una casa repetida (otras mayúsculas y espacios)', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$
+begin
+  insert into casas_apuestas (nombre) values ('Sin casa');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (57, 'A crea una casa llamada «Sin casa»', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$
+begin
+  delete from casas_apuestas where id in (select v from ids where k = 'casa');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (58, 'A borra una casa que tiene apuestas', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$
+begin
+  delete from estrategias where id in (select v from ids where k = 'estrategia');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (59, 'A borra una estrategia que tiene apuestas', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+
 reset role;
 
 -- ---------- 2. Como B: intentar acceder a lo de A ----------
@@ -393,6 +432,14 @@ exception when others then
     case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
 end $$;
 
+-- Gestión de casas y estrategias (Fase 3, segunda ronda)
+with x as (update casas_apuestas set nombre = 'HACKEADA' where id in (select v from ids where k = 'casa') returning 1)
+  insert into resultado select 60, 'B renombra una casa de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+with x as (update casas_apuestas set archivada = true where id in (select v from ids where k = 'casa') returning 1)
+  insert into resultado select 61, 'B archiva una casa de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+with x as (delete from estrategias where id in (select v from ids where k = 'estrategia') returning 1)
+  insert into resultado select 62, 'B borra una estrategia de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+
 reset role;
 
 -- ---------- 3. Sin sesión (visitante anónimo) ----------
@@ -427,9 +474,16 @@ insert into resultado
          'importe ' || coalesce(max(importe)::text, 'BORRADO'), coalesce(max(importe), 0) = 1
   from movimientos_bankroll where id in (select v from ids where k = 'movimiento');
 
+insert into resultado
+  select 63, 'La casa de A sigue intacta tras los intentos de B', 'PRUEBA-RLS, no archivada',
+         coalesce(max(nombre), 'BORRADA') || case when bool_or(archivada) then ', archivada' else ', no archivada' end,
+         max(nombre) = 'PRUEBA-RLS' and not bool_or(archivada)
+  from casas_apuestas where id in (select v from ids where k = 'casa');
+
 delete from apuestas where id in (select v from ids);             -- borra también su selección
 delete from movimientos_bankroll where id in (select v from ids); -- antes que las casas (no se puede borrar una casa con movimientos)
-delete from casas_apuestas where id in (select v from ids);
+delete from casas_apuestas where id in (select v from ids);       -- ya sin apuestas ni movimientos
+delete from estrategias where id in (select v from ids);
 delete from transcripciones where id in (select v from ids);
 delete from deportes where id in (select v from ids);            -- borra también su liga
 
