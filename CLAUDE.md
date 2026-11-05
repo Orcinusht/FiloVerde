@@ -35,10 +35,19 @@ archivo o panel ponerlas).
    2026-11-04** (verificados en el móvil; sin migración; instrucciones v6).
    **Copia de seguridad en CSV fusionada el 2026-11-05** (rama `exportar-csv`, hecha y probada el
    2026-11-04; pruebas de GitHub Actions en verde; sin migración): adelantada antes de la Fase 2.
-2. Gráficas y métricas.
+   **Verificada por el usuario en producción el 2026-11-05.**
+2. **Gráficas y métricas** (rama `fase-2-analisis`, desde el 2026-11-05; sin migración): pantalla
+   **Análisis** (antes "Gráficas") con filtro de fechas, resumen, segmentos con barras de beneficio,
+   aciertos por selección y mercado, y resumen descriptivo. Pendiente de verificar en el móvil y de
+   fusionar. Reglas de cálculo en la sección "Análisis (Fase 2)".
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar la copia de seguridad en CSV)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, al empezar la Fase 2 en `fase-2-analisis`)
+- **Resto de reglas de promociones de la Fase 2** (ver Principios): beneficio por promociones
+  APARTE, "aumento cobrado" solo si se gana y aumento negativo como dato dudoso. De momento el
+  Análisis solo aplica la regla de las apuestas **con crédito**.
+- **Comparar "precipitada" al registrar frente a al resolver** (`precipitada_momento`): aparcado
+  (las apuestas históricas se registran ya resueltas).
 - **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
@@ -121,7 +130,10 @@ src/
       ajustes/          tema, coste de la IA (coste-ia.tsx), capturas guardadas (recuento y borrado),
                         copia de seguridad (copia-seguridad.tsx: descarga de los CSV),
                         deportes/ (catálogo: renombrar y borrar), cuenta
-      graficas/ bankroll/
+      analisis/         pantalla Análisis (Fase 2): analisis.tsx (servidor: lee y calcula),
+                        controles.tsx (periodo, segmento, orden y tipo; todo en la dirección).
+                        /graficas redirige aquí (next.config.ts)
+      bankroll/
     api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada, solo en la revisión)
                       · reintentar/ (reintenta en silencio los borrados de imágenes que fallaron)
     api/exportar/     GET apuestas/ y selecciones/ (copia de seguridad en CSV; responder.ts = común)
@@ -143,6 +155,8 @@ src/
                       (traduce el texto de la fecha del evento), cola.ts (estados de la cola)
     exportar/         csv.ts (formato: celdas, columnas, lectura en tandas) · leer.ts (consultas
                       con la sesión del usuario; sin claves, se prueba con un cliente falso)
+    analisis/         calculos.ts (funciones puras: métricas, segmentos, rachas, periodos,
+                      MUESTRA_MINIMA) · leer.ts (consultas con la sesión, en tandas de 1000)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
@@ -153,6 +167,7 @@ src/
 supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
 tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts) + copia en CSV (exportar.test.ts)
+                      + análisis (analisis.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -326,6 +341,55 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 **Cambios en la base de datos = nueva migración** en `supabase/migrations/` (nunca editar una
 ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
 
+## Análisis (Fase 2)
+
+Pantalla `/analisis` (pestaña "Análisis"). Cálculos en `src/lib/analisis/calculos.ts` (funciones
+puras, probadas en `tests/analisis.test.ts`); lectura en `src/lib/analisis/leer.ts`, en el servidor
+con la sesión del usuario (RLS) y filtrando además por su id (de la sesión, nunca del navegador):
+apuestas resueltas y pendientes del periodo (las anuladas no se leen), en tandas de 1000 con orden
+fijo (fecha, creación, id), sus selecciones (por lotes de 150 ids) y los nombres de casa y
+estrategia. Error → mensaje en español y `[analisis:leer]` al log. Sin migración.
+
+- **Filtro de fechas** (en la dirección: `?periodo=mes|30d|ano|personalizado&desde=&hasta=`): Todo,
+  Este mes, Últimos 30 días (contando hoy), Este año y Personalizado (los dos días incluidos; al
+  revés se dan la vuelta). Por `apuestas.fecha`, con los días de **España**. Se filtra en la
+  consulta. **Todo** respeta el filtro: resumen, "En juego", rachas, segmentos y aciertos.
+- **Resueltas** = `ganada`, `perdida`, `cash_out`, `media_ganada`, `media_perdida` con resultado
+  económico. Anuladas y pendientes fuera de todas las métricas; las pendientes salen aparte en
+  **"En juego"** (número e importe). Una resuelta sin resultado no cuenta y sale un aviso (hoy no hay).
+- `resultado_economico` es el **beneficio neto** (ver "Base de datos"); beneficio = su suma.
+- **Importe apostado** = importe completo (también en medias y cash out). **Yield** = beneficio /
+  importe apostado. **% de acierto** = resultado > 0 / (> 0 + < 0); un resultado exactamente 0
+  cuenta en resueltas, importe y yield, pero no en el acierto. **Cuota media** = media simple de la
+  cuota total (de las que la tienen). **Importe medio** = importe apostado / resueltas.
+- **Con crédito** (`promo_tipo = 'credito'`): su resultado SÍ suma al beneficio neto, pero NO entran
+  en el importe apostado, el importe medio, el yield ni el % de acierto (numerador y denominador),
+  tampoco dentro de cada segmento. Si hay alguna: "Con crédito: N apuestas, X € obtenidos". Las
+  demás promociones cuentan como apuestas normales.
+- **Rachas** (solo con las apuestas del periodo; se dice en pantalla): por fecha (desempate:
+  creación, id); > 0 suma a la ganadora, < 0 a la perdedora; 0 y anuladas ni rompen ni suman.
+  Actual (con su signo), mejor ganadora y peor perdedora.
+- Cualquier división por cero → **"—"**. Se cuentan APUESTAS, no selecciones.
+- **Segmentos**: casa ("Sin casa"), estrategia ("Sin estrategia"), tipo, deporte (`apuestas.deporte`,
+  con "Mixto"), liga (deporte + liga), mercado, rango de cuota (sobre la total, con `<=`: Hasta 1,50
+  · 1,51 – 2,00 · 2,01 – 3,00 · Más de 3,00; sin cuota → "Sin dato"), directo (Pre-partido · Directo
+  viendo · Directo sin ver) y precipitada (Sí · No). Cada uno: nº, apostado, beneficio, yield,
+  acierto; orden por beneficio o por nº (`?seg=…&orden=n`). Liga y mercado: la apuesta cuenta solo
+  si TODAS sus selecciones coinciden (sin mayúsculas, tildes ni espacios de más; se muestra la forma
+  más usada); si no, "Varios"; todas vacías → "Sin dato"; dato + vacío → "Varios".
+- **"Muestra pequeña"** con n < `MUESTRA_MINIMA` (10; constante única en `calculos.ts`).
+- **Barras** de beneficio horizontales desde una línea central (verde positivo, rojo negativo), con
+  HTML/CSS propio, sin librería de gráficas.
+- **Aciertos por selección y mercado** (sin dinero): selecciones con estado propio `ganada` (verde)
+  o `perdida` (roja) de apuestas resueltas; % verdes y nº; "Muestra pequeña"; filtro por tipo de
+  apuesta (`?tipo=mismo_partido`).
+- **Resumen descriptivo** (por código, no por IA): nº de resueltas y beneficio, y por cada segmento
+  el de más y el de menos beneficio ENTRE los de n ≥ 10 (sin "Varios" ni "Sin …"). Si ninguno llega:
+  "Todavía no hay segmentos con muestra suficiente". Sin recomendaciones ni pronósticos (la prueba
+  lo comprueba).
+- **Avisos fijos** en pantalla: qué cuenta (resueltas), sin marcar = pre-partido y normal, y que con
+  muestra pequeña no se saca ninguna conclusión.
+
 ## Claves y seguridad
 
 - Claves en `.env.local` (en `.gitignore`) y en Vercel → Settings → Environment Variables.
@@ -468,7 +532,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -601,3 +665,13 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-04 | Lectura en tandas de 1000; el simulador local también corta en 1000 | Supabase devuelve como mucho 1000 filas por consulta; la prueba local lo reproduce (1205 apuestas) |
 | 2026-11-04 | Sin cambios en `comprobar_rls_en_vivo.sql` | No hay tablas, permisos ni funciones nuevas: la exportación solo lee con la sesión del usuario, ya cubierto por RLS |
 | 2026-11-05 | **Copia de seguridad en CSV fusionada en `main`** (rama `exportar-csv`, PR #1) | Pruebas de GitHub Actions en verde; producción desplegada en Vercel; sin migración |
+| 2026-11-05 | Copia de seguridad en CSV **verificada por el usuario en producción** | Descarga y apertura comprobadas en el móvil |
+| 2026-11-05 | **Fase 2 empezada** en la rama `fase-2-analisis`: pestaña "Gráficas" → **"Análisis"** (`/analisis`; `/graficas` redirige) | Reglas de cálculo cerradas por el usuario (sección "Análisis (Fase 2)") |
+| 2026-11-05 | Cálculos en funciones puras (`lib/analisis/calculos.ts`) y lectura en el servidor con la sesión, en tandas de 1000; sin migración ni cálculo en la BD | Probables con `npm test`; el volumen es pequeño; el móvil no habla directo con Supabase |
+| 2026-11-05 | Con crédito: suman al beneficio neto, fuera del importe, yield y acierto (también por segmento) | Su importe no es dinero propio: el yield no sale inflado (regla de Principios, ajustada por el usuario) |
+| 2026-11-05 | Liga y mercado agrupados sin mayúsculas, tildes ni espacios; la apuesta cuenta solo si todas sus selecciones coinciden ("Varios" / "Sin dato") | "1X2" y "1x2" son el mismo mercado; una combinada mixta no se reparte |
+| 2026-11-05 | Barras de beneficio con HTML/CSS propio, sin Recharts | 0 KB extra, sin riesgo con Next 16 / React 19, horizontales para nombres largos en el móvil; revisar si la Fase 3 necesita líneas |
+| 2026-11-05 | Filtros de la pantalla en la dirección (`periodo`, `desde`, `hasta`, `seg`, `orden`, `tipo`) | Se puede recargar o volver atrás sin perderlos |
+| 2026-11-05 | `MUESTRA_MINIMA = 10` en un solo sitio; el resumen descriptivo solo cita segmentos con n ≥ 10 y con valor concreto | Con pocas apuestas las cifras engañan; sin consejos |
+| 2026-11-05 | El simulador local admite el filtro `lt` (además de corte a 1000 filas) | La prueba completa usa el filtro de fechas real |
+| 2026-11-05 | Sin cambios en `comprobar_rls_en_vivo.sql` | Sin tablas, permisos ni funciones nuevas: solo lecturas con la sesión, ya cubiertas por RLS (prueba nueva en `rls.test.mjs` con las consultas del Análisis) |

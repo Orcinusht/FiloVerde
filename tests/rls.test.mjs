@@ -607,3 +607,23 @@ test('Exportar a CSV: Beto, con las consultas de la exportación y el id de Ana,
     assert.ok(rows.length >= 1)
   })
 })
+
+test('Análisis: Beto, con las consultas de la pantalla Análisis y el id de Ana, no obtiene nada de ella', async () => {
+  // Mismas consultas que src/lib/analisis/leer.ts (filtro por user_id, estados y fechas + RLS).
+  const estados = ['ganada', 'perdida', 'cash_out', 'media_ganada', 'media_perdida', 'pendiente']
+  await como(BETO, async (tx) => {
+    const a = await tx.query(
+      `select id, importe, resultado_economico, promo_tipo from apuestas
+        where user_id = $1 and estado = any($2) and fecha >= $3 and fecha < $4
+        order by fecha, created_at, id limit 1000 offset 0`,
+      [ANA, estados, '2000-01-01', '2100-01-01'],
+    )
+    assert.equal(a.rows.length, 0, 'apuestas: 0 filas de Ana')
+    const s = await tx.query(`select apuesta_id, mercado from selecciones where user_id = $1 and apuesta_id = any($2) order by id limit 1000`, [ANA, [ids.apuesta]])
+    assert.equal(s.rows.length, 0, 'selecciones: 0 filas de Ana aunque conozca el id de su apuesta')
+  })
+  await como(ANA, async (tx) => {
+    const a = await tx.query(`select id from apuestas where user_id = $1 and estado = any($2) order by fecha, created_at, id limit 1000`, [ANA, estados])
+    assert.ok(a.rows.length >= 1, 'Ana sí ve las suyas')
+  })
+})
