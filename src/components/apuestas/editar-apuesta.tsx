@@ -50,8 +50,10 @@ export function EditarApuesta({
   // Tras guardar o borrar bien: a la lista de la que venía (con sus filtros), REEMPLAZANDO
   // esta pantalla en el historial (Atrás no la vuelve a abrir) y con datos frescos.
   function volver(aviso: string) {
-    avisarAlVolver(aviso)
-    router.replace(rutaDeVuelta(), { scroll: false })
+    const destino = rutaDeVuelta()
+    // El aviso breve solo lo muestra la lista de Apuestas (desde Análisis se vuelve sin aviso).
+    if (destino.startsWith('/apuestas')) avisarAlVolver(aviso)
+    router.replace(destino, { scroll: false })
     router.refresh()
   }
 

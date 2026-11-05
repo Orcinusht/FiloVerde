@@ -40,12 +40,15 @@ archivo o panel ponerlas).
    GitHub Actions en verde; sin migración): pantalla **Análisis** (antes "Gráficas") con filtro de
    fechas, resumen, segmentos con barras de beneficio, aciertos por selección y mercado, y resumen
    descriptivo. **Verificada en el móvil con la cuenta de email (5 apuestas).** Falta verificarla en
-   producción con la cuenta de Google (39 resueltas). Reglas de cálculo en la sección "Análisis
+   producción con la cuenta de Google (35 apuestas). Reglas de cálculo en la sección "Análisis
    (Fase 2)".
+   **Retoques del Análisis** (rama `fase-2-retoques-analisis`, desde el 2026-11-05; sin migración):
+   aciertos también por liga, cada fila abre el detalle con sus apuestas y se quita "En cifras".
+   Pendiente de verificar en el móvil y de fusionar.
 3. Pendiente de definir.
 
 ### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar la Fase 2)
-- **Verificar el Análisis en producción con la cuenta de Google** (39 resueltas): cifras a mano con
+- **Verificar el Análisis en producción con la cuenta de Google** (35 apuestas): cifras a mano con
   calculadora, filtro de fechas, "Muestra pequeña" y "En juego".
 - **Resto de reglas de promociones de la Fase 2** (ver Principios): beneficio por promociones
   APARTE, "aumento cobrado" solo si se gana y aumento negativo como dato dudoso. De momento el
@@ -135,8 +138,10 @@ src/
                         copia de seguridad (copia-seguridad.tsx: descarga de los CSV),
                         deportes/ (catálogo: renombrar y borrar), cuenta
       analisis/         pantalla Análisis (Fase 2): analisis.tsx (servidor: lee y calcula),
-                        controles.tsx (periodo, segmento, orden y tipo; todo en la dirección).
-                        /graficas redirige aquí (next.config.ts)
+                        controles.tsx (periodo, segmento, orden, tipo y Mercado/Liga; todo en la
+                        dirección). /graficas redirige aquí (next.config.ts)
+        detalle/          las apuestas que forman una fila (segmento o aciertos), con la tarjeta de
+                          la lista, Todas/Verdes/Rojas en aciertos y páginas de 50
       bankroll/
     api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada, solo en la revisión)
                       · reintentar/ (reintenta en silencio los borrados de imágenes que fallaron)
@@ -149,7 +154,8 @@ src/
   components/         piezas de interfaz reutilizables
     apuestas/         formulario de revisión, flujo de capturas (registro-capturas.tsx: cola con
                       Anterior/Siguiente y resumen), eleccion-apuestas.tsx ("¿Cuáles quieres
-                      guardar?"), lista, filtros, visor de captura, selector-hora.tsx
+                      guardar?"), lista, tarjeta-apuesta.tsx (la tarjeta de la lista, también en el
+                      detalle de Análisis), filtros, visor de captura, selector-hora.tsx
   lib/
     apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
                       cálculos, validación del formulario, esquema de la IA (propuesta.ts),
@@ -159,9 +165,12 @@ src/
                       (traduce el texto de la fecha del evento), cola.ts (estados de la cola)
     exportar/         csv.ts (formato: celdas, columnas, lectura en tandas) · leer.ts (consultas
                       con la sesión del usuario; sin claves, se prueba con un cliente falso)
-    analisis/         calculos.ts (funciones puras: métricas, segmentos, rachas, periodos,
-                      MUESTRA_MINIMA) · leer.ts (consultas con la sesión, en tandas de 1000)
-    navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC)
+    analisis/         calculos.ts (funciones puras: métricas, segmentos y aciertos con los ids de
+                      sus apuestas, detalle, rachas, periodos, MUESTRA_MINIMA) · leer.ts (consultas
+                      con la sesión, en tandas de 1000) · direccion.ts (enlaces de Análisis y del
+                      detalle, y lectura de sus parámetros)
+    navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC) · volver-a-lista.ts (vuelta tras
+                      guardar/borrar; `rutaVueltaSegura`: ?volver= solo a /apuestas o /analisis…)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
                       capturas.ts (bucket), datos.ts (lecturas de la BD), catalogo.ts y
@@ -384,13 +393,31 @@ estrategia. Error → mensaje en español y `[analisis:leer]` al log. Sin migrac
 - **"Muestra pequeña"** con n < `MUESTRA_MINIMA` (10; constante única en `calculos.ts`).
 - **Barras** de beneficio horizontales desde una línea central (verde positivo, rojo negativo), con
   HTML/CSS propio, sin librería de gráficas.
-- **Aciertos por selección y mercado** (sin dinero): selecciones con estado propio `ganada` (verde)
-  o `perdida` (roja) de apuestas resueltas; % verdes y nº; "Muestra pequeña"; filtro por tipo de
-  apuesta (`?tipo=mismo_partido`).
-- **Resumen descriptivo** (por código, no por IA): nº de resueltas y beneficio, y por cada segmento
-  el de más y el de menos beneficio ENTRE los de n ≥ 10 (sin "Varios" ni "Sin …"). Si ninguno llega:
-  "Todavía no hay segmentos con muestra suficiente". Sin recomendaciones ni pronósticos (la prueba
-  lo comprueba).
+- **Aciertos por selección** (sin dinero: el dinero es de la apuesta y no se reparte entre
+  selecciones), agrupados por **Mercado** o por **Liga** (deporte + liga, sin mayúsculas, tildes ni
+  espacios; `?ac=liga`): selecciones con estado propio `ganada` (verde) o `perdida` (roja) de
+  apuestas resueltas; verdes, rojas, % verdes y total; "Muestra pequeña"; filtro por tipo de apuesta
+  (`?tipo=mismo_partido`). El beneficio por mercado o liga está en los segmentos.
+- **Detalle de cada fila** (`/analisis/detalle`, desde el 2026-11-05): TODAS las filas (segmentos y
+  aciertos, también "Varios" y "Sin dato") se pueden pulsar y muestran las apuestas que forman esa
+  cifra, con la tarjeta de la lista de Apuestas. Las funciones de cálculo devuelven los **ids** de
+  las apuestas de cada fila (`segmentar`, `aciertos`, `detalle`): la lista y la cifra salen de la
+  misma fuente y no pueden diferir (lo prueban `npm test` en los 9 segmentos y las 2 tablas, y la
+  prueba local en el navegador). Cabecera: "Mercado: X · desde a hasta · N apuestas"; en aciertos,
+  "N selecciones en M apuestas" con **Todas / Verdes / Rojas** (`?color=`). Solo resueltas. Páginas
+  de 50. Respeta el periodo y el tipo. El servidor vuelve a leer y calcular (no se pasan ids por la
+  dirección).
+- **Todo en la dirección**: Análisis (`periodo`, `desde`, `hasta`, `seg`, `orden`, `ac`, `tipo`) →
+  detalle (lo mismo + `vista`, `clave`, `color`, `pagina`) → apuesta (`?volver=` con la dirección
+  del detalle). "← Análisis" y guardar o borrar en la apuesta vuelven al mismo sitio (sin el aviso
+  breve, que es de la lista). `lib/analisis/direccion.ts` construye y lee las direcciones
+  (URLSearchParams codifica tildes, espacios y símbolos).
+- **`?volver=` seguro** (`rutaVueltaSegura`): solo `/apuestas` o `/analisis` seguido de nada, "/" o
+  "/" + minúsculas, cifras y guiones, y después opcionalmente "?…". Rechaza `//dominio`, `/\dominio`,
+  `/analisisx`, `/analisis@dominio`, sus versiones con `%2F`/`%5C` y cualquier dirección externa
+  (si no vale, vuelve a `/apuestas`).
+- **"En cifras" (resumen descriptivo) eliminado el 2026-11-05**: no se entendía en 5 segundos y
+  repetía las tarjetas y el orden por beneficio de las tablas.
 - **Avisos fijos** en pantalla: qué cuenta (resueltas), sin marcar = pre-partido y normal, y que con
   muestra pequeña no se saca ninguna conclusión.
 
@@ -676,7 +703,15 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-05 | Liga y mercado agrupados sin mayúsculas, tildes ni espacios; la apuesta cuenta solo si todas sus selecciones coinciden ("Varios" / "Sin dato") | "1X2" y "1x2" son el mismo mercado; una combinada mixta no se reparte |
 | 2026-11-05 | Barras de beneficio con HTML/CSS propio, sin Recharts | 0 KB extra, sin riesgo con Next 16 / React 19, horizontales para nombres largos en el móvil; revisar si la Fase 3 necesita líneas |
 | 2026-11-05 | Filtros de la pantalla en la dirección (`periodo`, `desde`, `hasta`, `seg`, `orden`, `tipo`) | Se puede recargar o volver atrás sin perderlos |
-| 2026-11-05 | `MUESTRA_MINIMA = 10` en un solo sitio; el resumen descriptivo solo cita segmentos con n ≥ 10 y con valor concreto | Con pocas apuestas las cifras engañan; sin consejos |
+| 2026-11-05 | `MUESTRA_MINIMA = 10` en un solo sitio (el resumen descriptivo que lo usaba se eliminó el 2026-11-05) | Con pocas apuestas las cifras engañan; sin consejos |
 | 2026-11-05 | El simulador local admite el filtro `lt` (además de corte a 1000 filas) | La prueba completa usa el filtro de fechas real |
 | 2026-11-05 | Sin cambios en `comprobar_rls_en_vivo.sql` | Sin tablas, permisos ni funciones nuevas: solo lecturas con la sesión, ya cubiertas por RLS (prueba nueva en `rls.test.mjs` con las consultas del Análisis) |
-| 2026-11-05 | **Fase 2 (pantalla Análisis) fusionada en `main`** (rama `fase-2-analisis`, PR #2) | Verificada en el móvil con la cuenta de email (5 apuestas); pruebas de GitHub Actions en verde; producción desplegada en Vercel; sin migración. Falta verificarla en producción con la cuenta de Google (39 resueltas) |
+| 2026-11-05 | **Fase 2 (pantalla Análisis) fusionada en `main`** (rama `fase-2-analisis`, PR #2) | Verificada en el móvil con la cuenta de email (5 apuestas); pruebas de GitHub Actions en verde; producción desplegada en Vercel; sin migración. Falta verificarla en producción con la cuenta de Google (35 apuestas) |
+| 2026-11-05 | **Retoques del Análisis** en la rama `fase-2-retoques-analisis` (sin migración) | Pedidos por el usuario antes de la Fase 3 |
+| 2026-11-05 | Aciertos por selección también por **liga** (deporte + liga), con selector Mercado / Liga y sin dinero | El dinero es de la apuesta: no se puede repartir entre selecciones de combinadas y "mismo partido" |
+| 2026-11-05 | **Detalle de cada fila** en una pantalla propia (`/analisis/detalle`) con todo en la dirección, en vez de un panel dentro de Análisis | Atrás del móvil, recargar y volver de una apuesta funcionan solos y dejan al usuario en el mismo sitio |
+| 2026-11-05 | Las funciones de cálculo devuelven los ids de cada fila; el detalle se recalcula en el servidor con las mismas funciones | El recuento de la lista y la cifra de la fila salen de la misma fuente: no pueden diferir |
+| 2026-11-05 | Tarjeta de la lista sacada a `tarjeta-apuesta.tsx` y reutilizada en el detalle | Mismo aspecto en las dos pantallas, sin duplicar código |
+| 2026-11-05 | `?volver=` acepta también `/analisis…` con una regla estricta de ruta (probada con `//`, `\`, `@`, `%2F`, `%5C` y externas) | Volver al Análisis sin abrir la puerta a redirecciones a otras webs |
+| 2026-11-05 | **"En cifras" eliminado** (código y pruebas) | No pasaba los criterios: no se entendía en 5 segundos y no aportaba nada que no estuviera ya en tarjetas y tablas |
+| 2026-11-05 | Corregido: la cuenta de Google tiene 35 apuestas (el "39" era el total de las dos cuentas) | Dato del usuario |

@@ -6,11 +6,20 @@
 const CLAVE_AVISO = 'filoverde:aviso'
 const CLAVE_SCROLL = 'filoverde:scroll'
 
-// Solo se acepta una dirección de la propia lista (nada de saltos a otras webs).
-export function rutaListaSegura(volver: string | null | undefined): string {
-  if (volver && /^\/apuestas(\?[^#\s]*)?$/.test(volver) && !volver.startsWith('//')) return volver
-  return '/apuestas'
+// Solo se acepta una dirección INTERNA de la lista de Apuestas o de la pantalla Análisis (y su
+// detalle): nada de saltos a otras webs. La RUTA (antes de "?") debe ser exactamente "/apuestas",
+// o "/analisis" seguido de nada, de "/" o de "/" + letras minúsculas, cifras o guiones. Así se rechazan
+// "//dominio", "/\dominio", "/analisisx", "/analisis@dominio" y sus versiones codificadas
+// ("%2F", "%5C"…), porque "%", "@" y "\" no caben en la ruta. Lo que va tras "?" son parámetros
+// ya codificados (pueden llevar "%2F" dentro de un valor) y no cambian a dónde se va.
+const RUTA_SEGURA = /^(\/apuestas|\/analisis(\/[a-z0-9-]+)*\/?)(\?[^#\s\\]*)?$/
+
+export function rutaVueltaSegura(volver: string | null | undefined, porDefecto = '/apuestas'): string {
+  if (volver && volver.length <= 2000 && RUTA_SEGURA.test(volver)) return volver
+  return porDefecto
 }
+// Nombre anterior (lo usa el detalle de la apuesta).
+export const rutaListaSegura = (volver: string | null | undefined) => rutaVueltaSegura(volver)
 
 export function rutaDeVuelta(): string {
   if (typeof window === 'undefined') return '/apuestas'

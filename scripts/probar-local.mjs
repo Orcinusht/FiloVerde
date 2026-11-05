@@ -1862,8 +1862,114 @@ const eCarla = await esperado(CARLA.id)
 assert.equal(eCarla.n, 1200)
 assert.equal(eCarla.pend, 5)
 await comprobarTarjetas(pagCarla, eCarla)
-await pagCarla.getByText('Rango de cuota:', { exact: false }).waitFor() // ya hay segmentos con muestra suficiente
+assert.equal(await pagCarla.getByText('En cifras', { exact: true }).count(), 0, 'el bloque «En cifras» ya no está')
 bien('Carla: 1200 resueltas y 5 en juego (más de 1000), cifras iguales que en la BD')
+
+// ---------- Retoques: detalle de cada cifra y aciertos por liga ----------
+paso('Análisis: cada fila abre las apuestas que la forman (mismo recuento) y se vuelve al mismo sitio')
+const filasDe = (p, tabla) => p.locator(`[data-tabla="${tabla}"] > li`)
+const numeroDato = async (fila, nombre) =>
+  Number((await fila.locator('dt', { hasText: new RegExp(`^${nombre}$`) }).locator('xpath=following-sibling::dd').innerText()).trim())
+async function abrirYContar(p, fila, { esperado, selecciones, etiqueta }) {
+  const desde = p.url()
+  etiqueta ??= (await fila.locator('p').first().innerText()).trim()
+  await fila.locator('a').click()
+  await p.waitForURL(/\/analisis\/detalle\?/)
+  // Espera a que se vea el detalle de ESTA fila (la dirección cambia antes que la pantalla).
+  const fin = new RegExp(`: ${etiqueta.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+  await p.locator('[data-detalle="titulo"]', { hasText: fin }).waitFor()
+  const recuento = await p.locator('[data-detalle="recuento"]').innerText()
+  const nTarjetas = await p.locator('[data-detalle="lista"] > li').count()
+  const m = /(\d+) (?:apuesta|apuestas)$/.exec(recuento)
+  assert.ok(m, recuento)
+  const nApuestas = Number(m[1])
+  if (esperado != null) assert.equal(nApuestas, esperado, `recuento = cifra de la fila (${recuento}) · ${desde} → ${p.url()}`)
+  if (selecciones != null) assert.ok(recuento.startsWith(`${selecciones} selecci`), recuento)
+  assert.equal(nTarjetas, Math.min(50, nApuestas), 'tarjetas en la lista')
+  return { desde, recuento, nApuestas }
+}
+// Segmentos de Ana: casa, mercado (con «Varios»/«Sin dato» si los hay) y directo.
+const verificadas = []
+for (const seg of ['casa', 'mercado', 'directo', 'liga']) {
+  await pag.goto(`${APP}/analisis?periodo=mes&seg=${seg}&orden=n`)
+  const filas = filasDe(pag, 'segmentos')
+  const n = await filas.count()
+  for (let i = 0; i < Math.min(n, 3); i++) {
+    const fila = filasDe(pag, 'segmentos').nth(i)
+    const etiqueta = (await fila.locator('p').first().innerText()).trim()
+    const cifra = await numeroDato(fila, 'Apuestas')
+    const { desde } = await abrirYContar(pag, fila, { esperado: cifra, etiqueta })
+    assert.ok((await pag.locator('[data-detalle="titulo"]').innerText()).endsWith(etiqueta))
+    await pag.getByRole('link', { name: '← Análisis' }).click()
+    await pag.waitForURL(desde)
+    verificadas.push(`${seg}: ${etiqueta} (${cifra})`)
+  }
+}
+assert.ok(verificadas.some((v) => /Varios|Sin dato|Sin casa/.test(v)), `se abrió alguna fila «Varios»/«Sin…»: ${verificadas.join(' | ')}`)
+bien(`Filas abiertas con su recuento exacto y vuelta al mismo periodo/segmento/orden: ${verificadas.length}`)
+
+// Aciertos: Mercado / Liga con sus columnas, y detalle con Todas / Verdes / Rojas.
+await pag.goto(`${APP}/analisis`)
+await pag.getByLabel('Agrupar aciertos por', { exact: true }).selectOption('liga')
+await pag.waitForURL(/ac=liga/)
+await pag.getByRole('heading', { name: /Aciertos por selección · Liga/ }).waitFor()
+const filaLiga = filasDe(pag, 'aciertos').first()
+for (const col of ['Verdes', 'Rojas', '% verdes', 'Total']) await filaLiga.locator('dt', { hasText: new RegExp(`^${col.replace('%', '\\%')}$`) }).waitFor()
+const [verdes, rojas, totalSel] = [await numeroDato(filaLiga, 'Verdes'), await numeroDato(filaLiga, 'Rojas'), await numeroDato(filaLiga, 'Total')]
+assert.equal(verdes + rojas, totalSel)
+await abrirYContar(pag, filaLiga, { selecciones: totalSel })
+await pag.getByRole('link', { name: 'Rojas', exact: true }).click()
+await pag.waitForURL(/color=rojas/)
+assert.ok((await pag.locator('[data-detalle="recuento"]').innerText()).startsWith(`${rojas} selecci`))
+await foto('84-detalle-aciertos')
+bien(`Aciertos por liga: ${verdes} verdes + ${rojas} rojas = ${totalSel}; el detalle cuenta las mismas selecciones (y filtra rojas)`)
+await pag.getByLabel('Agrupar aciertos por', { exact: true }).count() // (sigue en el detalle)
+await pag.getByRole('link', { name: '← Análisis' }).click()
+await pag.waitForURL(/\/analisis\?ac=liga$/)
+await pag.getByLabel('Agrupar aciertos por', { exact: true }).selectOption('mercado')
+await pag.waitForURL(/ac=mercado/)
+await pag.getByRole('heading', { name: /Aciertos por selección · Mercado/ }).waitFor()
+
+// Entrar en una apuesta desde el detalle y volver: al mismo detalle y con los mismos filtros.
+await pag.goto(`${APP}/analisis?periodo=mes&seg=tipo&orden=n`)
+await filasDe(pag, 'segmentos').first().locator('a').click()
+await pag.waitForURL(/\/analisis\/detalle\?/)
+const urlDetalle = pag.url()
+await pag.locator('[data-detalle="lista"] > li a').first().click()
+await esperarDetalle()
+await pag.getByRole('link', { name: '← Análisis' }).click()
+await pag.waitForURL(urlDetalle)
+bien('Apuesta abierta desde el detalle: «← Análisis» vuelve al mismo detalle (periodo, segmento y orden)')
+// Guardar desde esa apuesta también vuelve al detalle (y sin el aviso de la lista).
+await pag.locator('[data-detalle="lista"] > li a').first().click()
+await esperarDetalle()
+await pag.getByRole('button', { name: 'Guardar', exact: true }).first().click()
+await pag.waitForURL(urlDetalle)
+bien('Guardar desde la apuesta vuelve al mismo detalle')
+
+// El periodo cambia el detalle; una fila que no existe en ese periodo lo dice.
+const urlVacio = urlDetalle.replace(/periodo=mes/, 'periodo=personalizado&desde=2020-01-01&hasta=2020-12-31')
+await pag.goto(urlVacio)
+await pag.getByText('No hay apuestas en esta fila con el periodo y los filtros elegidos.').waitFor()
+bien('Con otro periodo el detalle cambia (2020 → sin apuestas)')
+
+// Carla: 1200 en «Pre-partido», paginadas de 50 en 50 con el recuento total.
+await pagCarla.goto(`${APP}/analisis?seg=directo`)
+const filaPre = filasDe(pagCarla, 'segmentos').first()
+assert.equal(await numeroDato(filaPre, 'Apuestas'), 1200)
+await abrirYContar(pagCarla, filaPre, { esperado: 1200 })
+await pagCarla.getByText('1–50 de 1200').waitFor()
+await pagCarla.getByRole('link', { name: 'Más antiguas →' }).click()
+await pagCarla.getByText('51–100 de 1200').waitFor()
+bien('Carla: «Pre-partido» = 1200 apuestas, paginadas de 50 en 50')
+
+// Seguridad: ?volver= externo no se usa; Beto no ve nada de Ana con la dirección del detalle.
+const idAna = (await sql(`select id from apuestas where user_id = '${ANA.id}' limit 1`))[0].id
+for (const malo of ['//evil.com', '/%2F%2Fevil.com', '/analisis@evil.com', 'https://evil.com']) {
+  await pag.goto(`${APP}/apuestas/${idAna}?volver=${encodeURIComponent(malo)}`)
+  assert.equal(await pag.getByRole('link', { name: '← Lista' }).getAttribute('href'), '/apuestas', malo)
+}
+bien('Un ?volver= externo se ignora (vuelve a /apuestas)')
 
 paso('Análisis: maquetación a 320, 375, 390 y 430 px, modo claro y oscuro')
 for (const ancho of [320, 375, 390, 430]) {
@@ -1871,7 +1977,7 @@ for (const ancho of [320, 375, 390, 430]) {
     const ctx = await navegador.newContext({ ...movil, viewport: { width: ancho, height: 800 }, colorScheme: tema })
     await ctx.addCookies([cookieSesion(ANA)])
     const p = await ctx.newPage()
-    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31']) {
+    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas']) {
       await p.goto(`${APP}${ruta}`, { waitUntil: 'networkidle' })
       const ancho2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
       assert.ok(ancho2 <= 0, `${ruta} a ${ancho}px (${tema}): scroll horizontal de ${ancho2}px`)
@@ -1912,6 +2018,9 @@ await pagBeto.goto(`${APP}/analisis`)
 await pagBeto.getByText('Todavía no hay apuestas resueltas.', { exact: false }).waitFor()
 await pagBeto.screenshot({ path: join(SALIDA, '83-analisis-vacio.png'), fullPage: true })
 bien('Análisis sin apuestas resueltas: estado vacío claro (nada de Ana)')
+await pagBeto.goto(urlDetalle)
+await pagBeto.getByText('No hay apuestas en esta fila con el periodo y los filtros elegidos.').waitFor()
+bien('Con la dirección de un detalle de Ana, Beto no ve ninguna apuesta')
 await pagBeto.goto(`${APP}/ajustes/deportes`)
 await pagBeto.getByRole('button', { name: /^Tenis/ }).click()
 assert.equal(await pagBeto.getByLabel('Nombre de la liga Laver Cup 2026').count(), 0)

@@ -10,25 +10,41 @@ import { isoALocal } from '@/lib/apuestas/fechas'
 import type { ValoresFormulario } from '@/lib/apuestas/formulario'
 import { NOMBRE_TIPO } from '@/lib/apuestas/estados'
 import { deporteResumen } from '@/lib/apuestas/catalogo'
+import { rutaVueltaSegura } from '@/lib/navegador/volver-a-lista'
 
 export const metadata = { title: 'Apuesta · Filoverde' }
 export const maxDuration = 60
 
-export default function Page({ params }: PageProps<'/apuestas/[id]'>) {
+export default function Page({ params, searchParams }: PageProps<'/apuestas/[id]'>) {
   return (
     <>
       <PageHeader
         title="Apuesta"
         accion={
-          <Link href="/apuestas" className="flex h-11 items-center px-2 text-sm font-semibold text-muted">
-            ← Lista
-          </Link>
+          <Suspense fallback={<EnlaceVuelta href="/apuestas" texto="← Lista" />}>
+            <Vuelta searchParams={searchParams} />
+          </Suspense>
         }
       />
       <Suspense fallback={<div className="mx-4 h-60 animate-pulse rounded-2xl bg-surface" />}>
         <Detalle params={params} />
       </Suspense>
     </>
+  )
+}
+
+// "← Lista" o "← Análisis": vuelve a donde se abrió la apuesta (?volver=, solo rutas internas).
+async function Vuelta({ searchParams }: { searchParams: PageProps<'/apuestas/[id]'>['searchParams'] }) {
+  const v = (await searchParams).volver
+  const href = rutaVueltaSegura(Array.isArray(v) ? v[0] : v)
+  return <EnlaceVuelta href={href} texto={href.startsWith('/analisis') ? '← Análisis' : '← Lista'} />
+}
+
+function EnlaceVuelta({ href, texto }: { href: string; texto: string }) {
+  return (
+    <Link href={href} className="flex h-11 items-center px-2 text-sm font-semibold text-muted">
+      {texto}
+    </Link>
   )
 }
 

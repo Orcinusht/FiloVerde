@@ -3,12 +3,10 @@
 // aquí no hay recomendaciones ni pronósticos.
 
 import { normalizar } from '../apuestas/catalogo.ts'
-import { formatoImporte } from '../apuestas/dinero.ts'
 import { NOMBRE_TIPO, type TipoApuesta } from '../apuestas/estados.ts'
 import { isoALocal, localAIso } from '../apuestas/fechas.ts'
 
-// Por debajo de este número de apuestas, un segmento lleva la etiqueta "Muestra pequeña" y no
-// entra en el resumen descriptivo. ÚNICO sitio donde se define.
+// Por debajo de este número, una fila lleva la etiqueta "Muestra pequeña". ÚNICO sitio donde se define.
 export const MUESTRA_MINIMA = 10
 
 export const ESTADOS_RESUELTOS = ['ganada', 'perdida', 'cash_out', 'media_ganada', 'media_perdida'] as const
@@ -20,6 +18,8 @@ export type SeleccionAnalisis = {
   liga: string | null
   mercado: string | null
   estado: string
+  evento?: string | null // solo para la tarjeta del detalle
+  orden?: number
 }
 
 export type ApuestaAnalisis = {
@@ -219,7 +219,11 @@ export function claveSegmento(a: ApuestaAnalisis, s: Segmento): { clave: string;
   }
 }
 
-export type FilaSegmento = Metricas & { clave: string; etiqueta: string; muestraPequena: boolean }
+// `ids`: las apuestas que forman la fila (de la más reciente a la más antigua). La lista del
+// detalle sale de aquí, así que su recuento SIEMPRE coincide con la cifra (`n`).
+export type FilaSegmento = Metricas & { clave: string; etiqueta: string; muestraPequena: boolean; ids: string[] }
+
+const masRecientePrimero = (lista: ApuestaAnalisis[]) => [...lista].sort((a, b) => compararFecha(b, a)).map((a) => a.id)
 
 // Orden fijo de algunos segmentos (para que no salten de sitio al cambiar el orden).
 const ORDEN_FIJO: Partial<Record<Segmento, readonly string[]>> = {
@@ -244,7 +248,7 @@ export function segmentar(apuestas: ApuestaAnalisis[], s: Segmento, orden: Orden
     // Etiqueta: la forma más usada (empate: la primera en orden alfabético).
     const etiqueta = [...g.textos].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0], 'es'))[0][0]
     const m = metricas(g.apuestas)
-    return { ...m, clave, etiqueta, muestraPequena: m.n < MUESTRA_MINIMA }
+    return { ...m, clave, etiqueta, muestraPequena: m.n < MUESTRA_MINIMA, ids: masRecientePrimero(g.apuestas) }
   })
   const fijo = ORDEN_FIJO[s]
   const posFijo = (f: FilaSegmento) => (fijo ? fijo.indexOf(f.etiqueta) : 0)
@@ -255,23 +259,56 @@ export function segmentar(apuestas: ApuestaAnalisis[], s: Segmento, orden: Orden
   )
 }
 
-// ---------- Aciertos por selección y mercado (sin dinero) ----------
+// ---------- Aciertos por selección: por mercado o por liga (sin dinero) ----------
 
-export type FilaMercado = { clave: string; etiqueta: string; verdes: number; rojas: number; n: number; pctVerdes: number | null; muestraPequena: boolean }
+export const AGRUPACIONES_ACIERTO = { mercado: 'Mercado', liga: 'Liga' } as const
+export type AgrupacionAcierto = keyof typeof AGRUPACIONES_ACIERTO
+export const esAgrupacionAcierto = (v: unknown): v is AgrupacionAcierto => typeof v === 'string' && v in AGRUPACIONES_ACIERTO
+
+// `ids` / `idsVerdes` / `idsRojas`: apuestas que contienen selecciones de la fila (todas, con
+// alguna verde, con alguna roja), de la más reciente a la más antigua. El detalle sale de aquí.
+export type FilaAcierto = {
+  clave: string
+  etiqueta: string
+  verdes: number
+  rojas: number
+  n: number
+  pctVerdes: number | null
+  muestraPequena: boolean
+  ids: string[]
+  idsVerdes: string[]
+  idsRojas: string[]
+}
+
+// Clave de una selección: mercado, o deporte + liga (igual que en los segmentos).
+function claveSeleccion(s: SeleccionAnalisis, por: AgrupacionAcierto): { clave: string; texto: string } {
+  if (por === 'liga') {
+    if (!normalizar(s.liga)) return { clave: `#${SIN_DATO}`, texto: SIN_DATO }
+    const texto = `${(s.deporte ?? '').trim()} · ${s.liga!.trim()}`
+    return { clave: normalizar(texto), texto }
+  }
+  return normalizar(s.mercado) ? { clave: normalizar(s.mercado), texto: s.mercado!.trim() } : { clave: `#${SIN_DATO}`, texto: SIN_DATO }
+}
 
 // Solo selecciones con estado propio ganada o perdida, de apuestas resueltas (nunca anuladas ni
 // pendientes). `tipo` opcional para mirar, p. ej., solo los "mismo partido".
-export function aciertosPorMercado(apuestas: ApuestaAnalisis[], tipo?: string): FilaMercado[] {
-  const grupos = new Map<string, { verdes: number; rojas: number; textos: Map<string, number> }>()
+export function aciertos(apuestas: ApuestaAnalisis[], por: AgrupacionAcierto, tipo?: string): FilaAcierto[] {
+  type G = { verdes: number; rojas: number; textos: Map<string, number>; todas: Set<ApuestaAnalisis>; conVerde: Set<ApuestaAnalisis>; conRoja: Set<ApuestaAnalisis> }
+  const grupos = new Map<string, G>()
   for (const a of apuestas) {
     if (!cuenta(a) || (tipo && a.tipo !== tipo)) continue
     for (const s of a.selecciones) {
       if (s.estado !== 'ganada' && s.estado !== 'perdida') continue
-      const clave = normalizar(s.mercado) || `#${SIN_DATO}`
-      const texto = normalizar(s.mercado) ? s.mercado!.trim() : SIN_DATO
-      const g = grupos.get(clave) ?? { verdes: 0, rojas: 0, textos: new Map() }
-      if (s.estado === 'ganada') g.verdes++
-      else g.rojas++
+      const { clave, texto } = claveSeleccion(s, por)
+      const g = grupos.get(clave) ?? { verdes: 0, rojas: 0, textos: new Map(), todas: new Set(), conVerde: new Set(), conRoja: new Set() }
+      g.todas.add(a)
+      if (s.estado === 'ganada') {
+        g.verdes++
+        g.conVerde.add(a)
+      } else {
+        g.rojas++
+        g.conRoja.add(a)
+      }
       g.textos.set(texto, (g.textos.get(texto) ?? 0) + 1)
       grupos.set(clave, g)
     }
@@ -280,55 +317,54 @@ export function aciertosPorMercado(apuestas: ApuestaAnalisis[], tipo?: string): 
     .map(([clave, g]) => {
       const n = g.verdes + g.rojas
       const etiqueta = [...g.textos].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0], 'es'))[0][0]
-      return { clave, etiqueta, verdes: g.verdes, rojas: g.rojas, n, pctVerdes: dividir(g.verdes, n), muestraPequena: n < MUESTRA_MINIMA }
+      return {
+        clave,
+        etiqueta,
+        verdes: g.verdes,
+        rojas: g.rojas,
+        n,
+        pctVerdes: dividir(g.verdes, n),
+        muestraPequena: n < MUESTRA_MINIMA,
+        ids: masRecientePrimero([...g.todas]),
+        idsVerdes: masRecientePrimero([...g.conVerde]),
+        idsRojas: masRecientePrimero([...g.conRoja]),
+      }
     })
     .sort((x, y) => y.n - x.n || x.etiqueta.localeCompare(y.etiqueta, 'es'))
 }
 
-// ---------- Resumen descriptivo (frases factuales, sin consejos) ----------
+export const aciertosPorMercado = (apuestas: ApuestaAnalisis[], tipo?: string) => aciertos(apuestas, 'mercado', tipo)
+export const aciertosPorLiga = (apuestas: ApuestaAnalisis[], tipo?: string) => aciertos(apuestas, 'liga', tipo)
 
-const SEGMENTOS_DESCRIPTIVOS: Segmento[] = ['casa', 'estrategia', 'tipo', 'deporte', 'liga', 'mercado', 'cuota', 'directo', 'precipitada']
-const NOMBRE_EN_FRASE: Record<Segmento, string> = {
-  casa: 'Casa',
-  estrategia: 'Estrategia',
-  tipo: 'Tipo de apuesta',
-  deporte: 'Deporte',
-  liga: 'Liga',
-  mercado: 'Mercado',
-  cuota: 'Rango de cuota',
-  directo: 'Directo',
-  precipitada: 'Precipitada',
-}
+// ---------- Detalle: las apuestas que forman una cifra ----------
 
-const SIN_VALOR_CONCRETO = [`#${VARIOS}`, `#${SIN_DATO}`, '#Sin casa', '#Sin estrategia']
+export type Color = 'todas' | 'verdes' | 'rojas'
+export const esColor = (v: unknown): v is Color => v === 'todas' || v === 'verdes' || v === 'rojas'
 
-const apuestasTxt = (n: number) => (n === 1 ? '1 apuesta' : `${n} apuestas`)
+export type PeticionDetalle =
+  | { vista: 'seg'; seg: Segmento; clave: string }
+  | { vista: 'aciertos'; por: AgrupacionAcierto; clave: string; tipo?: string; color: Color }
 
-export function resumenDescriptivo(apuestas: ApuestaAnalisis[]): string[] {
-  const r = resumen(apuestas)
-  if (r.n === 0) return []
-  const dinero = (c: number) => formatoImporte(c, r.divisa, { conSigno: true })
-  const frases = [
-    `En este periodo hay ${apuestasTxt(r.n)} resueltas, con un beneficio neto de ${dinero(r.beneficio)}.`,
-  ]
-  let alguno = false
-  for (const s of SEGMENTOS_DESCRIPTIVOS) {
-    // Solo segmentos con muestra suficiente y con un valor concreto (no "Varios" ni "Sin …").
-    const validas = segmentar(apuestas, s).filter((f) => !f.muestraPequena && !SIN_VALOR_CONCRETO.includes(f.clave))
-    if (validas.length === 0) continue
-    alguno = true
-    const mas = validas[0]
-    const menos = validas[validas.length - 1]
-    if (validas.length === 1) {
-      frases.push(`${NOMBRE_EN_FRASE[s]}: solo «${mas.etiqueta}» llega a ${MUESTRA_MINIMA} apuestas (${apuestasTxt(mas.n)}, ${dinero(mas.beneficio)}).`)
-    } else {
-      frases.push(
-        `${NOMBRE_EN_FRASE[s]}: más beneficio en «${mas.etiqueta}» (${dinero(mas.beneficio)} en ${apuestasTxt(mas.n)}); menos en «${menos.etiqueta}» (${dinero(menos.beneficio)} en ${apuestasTxt(menos.n)}).`,
-      )
-    }
+export type Detalle = {
+  titulo: string // "Mercado: Remates"
+  etiqueta: string
+  ids: string[] // apuestas a listar (más reciente primero)
+  n: number // la cifra de la fila (apuestas en segmentos; selecciones en aciertos)
+  selecciones?: number // aciertos: selecciones del color elegido
+} | null
+
+// Calcula el detalle con LAS MISMAS funciones que la tabla: la lista y la cifra no pueden diferir.
+export function detalle(apuestas: ApuestaAnalisis[], p: PeticionDetalle): Detalle {
+  if (p.vista === 'seg') {
+    const fila = segmentar(apuestas, p.seg).find((f) => f.clave === p.clave)
+    if (!fila) return null
+    return { titulo: `${SEGMENTOS[p.seg]}: ${fila.etiqueta}`, etiqueta: fila.etiqueta, ids: fila.ids, n: fila.n }
   }
-  if (!alguno) frases.push(`Todavía no hay segmentos con muestra suficiente (${MUESTRA_MINIMA} apuestas o más).`)
-  return frases
+  const fila = aciertos(apuestas, p.por, p.tipo).find((f) => f.clave === p.clave)
+  if (!fila) return null
+  const ids = p.color === 'verdes' ? fila.idsVerdes : p.color === 'rojas' ? fila.idsRojas : fila.ids
+  const selecciones = p.color === 'verdes' ? fila.verdes : p.color === 'rojas' ? fila.rojas : fila.n
+  return { titulo: `${AGRUPACIONES_ACIERTO[p.por]}: ${fila.etiqueta}`, etiqueta: fila.etiqueta, ids, n: fila.n, selecciones }
 }
 
 // ---------- Filtro de fechas (hora de España) ----------

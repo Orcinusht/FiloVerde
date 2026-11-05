@@ -48,7 +48,7 @@ export async function leerApuestasAnalisis(supabase: SupabaseClient, userId: str
     const sel = await leerTodo<SeleccionAnalisis & { apuesta_id: string }>(async (desde, hasta) => {
       const { data, error } = await supabase
         .from('selecciones')
-        .select('apuesta_id, deporte, liga, mercado, estado')
+        .select('apuesta_id, deporte, liga, mercado, estado, evento, orden')
         .eq('user_id', userId)
         .in('apuesta_id', ids)
         .order('id')
@@ -70,6 +70,7 @@ export async function leerApuestasAnalisis(supabase: SupabaseClient, userId: str
     cuota_total: a.cuota_total == null ? null : Number(a.cuota_total),
     casa: casa_id ? (casas.get(casa_id) ?? null) : null,
     estrategia: estrategia_id ? (estrategias.get(estrategia_id) ?? null) : null,
-    selecciones: porApuesta.get(a.id) ?? [],
+    // En el orden del resguardo (el primer evento es el que enseña la tarjeta del detalle).
+    selecciones: (porApuesta.get(a.id) ?? []).sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0)),
   }))
 }

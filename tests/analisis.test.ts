@@ -17,7 +17,6 @@ import {
   rangoCuota,
   rangoPeriodo,
   resumen,
-  resumenDescriptivo,
   segmentar,
   type ApuestaAnalisis,
   type SeleccionAnalisis,
@@ -226,27 +225,6 @@ test(`segmentos: «Muestra pequeña» con n < ${MUESTRA_MINIMA}, orden por benef
   assert.ok(!segmentar(conOtras, 'casa').some((f) => f.etiqueta === 'Bwin'))
 })
 
-test('resumen descriptivo: solo segmentos con n >= 10, sin consejos', () => {
-  const pocos = resumenDescriptivo([ganada(), perdida()])
-  assert.ok(pocos.some((f) => f.includes('Todavía no hay segmentos con muestra suficiente')))
-  assert.ok(pocos[0].includes('2 apuestas resueltas'))
-  const datos = [
-    ...Array.from({ length: 10 }, () => ganada(1000, 500, { casa: 'Bet365' })),
-    ...Array.from({ length: 10 }, () => perdida(1000, { casa: 'Codere' })),
-    ...Array.from({ length: 3 }, () => ganada(1000, 9000, { casa: 'Bwin' })), // mucho beneficio, muestra pequeña
-  ]
-  const frases = resumenDescriptivo(datos)
-  const casa = frases.find((f) => f.startsWith('Casa:'))!
-  assert.ok(casa.includes('más beneficio en «Bet365»'), casa)
-  assert.ok(casa.includes('menos en «Codere»'), casa)
-  assert.ok(!casa.includes('Bwin'), 'Bwin tiene menos de 10')
-  for (const f of [...frases, ...pocos]) assert.ok(!/deber|recomend|conviene|apuesta más|evita/i.test(f), `sin consejos: ${f}`)
-  assert.deepEqual(resumenDescriptivo([]), [])
-  // «Sin casa», «Sin estrategia», «Sin dato» y «Varios» no son un valor concreto: no se citan.
-  const sinCasa = resumenDescriptivo(Array.from({ length: 12 }, () => ganada(1000, 500, { casa: null })))
-  assert.ok(!sinCasa.some((f) => f.includes('Sin casa') || f.includes('Sin estrategia')), sinCasa.join(' | '))
-})
-
 test('aciertos por mercado: solo selecciones ganadas o perdidas de apuestas resueltas, filtro por tipo', () => {
   const datos = [
     ap({ tipo: 'mismo_partido', estado: 'perdida', resultado_economico: -1000, selecciones: [sel({ mercado: 'Goles', estado: 'ganada' }), sel({ mercado: 'Córners', estado: 'perdida' }), sel({ mercado: 'Goles', estado: 'anulada' })] }),
@@ -376,4 +354,194 @@ test('lectura: un usuario NO ve datos de otro y todas las consultas filtran por 
   assert.equal(propias[0].casa, 'Casa de Beto')
   assert.deepEqual(propias[0].selecciones.map((s) => s.mercado), ['Ganador'])
   for (const q of consultas) assert.ok(q.filtros.some(([op, c]) => op === 'eq' && c === 'user_id'), `la consulta a ${q.tabla} filtra por user_id`)
+})
+
+// ---------- Retoques: aciertos por liga, detalle de cada cifra y direcciones ----------
+
+import { aciertos, aciertosPorLiga, detalle, SEGMENTOS, type Segmento } from '../src/lib/analisis/calculos.ts'
+import { enlaceAnalisis, enlaceDetalleAcierto, enlaceDetalleSegmento, leerPeticionDetalle } from '../src/lib/analisis/direccion.ts'
+import { rutaVueltaSegura } from '../src/lib/navegador/volver-a-lista.ts'
+
+test('aciertos por liga: deporte + liga, sin mayúsculas, tildes ni espacios; «Sin dato»; filtro por tipo', () => {
+  const datos = [
+    ap({ tipo: 'combinada', estado: 'perdida', resultado_economico: -1000, selecciones: [
+      sel({ liga: 'LaLiga', estado: 'ganada' }),
+      sel({ liga: ' laliga ', estado: 'perdida' }),
+      sel({ deporte: 'Fútbol', liga: 'Premier League', estado: 'ganada' }),
+    ] }),
+    ap({ tipo: 'simple', selecciones: [sel({ deporte: 'futbol', liga: 'LALIGA', estado: 'ganada' })] }),
+    ap({ tipo: 'simple', deporte: 'Voleibol', selecciones: [sel({ deporte: 'Voleibol', liga: 'Superliga', estado: 'ganada' })] }),
+    ap({ tipo: 'simple', selecciones: [sel({ liga: 'Superliga', estado: 'perdida' })] }),
+    ap({ tipo: 'simple', selecciones: [sel({ liga: null, estado: 'perdida' })] }),
+    ap({ tipo: 'simple', estado: 'anulada', resultado_economico: 0, selecciones: [sel({ liga: 'LaLiga', estado: 'perdida' })] }),
+  ]
+  const filas = aciertosPorLiga(datos)
+  const laliga = filas.find((f) => f.clave === 'futbol · laliga')!
+  assert.deepEqual([laliga.verdes, laliga.rojas, laliga.n, laliga.ids.length], [2, 1, 3, 2], 'tildes y mayúsculas juntas; la anulada no cuenta')
+  assert.equal(laliga.pctVerdes, 2 / 3)
+  assert.equal(laliga.muestraPequena, true)
+  assert.equal(filas.filter((f) => f.etiqueta.endsWith('Superliga')).length, 2, 'la Superliga de voleibol no es la de fútbol')
+  assert.ok(filas.some((f) => f.etiqueta === 'Sin dato' && f.rojas === 1))
+  const soloCombinadas = aciertosPorLiga(datos, 'combinada')
+  assert.deepEqual(soloCombinadas.map((f) => [f.clave, f.n]), [['futbol · laliga', 2], ['futbol · premier league', 1]])
+})
+
+// Datos variados para comprobar que la lista del detalle cuadra SIEMPRE con la cifra.
+function variado() {
+  const out: ApuestaAnalisis[] = []
+  const casas = ['Bet365', 'bet365 ', 'Codere', null]
+  const mercados = ['1X2', 'Goles', 'Jugador - Remates a puerta', null]
+  const estados = ['ganada', 'perdida', 'cash_out', 'media_ganada', 'media_perdida', 'anulada', 'pendiente']
+  for (let i = 0; i < 140; i++) {
+    const estado = estados[i % estados.length]
+    const nSel = 1 + (i % 3)
+    const selecciones = Array.from({ length: nSel }, (_, k) =>
+      sel({
+        mercado: mercados[(i + (i % 5 === 0 ? k : 0)) % mercados.length],
+        liga: i % 7 === 0 ? null : k % 2 && i % 4 === 0 ? 'Premier League' : 'LaLiga',
+        estado: ['ganada', 'perdida', 'anulada', 'media_ganada'][(i + k) % 4],
+      }),
+    )
+    out.push(
+      ap({
+        estado,
+        tipo: ['simple', 'combinada', 'mismo_partido', 'sistema'][i % 4],
+        casa: casas[i % casas.length],
+        estrategia: i % 3 ? 'Valor' : null,
+        deporte: i % 6 ? 'Fútbol' : 'Mixto',
+        cuota_total: [1.2, 1.5, 1.51, 2, 2.01, 3, 3.01, null][i % 8],
+        en_directo: i % 5 === 0,
+        viendo_partido: i % 10 === 0,
+        precipitada: i % 4 === 0,
+        promo_tipo: i % 13 === 0 ? 'credito' : null,
+        importe: 500 + i,
+        resultado_economico: estado === 'pendiente' ? null : estado === 'anulada' ? 0 : [700, -500, 0, 200, -250][i % 5],
+        selecciones,
+      }),
+    )
+  }
+  return out
+}
+
+test('detalle: el recuento de la lista es IGUAL a la cifra en todos los segmentos (incluidos «Varios» y «Sin dato»)', () => {
+  const datos = variado()
+  const resueltas = new Set(datos.filter((a) => ['ganada', 'perdida', 'cash_out', 'media_ganada', 'media_perdida'].includes(a.estado)).map((a) => a.id))
+  const vistas = new Set<string>()
+  for (const seg of Object.keys(SEGMENTOS) as Segmento[]) {
+    const filas = segmentar(datos, seg)
+    assert.equal(filas.reduce((s, f) => s + f.n, 0), resueltas.size, `${seg}: cada resuelta en una sola fila`)
+    for (const f of filas) {
+      const d = detalle(datos, { vista: 'seg', seg, clave: f.clave })!
+      assert.equal(d.ids.length, f.n, `${seg} · ${f.etiqueta}`)
+      assert.equal(new Set(d.ids).size, d.ids.length, 'sin repetidas')
+      assert.ok(d.ids.every((id) => resueltas.has(id)), 'solo resueltas (ni anuladas ni pendientes)')
+      assert.equal(d.titulo, `${SEGMENTOS[seg]}: ${f.etiqueta}`)
+      vistas.add(f.etiqueta)
+    }
+  }
+  for (const e of ['Varios', 'Sin dato', 'Sin casa', 'Sin estrategia', 'Mixto']) assert.ok(vistas.has(e), `hay fila «${e}»`)
+  assert.equal(detalle(datos, { vista: 'seg', seg: 'casa', clave: 'no-existe' }), null)
+})
+
+test('detalle de aciertos: N selecciones en M apuestas, con Todas / Verdes / Rojas', () => {
+  const datos = variado()
+  for (const por of ['mercado', 'liga'] as const) {
+    for (const f of aciertos(datos, por)) {
+      const todas = detalle(datos, { vista: 'aciertos', por, clave: f.clave, color: 'todas' })!
+      const verdes = detalle(datos, { vista: 'aciertos', por, clave: f.clave, color: 'verdes' })!
+      const rojas = detalle(datos, { vista: 'aciertos', por, clave: f.clave, color: 'rojas' })!
+      assert.deepEqual([todas.selecciones, verdes.selecciones, rojas.selecciones], [f.n, f.verdes, f.rojas], `${por} · ${f.etiqueta}`)
+      // M apuestas, calculado aparte: las resueltas con alguna selección de esa fila.
+      const conColor = (estado: string) =>
+        datos.filter((a) => ['ganada', 'perdida', 'cash_out', 'media_ganada', 'media_perdida'].includes(a.estado) &&
+          a.selecciones.some((s) => s.estado === estado && aciertos([{ ...a, selecciones: [s] }], por)[0]?.clave === f.clave)).length
+      assert.equal(verdes.ids.length, conColor('ganada'))
+      assert.equal(rojas.ids.length, conColor('perdida'))
+      assert.equal(todas.ids.length, new Set([...verdes.ids, ...rojas.ids]).size)
+    }
+  }
+})
+
+test('detalle: respeta el filtro de fechas y el de tipo', () => {
+  const datos = variado()
+  const r = { desde: datos[40].fecha, hasta: datos[90].fecha }
+  const periodo = datos.filter((a) => enRango(a.fecha, r)) // lo que devuelve la consulta con el filtro
+  const filaTodo = segmentar(datos, 'tipo').find((f) => f.etiqueta === 'Combinada')!
+  const filaPeriodo = segmentar(periodo, 'tipo').find((f) => f.etiqueta === 'Combinada')!
+  const d = detalle(periodo, { vista: 'seg', seg: 'tipo', clave: filaPeriodo.clave })!
+  assert.equal(d.ids.length, filaPeriodo.n)
+  assert.ok(filaPeriodo.n < filaTodo.n, 'el periodo reduce la lista')
+  assert.ok(d.ids.every((id) => enRango(periodo.find((a) => a.id === id)!.fecha, r)))
+  const f = aciertos(datos, 'mercado', 'mismo_partido')[0]
+  const conTipo = detalle(datos, { vista: 'aciertos', por: 'mercado', clave: f.clave, tipo: 'mismo_partido', color: 'todas' })!
+  assert.equal(conTipo.selecciones, f.n)
+  assert.ok(conTipo.ids.every((id) => datos.find((a) => a.id === id)!.tipo === 'mismo_partido'))
+  const sinTipo = detalle(datos, { vista: 'aciertos', por: 'mercado', clave: f.clave, color: 'todas' })!
+  assert.ok(sinTipo.ids.length >= conTipo.ids.length)
+  // En conjunto, el filtro de tipo deja fuera apuestas de otros tipos.
+  const total = (tipo?: string) => aciertos(datos, 'mercado', tipo).reduce((s, x) => s + x.ids.length, 0)
+  assert.ok(total('mismo_partido') < total(), 'el filtro de tipo reduce el detalle')
+})
+
+test('detalle: un usuario no ve apuestas de otro', async () => {
+  const { cliente } = clienteFalso('beto', base(50))
+  const deBeto = await leerApuestasAnalisis(cliente, 'beto', { desde: null, hasta: null })
+  for (const seg of Object.keys(SEGMENTOS) as Segmento[]) {
+    for (const f of segmentar(deBeto, seg)) {
+      const d = detalle(deBeto, { vista: 'seg', seg, clave: f.clave })!
+      assert.ok(d.ids.every((id) => id.startsWith('beto-')), 'solo apuestas de Beto')
+    }
+  }
+  // Aunque pida la clave de una fila de Ana, con sus datos no hay nada.
+  assert.equal(detalle(deBeto, { vista: 'seg', seg: 'casa', clave: 'casa de ana' }), null)
+})
+
+test('direcciones: valores bien codificados y decodificados (Varios, Sin dato, tildes, espacios y símbolos)', () => {
+  const sp = { periodo: 'personalizado', desde: '2026-10-01', hasta: '2026-11-05', seg: 'mercado', orden: 'n', tipo: 'mismo_partido', ac: 'liga', otro: 'x' }
+  for (const clave of ['#Varios', '#Sin dato', 'jugador - remates a puerta', 'fútbol · laliga', 'más de 2,5 & 1x2/ambos? #1 %20 +'] ) {
+    const url = new URL(enlaceDetalleSegmento(sp, 'mercado', clave), 'http://x')
+    assert.equal(url.pathname, '/analisis/detalle')
+    assert.deepEqual(leerPeticionDetalle(url.searchParams), { vista: 'seg', seg: 'mercado', clave }, clave)
+    assert.equal(url.searchParams.get('periodo'), 'personalizado', 'conserva el periodo')
+    assert.equal(url.searchParams.get('otro'), null, 'solo parámetros conocidos')
+    const urlA = new URL(enlaceDetalleAcierto(sp, 'liga', clave, 'rojas'), 'http://x')
+    assert.deepEqual(leerPeticionDetalle(urlA.searchParams), { vista: 'aciertos', por: 'liga', clave, tipo: 'mismo_partido', color: 'rojas' })
+    // Y la dirección del detalle vale como ?volver= de una apuesta.
+    assert.equal(rutaVueltaSegura(url.pathname + url.search), url.pathname + url.search)
+  }
+  // De la fila real al detalle y vuelta: misma fila.
+  const datos = [ganada(1000, 500, { selecciones: [sel({ mercado: 'Jugador - Remates a puerta' })] }), ganada(1000, 500, { selecciones: [sel({ mercado: '1X2' }), sel({ mercado: 'Goles' })] })]
+  for (const f of segmentar(datos, 'mercado')) {
+    const p = leerPeticionDetalle(new URL(enlaceDetalleSegmento({}, 'mercado', f.clave), 'http://x').searchParams)!
+    assert.equal(detalle(datos, p)!.etiqueta, f.etiqueta)
+  }
+  assert.equal(enlaceAnalisis(sp), '/analisis?periodo=personalizado&desde=2026-10-01&hasta=2026-11-05&seg=mercado&orden=n&ac=liga&tipo=mismo_partido')
+  assert.equal(enlaceAnalisis({}), '/analisis')
+  assert.equal(leerPeticionDetalle({ seg: 'mercado' }), null, 'sin clave')
+  assert.equal(leerPeticionDetalle({ seg: 'inventado', clave: 'x' }), null)
+  assert.equal(leerPeticionDetalle({ vista: 'aciertos', ac: 'inventado', clave: 'x' }), null)
+})
+
+test('volver: solo rutas internas de /apuestas y /analisis', () => {
+  const buenas = [
+    '/apuestas',
+    '/apuestas?estado=ganada&casa=sin',
+    '/analisis',
+    '/analisis?periodo=mes&seg=mercado',
+    '/analisis/detalle?vista=seg&seg=mercado&clave=jugador+-+remates+a+puerta',
+    '/analisis/detalle?clave=over%2Funder', // "/" codificada dentro de un VALOR: es un parámetro
+    '/analisis/',
+  ]
+  for (const r of buenas) assert.equal(rutaVueltaSegura(r), r, r)
+  const malas = [
+    '//evil.com', '//evil.com/analisis', '/\\evil.com', '/\\/evil.com', '\\\\evil.com',
+    '/analisisx', '/analisis@evil.com', '/analisis@evil.com/x', '/apuestasx', '/apuestas/x',
+    '/%2Fevil.com', '/%2fevil.com', '/%5Cevil.com', '/%5cevil.com', '/analisis%2F%2Fevil.com', '/analisis%5Cevil.com',
+    '/analisis%40evil.com', '/%2F%2Fevil.com', '/analisis/%2F%2Fevil.com', '/analisis/..%2F..%2Fevil',
+    'https://evil.com', 'http://evil.com/analisis', 'javascript:alert(1)', 'evil.com', '', ' /analisis',
+    '/analisis?x=1#frag', '/analisis?x=\\evil', '/ANALISIS', '/analisis/Detalle', '/analisis/../evil',
+  ]
+  for (const r of malas) assert.equal(rutaVueltaSegura(r), '/apuestas', `rechaza ${r}`)
+  assert.equal(rutaVueltaSegura(null), '/apuestas')
+  assert.equal(rutaVueltaSegura('//evil.com', '/analisis'), '/analisis')
 })

@@ -7,21 +7,25 @@ import {
   MUESTRA_MINIMA,
   PERIODOS,
   SEGMENTOS,
-  aciertosPorMercado,
+  AGRUPACIONES_ACIERTO,
+  aciertos,
   cuotaMediaTxt,
+  esAgrupacionAcierto,
   esPeriodo,
   esSegmento,
   porcentaje,
   rachaTxt,
   rangoPeriodo,
   resumen,
-  resumenDescriptivo,
   segmentar,
+  type AgrupacionAcierto,
   type ApuestaAnalisis,
+  type FilaAcierto,
   type FilaSegmento,
   type OrdenSegmento,
   type Segmento,
 } from '@/lib/analisis/calculos'
+import { enlaceDetalleAcierto, enlaceDetalleSegmento } from '@/lib/analisis/direccion'
 import { formatoImporte } from '@/lib/apuestas/dinero'
 import { NOMBRE_TIPO, TIPOS_APUESTA, esTipoApuesta } from '@/lib/apuestas/estados'
 import { FiltroFechas, Selector } from './controles'
@@ -37,6 +41,7 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
   const seg: Segmento = esSegmento(uno(sp.seg)) ? (uno(sp.seg) as Segmento) : 'casa'
   const orden: OrdenSegmento = uno(sp.orden) === 'n' ? 'n' : 'beneficio'
   const tipo = esTipoApuesta(uno(sp.tipo)) ? uno(sp.tipo) : ''
+  const ac: AgrupacionAcierto = esAgrupacionAcierto(uno(sp.ac)) ? (uno(sp.ac) as AgrupacionAcierto) : 'mercado'
 
   let apuestas: ApuestaAnalisis[] = []
   let fallo: 'sesion' | 'error' | null = null
@@ -121,17 +126,6 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
             )}
           </section>
 
-          <section aria-labelledby="t-descriptivo" className="space-y-2">
-            <h2 id="t-descriptivo" className="text-sm font-semibold uppercase tracking-wide text-muted">
-              En cifras
-            </h2>
-            <ul className="space-y-1.5 rounded-2xl border border-border bg-surface p-3 text-sm">
-              {resumenDescriptivo(apuestas).map((f) => (
-                <li key={f}>{f}</li>
-              ))}
-            </ul>
-          </section>
-
           <section aria-labelledby="t-segmentos" className="space-y-2">
             <h2 id="t-segmentos" className="text-sm font-semibold uppercase tracking-wide text-muted">
               Por segmento
@@ -153,23 +147,28 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
                 Una apuesta cuenta en {seg === 'liga' ? 'una liga' : 'un mercado'} solo si todas sus selecciones coinciden; si no, va a «Varios».
               </p>
             )}
-            <ListaSegmento filas={segmentar(apuestas, seg, orden)} dinero={dinero} />
+            <p className="text-xs text-muted">Pulsa una fila para ver las apuestas que la forman.</p>
+            <ListaSegmento filas={segmentar(apuestas, seg, orden)} dinero={dinero} enlace={(clave) => enlaceDetalleSegmento(sp, seg, clave)} />
           </section>
 
-          <section aria-labelledby="t-mercados" className="space-y-2">
-            <h2 id="t-mercados" className="text-sm font-semibold uppercase tracking-wide text-muted">
-              Aciertos por selección y mercado
+          <section aria-labelledby="t-aciertos" className="space-y-2">
+            <h2 id="t-aciertos" className="text-sm font-semibold uppercase tracking-wide text-muted">
+              Aciertos por selección · {AGRUPACIONES_ACIERTO[ac]}
             </h2>
             <p className="text-xs text-muted">
-              Selecciones ganadas (verdes) y perdidas (rojas) de apuestas resueltas, sin dinero. Útil para ver qué condiciones fallan más.
+              Selecciones ganadas (verdes) y perdidas (rojas) de apuestas resueltas, sin dinero (el dinero es de la apuesta, no
+              de cada selección). Útil para ver qué condiciones fallan más.
             </p>
-            <Selector
-              nombre="tipo"
-              etiqueta="Tipo de apuesta"
-              valor={tipo}
-              opciones={[['', 'Todos los tipos'], ...TIPOS_APUESTA.map((t) => [t, NOMBRE_TIPO[t]] as [string, string])]}
-            />
-            <TablaMercados apuestas={apuestas} tipo={tipo} />
+            <div className="grid grid-cols-2 gap-2">
+              <Selector nombre="ac" etiqueta="Agrupar aciertos por" valor={ac} opciones={Object.entries(AGRUPACIONES_ACIERTO)} />
+              <Selector
+                nombre="tipo"
+                etiqueta="Tipo de apuesta"
+                valor={tipo}
+                opciones={[['', 'Todos los tipos'], ...TIPOS_APUESTA.map((t) => [t, NOMBRE_TIPO[t]] as [string, string])]}
+              />
+            </div>
+            <TablaAciertos filas={aciertos(apuestas, ac, tipo || undefined)} enlace={(clave) => enlaceDetalleAcierto(sp, ac, clave)} />
           </section>
         </>
       )}
@@ -210,15 +209,37 @@ function MuestraPequena() {
   )
 }
 
+// Fila pulsable: abre el detalle con las apuestas que la forman.
+function FilaEnlace({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <li>
+      <Link href={href} className="flex items-center gap-2 p-3 active:bg-background">
+        <div className="min-w-0 flex-1 space-y-1.5">{children}</div>
+        <span aria-hidden="true" className="shrink-0 text-lg text-muted">
+          ›
+        </span>
+      </Link>
+    </li>
+  )
+}
+
 // Barras horizontales de beneficio (verde positivo, rojo negativo) desde una línea central.
-function ListaSegmento({ filas, dinero }: { filas: FilaSegmento[]; dinero: (c: number | null, s?: boolean) => string }) {
+function ListaSegmento({
+  filas,
+  dinero,
+  enlace,
+}: {
+  filas: FilaSegmento[]
+  dinero: (c: number | null, s?: boolean) => string
+  enlace: (clave: string) => string
+}) {
   const max = Math.max(1, ...filas.map((f) => Math.abs(f.beneficio)))
   return (
-    <ul className="divide-y divide-border rounded-2xl border border-border bg-surface">
+    <ul className="divide-y divide-border rounded-2xl border border-border bg-surface" data-tabla="segmentos">
       {filas.map((f) => {
         const ancho = `${(Math.abs(f.beneficio) / max) * 50}%`
         return (
-          <li key={f.clave} className="space-y-1.5 p-3">
+          <FilaEnlace key={f.clave} href={enlace(f.clave)}>
             <div className="flex items-start justify-between gap-2">
               <p className="min-w-0 break-words text-sm font-medium">{f.etiqueta}</p>
               {f.muestraPequena && <MuestraPequena />}
@@ -240,31 +261,31 @@ function ListaSegmento({ filas, dinero }: { filas: FilaSegmento[]; dinero: (c: n
               <Dato n="Acierto" v={porcentaje(f.acierto)} />
               {f.nCredito > 0 && <Dato n="Con crédito" v={String(f.nCredito)} />}
             </dl>
-          </li>
+          </FilaEnlace>
         )
       })}
     </ul>
   )
 }
 
-function Dato({ n, v, tono }: { n: string; v: string; tono?: number }) {
+function Dato({ n, v, tono, clase = '' }: { n: string; v: string; tono?: number; clase?: string }) {
   return (
     <div className="min-w-0">
       <dt className="text-muted">{n}</dt>
-      <dd className={`truncate font-semibold tabular-nums ${colorTono(tono)}`}>{v}</dd>
+      <dd className={`truncate font-semibold tabular-nums ${clase || colorTono(tono)}`}>{v}</dd>
     </div>
   )
 }
 
-function TablaMercados({ apuestas, tipo }: { apuestas: ApuestaAnalisis[]; tipo: string }) {
-  const filas = aciertosPorMercado(apuestas, tipo || undefined)
+// Aciertos por selección (mercado o liga): verdes, rojas, % verdes y total. Sin dinero.
+function TablaAciertos({ filas, enlace }: { filas: FilaAcierto[]; enlace: (clave: string) => string }) {
   if (filas.length === 0) {
     return <p className="rounded-2xl border border-border bg-surface p-3 text-sm text-muted">No hay selecciones ganadas o perdidas con este filtro.</p>
   }
   return (
-    <ul className="divide-y divide-border rounded-2xl border border-border bg-surface">
+    <ul className="divide-y divide-border rounded-2xl border border-border bg-surface" data-tabla="aciertos">
       {filas.map((f) => (
-        <li key={f.clave} className="space-y-1 p-3">
+        <FilaEnlace key={f.clave} href={enlace(f.clave)}>
           <div className="flex items-start justify-between gap-2">
             <p className="min-w-0 break-words text-sm font-medium">{f.etiqueta}</p>
             {f.muestraPequena && <MuestraPequena />}
@@ -273,11 +294,13 @@ function TablaMercados({ apuestas, tipo }: { apuestas: ApuestaAnalisis[]; tipo: 
             <div className="bg-green-600 dark:bg-green-500" style={{ width: `${(f.verdes / f.n) * 100}%` }} />
             <div className="bg-red-600 dark:bg-red-500" style={{ width: `${(f.rojas / f.n) * 100}%` }} />
           </div>
-          <p className="text-xs tabular-nums">
-            <span className="text-green-700 dark:text-green-400">{f.verdes} verdes</span> ·{' '}
-            <span className="text-red-600 dark:text-red-400">{f.rojas} rojas</span> · {porcentaje(f.pctVerdes)} verdes · {f.n} en total
-          </p>
-        </li>
+          <dl className="grid grid-cols-4 gap-x-2 text-xs">
+            <Dato n="Verdes" v={String(f.verdes)} clase="text-green-700 dark:text-green-400" />
+            <Dato n="Rojas" v={String(f.rojas)} clase="text-red-600 dark:text-red-400" />
+            <Dato n="% verdes" v={porcentaje(f.pctVerdes)} />
+            <Dato n="Total" v={String(f.n)} />
+          </dl>
+        </FilaEnlace>
       ))}
     </ul>
   )
