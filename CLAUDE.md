@@ -36,13 +36,17 @@ archivo o panel ponerlas).
    **Copia de seguridad en CSV fusionada el 2026-11-05** (rama `exportar-csv`, hecha y probada el
    2026-11-04; pruebas de GitHub Actions en verde; sin migración): adelantada antes de la Fase 2.
    **Verificada por el usuario en producción el 2026-11-05.**
-2. **Gráficas y métricas** (rama `fase-2-analisis`, desde el 2026-11-05; sin migración): pantalla
-   **Análisis** (antes "Gráficas") con filtro de fechas, resumen, segmentos con barras de beneficio,
-   aciertos por selección y mercado, y resumen descriptivo. Pendiente de verificar en el móvil y de
-   fusionar. Reglas de cálculo en la sección "Análisis (Fase 2)".
+2. **Gráficas y métricas: fusionada el 2026-11-05** (rama `fase-2-analisis`, PR #2; pruebas de
+   GitHub Actions en verde; sin migración): pantalla **Análisis** (antes "Gráficas") con filtro de
+   fechas, resumen, segmentos con barras de beneficio, aciertos por selección y mercado, y resumen
+   descriptivo. **Verificada en el móvil con la cuenta de email (5 apuestas).** Falta verificarla en
+   producción con la cuenta de Google (39 resueltas). Reglas de cálculo en la sección "Análisis
+   (Fase 2)".
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, al empezar la Fase 2 en `fase-2-analisis`)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar la Fase 2)
+- **Verificar el Análisis en producción con la cuenta de Google** (39 resueltas): cifras a mano con
+  calculadora, filtro de fechas, "Muestra pequeña" y "En juego".
 - **Resto de reglas de promociones de la Fase 2** (ver Principios): beneficio por promociones
   APARTE, "aumento cobrado" solo si se gana y aumento negativo como dato dudoso. De momento el
   Análisis solo aplica la regla de las apuestas **con crédito**.
@@ -675,3 +679,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-05 | `MUESTRA_MINIMA = 10` en un solo sitio; el resumen descriptivo solo cita segmentos con n ≥ 10 y con valor concreto | Con pocas apuestas las cifras engañan; sin consejos |
 | 2026-11-05 | El simulador local admite el filtro `lt` (además de corte a 1000 filas) | La prueba completa usa el filtro de fechas real |
 | 2026-11-05 | Sin cambios en `comprobar_rls_en_vivo.sql` | Sin tablas, permisos ni funciones nuevas: solo lecturas con la sesión, ya cubiertas por RLS (prueba nueva en `rls.test.mjs` con las consultas del Análisis) |
+| 2026-11-05 | **Fase 2 (pantalla Análisis) fusionada en `main`** (rama `fase-2-analisis`, PR #2) | Verificada en el móvil con la cuenta de email (5 apuestas); pruebas de GitHub Actions en verde; producción desplegada en Vercel; sin migración. Falta verificarla en producción con la cuenta de Google (39 resueltas) |
