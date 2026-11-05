@@ -42,14 +42,16 @@ archivo o panel ponerlas).
    descriptivo. **Verificada en el móvil con la cuenta de email (5 apuestas).** Falta verificarla en
    producción con la cuenta de Google (35 apuestas). Reglas de cálculo en la sección "Análisis
    (Fase 2)".
-   **Retoques del Análisis** (rama `fase-2-retoques-analisis`, desde el 2026-11-05; sin migración):
-   aciertos también por liga, cada fila abre el detalle con sus apuestas y se quita "En cifras".
-   Pendiente de verificar en el móvil y de fusionar.
+   **Retoques del Análisis fusionados el 2026-11-05** (rama `fase-2-retoques-analisis`, PR #3;
+   pruebas de GitHub Actions en verde; sin migración): aciertos también por liga, cada fila abre el
+   detalle con sus apuestas y se quita "En cifras". **Verificados en el móvil con la cuenta de email
+   (5 apuestas).** Falta verificarlos en producción con la cuenta de Google (35 apuestas).
 3. Pendiente de definir.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar la Fase 2)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar los retoques del Análisis)
 - **Verificar el Análisis en producción con la cuenta de Google** (35 apuestas): cifras a mano con
-  calculadora, filtro de fechas, "Muestra pequeña" y "En juego".
+  calculadora, filtro de fechas, "Muestra pequeña" y "En juego"; y los retoques (aciertos por liga,
+  detalle de cada fila con el mismo recuento y vuelta al mismo sitio).
 - **Resto de reglas de promociones de la Fase 2** (ver Principios): beneficio por promociones
   APARTE, "aumento cobrado" solo si se gana y aumento negativo como dato dudoso. De momento el
   Análisis solo aplica la regla de las apuestas **con crédito**.
@@ -715,3 +717,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-05 | `?volver=` acepta también `/analisis…` con una regla estricta de ruta (probada con `//`, `\`, `@`, `%2F`, `%5C` y externas) | Volver al Análisis sin abrir la puerta a redirecciones a otras webs |
 | 2026-11-05 | **"En cifras" eliminado** (código y pruebas) | No pasaba los criterios: no se entendía en 5 segundos y no aportaba nada que no estuviera ya en tarjetas y tablas |
 | 2026-11-05 | Corregido: la cuenta de Google tiene 35 apuestas (el "39" era el total de las dos cuentas) | Dato del usuario |
+| 2026-11-05 | **Retoques del Análisis fusionados en `main`** (rama `fase-2-retoques-analisis`, PR #3) | Verificados en el móvil con la cuenta de email (5 apuestas); pruebas de GitHub Actions en verde; producción desplegada en Vercel; sin migración. Falta verificarlos en producción con la cuenta de Google (35 apuestas) |
