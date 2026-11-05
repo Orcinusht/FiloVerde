@@ -12,7 +12,8 @@ const CLAVE_SCROLL = 'filoverde:scroll'
 // "//dominio", "/\dominio", "/analisisx", "/analisis@dominio" y sus versiones codificadas
 // ("%2F", "%5C"…), porque "%", "@" y "\" no caben en la ruta. Lo que va tras "?" son parámetros
 // ya codificados (pueden llevar "%2F" dentro de un valor) y no cambian a dónde se va.
-const RUTA_SEGURA = /^(\/apuestas|\/analisis(\/[a-z0-9-]+)*\/?)(\?[^#\s\\]*)?$/
+// (Desde la Fase 3 también "/bankroll", con la misma regla que "/analisis".)
+const RUTA_SEGURA = /^(\/apuestas|\/(analisis|bankroll)(\/[a-z0-9-]+)*\/?)(\?[^#\s\\]*)?$/
 
 export function rutaVueltaSegura(volver: string | null | undefined, porDefecto = '/apuestas'): string {
   if (volver && volver.length <= 2000 && RUTA_SEGURA.test(volver)) return volver

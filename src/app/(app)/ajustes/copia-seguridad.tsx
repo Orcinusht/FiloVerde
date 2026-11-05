@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 
-type Que = 'apuestas' | 'selecciones'
+type Que = 'apuestas' | 'selecciones' | 'bankroll'
 type Mensaje = { ok: boolean; texto: string }
 
 // Ajustes → Copia de seguridad: descarga las apuestas y las selecciones en CSV (dos archivos
@@ -39,7 +39,8 @@ export function CopiaSeguridad() {
       a.click()
       a.remove()
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
-      const cuantas = que === 'apuestas' ? (filas === 1 ? '1 apuesta' : `${filas} apuestas`) : filas === 1 ? '1 selección' : `${filas} selecciones`
+      const [una, varias] = { apuestas: ['apuesta', 'apuestas'], selecciones: ['selección', 'selecciones'], bankroll: ['movimiento', 'movimientos'] }[que]
+      const cuantas = filas === 1 ? `1 ${una}` : `${filas} ${varias}`
       setMensaje({ ok: true, texto: `Descargado ${archivo} (${cuantas}).` })
     } catch {
       setMensaje({ ok: false, texto: 'No hay conexión con el servidor. Comprueba tu conexión e inténtalo de nuevo.' })
@@ -64,11 +65,12 @@ export function CopiaSeguridad() {
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">Copia de seguridad</h2>
       <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
         <p className="text-xs text-muted">
-          Descarga todas tus apuestas en archivos CSV para Excel o Google Sheets. Guárdalos en un lugar seguro: el
-          plan gratuito no hace copias automáticas.
+          Descarga todas tus apuestas y tus movimientos de bankroll en archivos CSV para Excel o Google Sheets.
+          Guárdalos en un lugar seguro: el plan gratuito no hace copias automáticas.
         </p>
         {boton('apuestas', 'Descargar apuestas (CSV)')}
         {boton('selecciones', 'Descargar selecciones (CSV)')}
+        {boton('bankroll', 'Descargar bankroll (CSV)')}
         {mensaje && (
           <p role="status" className={`text-sm ${mensaje.ok ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
             {mensaje.texto}

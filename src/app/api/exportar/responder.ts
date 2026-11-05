@@ -9,7 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 // Respuesta común de /api/exportar/apuestas y /api/exportar/selecciones.
 // Errores: mensaje en español para el usuario; el error real, al log (sin datos personales).
 export async function responderCsv(
-  que: 'apuestas' | 'selecciones',
+  que: 'apuestas' | 'selecciones' | 'bankroll',
   exportar: (supabase: SupabaseClient, userId: string) => Promise<Exportacion>,
 ) {
   const error = (status: number, mensaje: string) =>
@@ -27,7 +27,12 @@ export async function responderCsv(
     return error(500, 'No se ha podido preparar la copia. Inténtalo de nuevo en un momento.')
   }
   if (r.filas === 0) {
-    return error(404, 'Todavía no tienes apuestas registradas: no hay nada que exportar.')
+    return error(
+      404,
+      que === 'bankroll'
+        ? 'Todavía no tienes movimientos de bankroll: no hay nada que exportar.'
+        : 'Todavía no tienes apuestas registradas: no hay nada que exportar.',
+    )
   }
 
   const archivo = nombreArchivo(que)

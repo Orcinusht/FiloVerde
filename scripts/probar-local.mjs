@@ -1977,7 +1977,7 @@ for (const ancho of [320, 375, 390, 430]) {
     const ctx = await navegador.newContext({ ...movil, viewport: { width: ancho, height: 800 }, colorScheme: tema })
     await ctx.addCookies([cookieSesion(ANA)])
     const p = await ctx.newPage()
-    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas']) {
+    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/bankroll', '/bankroll/nuevo']) {
       await p.goto(`${APP}${ruta}`, { waitUntil: 'networkidle' })
       const ancho2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
       assert.ok(ancho2 <= 0, `${ruta} a ${ancho}px (${tema}): scroll horizontal de ${ancho2}px`)
@@ -1988,6 +1988,175 @@ for (const ancho of [320, 375, 390, 430]) {
 }
 bien('Sin scroll horizontal en los 4 anchos y los 2 modos')
 await ctxCarla.close()
+
+// ---------- Fase 3 · Bankroll ----------
+paso('Bankroll: movimientos y saldos (comparados con un cálculo aparte en la base de datos)')
+const RES_BK = `('ganada','perdida','cash_out','media_ganada','media_perdida')`
+// Saldo esperado calculado con SQL, independiente del código de la app.
+async function esperadoBk(userId, casaId = null) {
+  const cond = casaId ? `and casa_id = '${casaId}'` : ''
+  const [f] = await sql(`select
+    coalesce((select sum(case tipo when 'deposito' then importe when 'retirada' then -importe when 'ajuste' then importe else 0 end)
+              from movimientos_bankroll where user_id = '${userId}' ${cond}), 0)::bigint
+    + ${casaId ? `coalesce((select sum(importe) from movimientos_bankroll where user_id = '${userId}' and tipo = 'traspaso' and casa_destino_id = '${casaId}'), 0)::bigint
+    - coalesce((select sum(importe) from movimientos_bankroll where user_id = '${userId}' and tipo = 'traspaso' and casa_id = '${casaId}'), 0)::bigint` : '0'}
+    + coalesce((select sum(resultado_economico) from apuestas where user_id = '${userId}' ${cond} and estado in ${RES_BK}), 0)::bigint as saldo,
+    coalesce((select sum(importe) from apuestas where user_id = '${userId}' ${cond} and estado = 'pendiente'), 0)::bigint as en_juego,
+    coalesce((select sum(resultado_economico) from apuestas where user_id = '${userId}' ${cond} and estado in ${RES_BK}), 0)::bigint as beneficio,
+    coalesce((select sum(importe) from movimientos_bankroll where user_id = '${userId}' ${cond} and tipo = 'deposito'), 0)::bigint as depositado`)
+  return Object.fromEntries(Object.entries(f).map(([k, v]) => [k, Number(v)]))
+}
+const cifraBk = (p, bloque, n) => p.locator(`${bloque} [data-cifra="${n}"] dd`).innerText()
+async function comprobarBk(p, bloque, e) {
+  // Espera (máx. 10 s) a que la pantalla muestre el saldo esperado; luego compara el resto.
+  const exacto = new RegExp(`^${eur(e.saldo).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+  await p.locator(`${bloque} [data-cifra="Saldo"] dd`, { hasText: exacto }).waitFor({ timeout: 10000 }).catch(() => {})
+  assert.equal(await cifraBk(p, bloque, 'Saldo'), eur(e.saldo), `${bloque} saldo`)
+  assert.equal(await cifraBk(p, bloque, 'En juego'), eur(e.en_juego), `${bloque} en juego`)
+  assert.equal(await cifraBk(p, bloque, 'ROI sobre bankroll').catch(() => cifraBk(p, bloque, 'ROI')), e.depositado ? pct(e.beneficio / e.depositado) : '—', `${bloque} ROI`)
+}
+// Casa principal de Ana: la que tiene más apuestas resueltas.
+const [casaBk] = await sql(`select c.id, c.nombre from casas_apuestas c join apuestas a on a.casa_id = c.id
+  where c.user_id = '${ANA.id}' and a.estado in ${RES_BK} group by c.id, c.nombre order by count(*) desc, c.nombre limit 1`)
+await pag.goto(`${APP}/bankroll`)
+await pag.getByText('Registra tus depósitos y retiradas pasados para que el saldo y el ROI sean correctos.').waitFor()
+assert.equal(await cifraBk(pag, '[data-bloque="global"]', 'ROI sobre bankroll'), '—', 'sin depósitos, ROI «—»')
+await foto('90-bankroll-vacio')
+bien('Estado vacío con su guía; ROI «—» sin depósitos')
+
+async function nuevoMovimiento({ tipo = 'Depósito', importe, casa, destino, nuevaCasa, signo, dia, notas }) {
+  await pag.goto(`${APP}/bankroll`)
+  await pag.getByRole('link', { name: '+ Movimiento' }).click()
+  await pag.waitForURL(/\/bankroll\/nuevo/)
+  await pag.waitForLoadState('networkidle')
+  await pag.getByRole('button', { name: tipo, exact: true }).click()
+  if (dia) await pag.getByLabel('Día', { exact: true }).fill(dia)
+  await pag.getByLabel('Importe (€)').fill(importe)
+  if (signo) await pag.getByRole('button', { name: signo, exact: true }).click()
+  if (casa) await pag.getByLabel(tipo === 'Traspaso' ? 'Casa de origen' : 'Casa', { exact: true }).selectOption(casa)
+  if (destino) await pag.getByLabel('Casa de destino', { exact: true }).selectOption(destino)
+  if (nuevaCasa) {
+    await pag.getByLabel('Casa de destino', { exact: true }).selectOption('__nueva__')
+    await pag.getByPlaceholder('Nombre de la casa').fill(nuevaCasa)
+    await pag.getByRole('button', { name: 'Crear', exact: true }).click()
+    await pag.getByLabel('Casa de destino', { exact: true }).locator('option:checked', { hasText: nuevaCasa }).waitFor({ state: 'attached' })
+  }
+  if (notas) await pag.getByLabel('Notas (opcional)').fill(notas)
+  await pag.getByRole('button', { name: 'Guardar', exact: true }).click()
+}
+
+await nuevoMovimiento({ importe: '100', casa: casaBk.id })
+await pag.waitForURL(`${APP}/bankroll`)
+let eG = await esperadoBk(ANA.id)
+let eC = await esperadoBk(ANA.id, casaBk.id)
+await comprobarBk(pag, '[data-bloque="global"]', eG)
+await comprobarBk(pag, `[data-casa="${casaBk.nombre}"]`, eC)
+assert.equal(eC.depositado, 10000)
+bien(`Depósito de 100 € en ${casaBk.nombre}: saldo ${eur(eC.saldo)} = 100 € + beneficio ${eur(eC.beneficio)}; ROI = beneficio / 100`)
+
+// Retirada, ajuste negativo y traspaso a una casa nueva (creada desde el formulario).
+await nuevoMovimiento({ tipo: 'Retirada', importe: '20', casa: casaBk.id })
+await pag.waitForURL(`${APP}/bankroll`)
+await nuevoMovimiento({ tipo: 'Ajuste', importe: '5,50', signo: 'Resta', casa: casaBk.id, notas: '=comisión' })
+await pag.waitForURL(`${APP}/bankroll`)
+const globalAntes = (await esperadoBk(ANA.id)).saldo
+await nuevoMovimiento({ tipo: 'Traspaso', importe: '30', casa: casaBk.id, nuevaCasa: 'Casa Nueva' })
+await pag.waitForURL(`${APP}/bankroll`)
+const [casaNueva] = await sql(`select id from casas_apuestas where user_id = '${ANA.id}' and nombre = 'Casa Nueva'`)
+eG = await esperadoBk(ANA.id)
+eC = await esperadoBk(ANA.id, casaBk.id)
+const eN = await esperadoBk(ANA.id, casaNueva.id)
+assert.equal(eG.saldo, globalAntes, 'el traspaso no cambia el global')
+assert.equal(eN.saldo, 3000)
+await comprobarBk(pag, '[data-bloque="global"]', eG)
+await comprobarBk(pag, `[data-casa="${casaBk.nombre}"]`, eC)
+assert.equal(await cifraBk(pag, '[data-casa="Casa Nueva"]', 'Saldo'), eur(3000))
+assert.equal(await cifraBk(pag, '[data-casa="Casa Nueva"]', 'ROI'), '—')
+await pag.locator('[data-casa="Casa Nueva"]').getByText('ROI «—»: solo recibe traspasos.').waitFor()
+await foto('91-bankroll')
+bien(`Retirada 20 €, ajuste −5,50 € y traspaso 30 €: ${casaBk.nombre} ${eur(eC.saldo)}, Casa Nueva 30,00 € (ROI «—»), global sin cambio por el traspaso`)
+
+// Fecha futura: no se puede (aviso claro).
+await pag.goto(`${APP}/bankroll/nuevo`, { waitUntil: 'networkidle' })
+const manana = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date(Date.now() + 2 * 86400000))
+await pag.getByLabel('Día', { exact: true }).fill(manana)
+await pag.getByLabel('Importe (€)').fill('10')
+await pag.getByLabel('Casa', { exact: true }).selectOption(casaBk.id)
+await pag.getByRole('button', { name: 'Guardar', exact: true }).click()
+await pag.getByText('La fecha no puede ser futura: registra el movimiento cuando se haga.').waitFor()
+assert.equal((await sql(`select count(*)::int n from movimientos_bankroll where user_id = '${ANA.id}'`))[0].n, 4)
+bien('Fecha futura: «La fecha no puede ser futura…» y no se guarda')
+
+// Editar y borrar (con confirmación): las cifras se recalculan.
+await pag.goto(`${APP}/bankroll?tipo=retirada`)
+assert.equal(await pag.locator('[data-lista="movimientos"]:visible > li').count(), 1, 'filtro por tipo')
+await pag.locator('[data-lista="movimientos"]:visible > li a').first().click()
+await pag.getByLabel('Importe (€)').fill('25')
+await pag.getByRole('button', { name: 'Guardar cambios' }).click()
+await pag.waitForURL(`${APP}/bankroll?tipo=retirada`)
+eC = await esperadoBk(ANA.id, casaBk.id)
+await pag.goto(`${APP}/bankroll`)
+await comprobarBk(pag, `[data-casa="${casaBk.nombre}"]`, eC)
+await pag.goto(`${APP}/bankroll?tipo=ajuste`)
+await pag.locator('[data-lista="movimientos"]:visible > li a').first().click()
+await pag.getByRole('button', { name: 'Borrar movimiento' }).click()
+await pag.getByRole('alertdialog', { name: 'Confirmar borrado' }).waitFor()
+await pag.getByRole('button', { name: 'Sí, borrar' }).click()
+await pag.waitForURL(`${APP}/bankroll?tipo=ajuste`)
+await pag.getByText('No hay movimientos con estos filtros.').waitFor()
+eG = await esperadoBk(ANA.id)
+await pag.goto(`${APP}/bankroll`)
+await comprobarBk(pag, '[data-bloque="global"]', eG)
+bien('Editar (retirada 20 → 25 €) y borrar (con confirmación) recalculan los saldos')
+
+// Detalle de una casa: cifras, sus movimientos (también el traspaso) y enlace a sus apuestas.
+await pag.locator(`[data-casa="${casaBk.nombre}"]`).click()
+await pag.waitForURL(new RegExp(`/bankroll/casa/${casaBk.id}$`))
+await comprobarBk(pag, `[data-bloque="${casaBk.nombre}"]`, await esperadoBk(ANA.id, casaBk.id))
+assert.equal(await pag.locator('[data-lista="movimientos"]:visible > li').count(), 3, 'depósito, retirada y traspaso enviado')
+await pag.locator('[data-lista="movimientos"]:visible').getByText(`−30,00 €`).or(pag.locator('[data-lista="movimientos"]:visible').getByText('-30,00 €')).first().waitFor()
+assert.equal(await pag.getByRole('link', { name: 'Ver sus apuestas →' }).getAttribute('href'), `/apuestas?casa=${casaBk.id}`)
+await foto('92-bankroll-casa')
+// Abrir un movimiento desde el detalle y volver a él.
+await pag.locator('[data-lista="movimientos"]:visible > li a').first().click()
+await pag.getByRole('link', { name: '← Volver' }).click()
+await pag.waitForURL(new RegExp(`/bankroll/casa/${casaBk.id}$`))
+bien('Detalle de la casa: cifras, 3 movimientos (el traspaso, con −30 €), enlace a sus apuestas y vuelta desde un movimiento')
+const sinCasaAna = (await sql(`select count(*)::int n from apuestas where user_id = '${ANA.id}' and casa_id is null and estado in ${RES_BK}`))[0].n
+if (sinCasaAna > 0) {
+  await pag.goto(`${APP}/bankroll`)
+  await pag.locator('[data-casa="Sin casa"]').waitFor()
+  bien('Aparece «Sin casa» (apuestas resueltas sin casa: cuentan en el global)')
+}
+
+// CSV de bankroll.
+await pag.goto(`${APP}/ajustes`)
+const csvBk = await descargarCsv(pag, 'Descargar bankroll (CSV)')
+assert.equal(csvBk.nombre, `filoverde-bankroll-${hoyMadrid}.csv`)
+assert.equal(csvBk.filas.length, 3)
+assert.deepEqual(csvBk.filas.map((f) => f.tipo).sort(), ['deposito', 'retirada', 'traspaso'])
+assert.ok(csvBk.filas.some((f) => f.tipo === 'traspaso' && f.casa_destino === 'Casa Nueva' && f.importe === '30,00'))
+bien('CSV de bankroll: 3 movimientos, importes con coma y casa de destino')
+
+// Carla: más de 1000 movimientos.
+const [casaCarla] = await sql(`insert into casas_apuestas (user_id, nombre) values ('${CARLA.id}', 'Casa de Carla') returning id`)
+await sql(`insert into movimientos_bankroll (user_id, tipo, importe, casa_id, fecha, notas)
+  select '${CARLA.id}', case when g % 5 = 0 then 'retirada' else 'deposito' end, 100 + g, '${casaCarla.id}', timestamptz '2025-01-01 12:00+01' + g * interval '1 hour',
+         case when g = 1 then '@importe' end
+  from generate_series(1, 1150) g`)
+const ctxCarla2 = await navegador.newContext({ ...movil, acceptDownloads: true })
+await ctxCarla2.addCookies([cookieSesion(CARLA)])
+const pagCarla2 = await ctxCarla2.newPage()
+await pagCarla2.goto(`${APP}/bankroll`)
+assert.equal(await pagCarla2.locator('[data-recuento="movimientos"]:visible').innerText(), '1150 movimientos')
+await comprobarBk(pagCarla2, '[data-bloque="global"]', await esperadoBk(CARLA.id))
+await pagCarla2.getByText('1–50 de 1150').waitFor()
+await pagCarla2.goto(`${APP}/ajustes`)
+const csvCarlaBk = await descargarCsv(pagCarla2, 'Descargar bankroll (CSV)')
+assert.equal(csvCarlaBk.filas.length, 1150)
+assert.equal(csvCarlaBk.filas[0].notas, "'@importe", 'protección de fórmulas')
+await ctxCarla2.close()
+bien('Carla: 1150 movimientos (más de 1000), saldos como en la BD y CSV completo')
 
 // Sin sesión: no hay archivo.
 const sinSesionCsv = await (await navegador.newContext()).request.get(`${APP}/api/exportar/apuestas`, { maxRedirects: 0 })
@@ -2021,6 +2190,14 @@ bien('Análisis sin apuestas resueltas: estado vacío claro (nada de Ana)')
 await pagBeto.goto(urlDetalle)
 await pagBeto.getByText('No hay apuestas en esta fila con el periodo y los filtros elegidos.').waitFor()
 bien('Con la dirección de un detalle de Ana, Beto no ve ninguna apuesta')
+await pagBeto.goto(`${APP}/bankroll`)
+await pagBeto.getByText('Registra tus depósitos y retiradas pasados para que el saldo y el ROI sean correctos.').waitFor()
+const [movAna] = await sql(`select id from movimientos_bankroll where user_id = '${ANA.id}' limit 1`)
+await pagBeto.goto(`${APP}/bankroll/${movAna.id}`)
+await pagBeto.getByText('Este movimiento no existe.', { exact: false }).waitFor()
+await pagBeto.goto(`${APP}/bankroll/casa/${casaBk.id}`)
+await pagBeto.getByText('Esta casa no existe.').waitFor()
+bien('Bankroll de Beto vacío; no puede abrir un movimiento ni una casa de Ana')
 await pagBeto.goto(`${APP}/ajustes/deportes`)
 await pagBeto.getByRole('button', { name: /^Tenis/ }).click()
 assert.equal(await pagBeto.getByLabel('Nombre de la liga Laver Cup 2026').count(), 0)
