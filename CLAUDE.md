@@ -46,15 +46,19 @@ archivo o panel ponerlas).
    pruebas de GitHub Actions en verde; sin migración): aciertos también por liga, cada fila abre el
    detalle con sus apuestas y se quita "En cifras". **Verificados en el móvil con la cuenta de email
    (5 apuestas).** Falta verificarlos en producción con la cuenta de Google (35 apuestas).
-3. **Bankroll y evolución.** **Primera ronda: Bankroll** (rama `fase-3-bankroll`, desde el
-   2026-11-06; migración `20261106000001`, pendiente de pegar en Supabase): movimientos (depósito,
-   retirada, ajuste y traspaso entre casas), saldo global y por casa, en juego, disponible y ROI
-   sobre bankroll; CSV de movimientos. Pendiente de verificar en el móvil y de fusionar. La segunda
-   ronda (evolución en el tiempo, gestión de casas y estrategias) está sin empezar.
+3. **Bankroll y evolución.** **Primera ronda (Bankroll) fusionada el 2026-11-05** (rama
+   `fase-3-bankroll`, PR #4; pruebas de GitHub Actions en verde; migración `20261106000001`
+   **aplicada** en Supabase): movimientos (depósito, retirada, ajuste y traspaso entre casas), saldo
+   global y por casa, en juego, disponible y ROI sobre bankroll; CSV de movimientos. **Verificada en
+   el móvil con la cuenta de email.** Falta verificarla en producción con la cuenta de Google (35
+   apuestas). La segunda ronda está sin empezar (ver Pendiente).
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, al empezar la Fase 3 en `fase-3-bankroll`)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar la Fase 3, primera ronda)
+- **Verificar el Bankroll en producción con la cuenta de Google** (35 apuestas): saldos por casa y
+  global con calculadora, traspaso, ajuste, editar y borrar, y el CSV de bankroll.
 - **Fase 3, segunda ronda:** evolución en el tiempo (beneficio acumulado, evolución del saldo, por
-  mes y día de la semana, drawdown) y **gestión de casas y estrategias** en Ajustes. Al borrar una
+  mes y día de la semana, drawdown), **gestión de casas y estrategias** en Ajustes (renombrar y
+  borrar) e **importación** (de CSV). Al borrar una
   casa: impedirlo si tiene apuestas o movimientos ("Esta casa tiene N apuestas y M movimientos: no se
   puede borrar. Puedes renombrarla"); renombrar es seguro (todo va por id). Hoy la BD ya impide
   borrar una casa con movimientos (`on delete restrict`); con apuestas la dejaría en "Sin casa".
@@ -777,14 +781,16 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-05 | **"En cifras" eliminado** (código y pruebas) | No pasaba los criterios: no se entendía en 5 segundos y no aportaba nada que no estuviera ya en tarjetas y tablas |
 | 2026-11-05 | Corregido: la cuenta de Google tiene 35 apuestas (el "39" era el total de las dos cuentas) | Dato del usuario |
 | 2026-11-05 | **Retoques del Análisis fusionados en `main`** (rama `fase-2-retoques-analisis`, PR #3) | Verificados en el móvil con la cuenta de email (5 apuestas); pruebas de GitHub Actions en verde; producción desplegada en Vercel; sin migración. Falta verificarlos en producción con la cuenta de Google (35 apuestas) |
-| 2026-11-06 | **Fase 3 empezada (primera ronda: Bankroll)** en la rama `fase-3-bankroll` | La evolución en el tiempo y la gestión de casas quedan para la segunda ronda |
-| 2026-11-06 | Se amplía `movimientos_bankroll` (de la Fase 0, vacía) en vez de crear otra tabla | Reutiliza su RLS, permisos, divisa por defecto y pruebas; no hay datos que migrar |
-| 2026-11-06 | Casas del movimiento comprobadas por clave compuesta `(casa, user_id)` | Más fuerte que una regla de RLS: la BD impide usar la casa de otro usuario venga de donde venga |
-| 2026-11-06 | `on delete restrict` en las casas de los movimientos | No se puede borrar una casa con movimientos; con apuestas, se bloqueará en la gestión de casas (segunda ronda) |
-| 2026-11-06 | Ajuste ≠ 0 (puede ser + o −); depósito, retirada y traspaso > 0 | Un ajuste de 0 no cambia nada |
-| 2026-11-06 | **Sin fechas futuras** en movimientos (servidor + disparador en la BD, margen de 1 día) | El saldo "hasta hoy" no incluye dinero que aún no se ha movido |
-| 2026-11-06 | ROI por casa con sus propios depósitos; "—" y nota si solo recibe traspasos | Los traspasos no son depósitos (regla del usuario) |
-| 2026-11-06 | Cálculos en funciones puras y lectura en el servidor en tandas de 1000; formulario con Server Actions | Probables con `npm test`; el móvil no habla directo con Supabase |
-| 2026-11-06 | La pestaña Bankroll ya existía: la barra sigue con 4 entradas | Sin saturar la navegación |
-| 2026-11-06 | `SelectorOpcion` admite el texto de la opción vacía ("Elige una casa") | La casa es obligatoria en los movimientos; en las apuestas no cambia nada |
-| 2026-11-06 | `comprobar_rls_en_vivo.sql` con 9 comprobaciones nuevas de bankroll (55 en total) | La versión de `main` (antes de fusionar) falla tras pegar la migración porque crea un movimiento sin casa: usar la de la rama |
+| 2026-11-05 | **Fase 3 empezada (primera ronda: Bankroll)** en la rama `fase-3-bankroll` | La evolución en el tiempo y la gestión de casas quedan para la segunda ronda |
+| 2026-11-05 | Se amplía `movimientos_bankroll` (de la Fase 0, vacía) en vez de crear otra tabla | Reutiliza su RLS, permisos, divisa por defecto y pruebas; no hay datos que migrar |
+| 2026-11-05 | Casas del movimiento comprobadas por clave compuesta `(casa, user_id)` | Más fuerte que una regla de RLS: la BD impide usar la casa de otro usuario venga de donde venga |
+| 2026-11-05 | `on delete restrict` en las casas de los movimientos | No se puede borrar una casa con movimientos; con apuestas, se bloqueará en la gestión de casas (segunda ronda) |
+| 2026-11-05 | Ajuste ≠ 0 (puede ser + o −); depósito, retirada y traspaso > 0 | Un ajuste de 0 no cambia nada |
+| 2026-11-05 | **Sin fechas futuras** en movimientos (servidor + disparador en la BD, margen de 1 día) | El saldo "hasta hoy" no incluye dinero que aún no se ha movido |
+| 2026-11-05 | ROI por casa con sus propios depósitos; "—" y nota si solo recibe traspasos | Los traspasos no son depósitos (regla del usuario) |
+| 2026-11-05 | Cálculos en funciones puras y lectura en el servidor en tandas de 1000; formulario con Server Actions | Probables con `npm test`; el móvil no habla directo con Supabase |
+| 2026-11-05 | La pestaña Bankroll ya existía: la barra sigue con 4 entradas | Sin saturar la navegación |
+| 2026-11-05 | `SelectorOpcion` admite el texto de la opción vacía ("Elige una casa") | La casa es obligatoria en los movimientos; en las apuestas no cambia nada |
+| 2026-11-05 | `comprobar_rls_en_vivo.sql` con 9 comprobaciones nuevas de bankroll (55 en total) | Desde la fusión (2026-11-05), la versión de `main` ya es la nueva (55 comprobaciones; crea movimientos con casa) |
+| 2026-11-05 | El nombre `20261106000001` de la migración de bankroll no es una fecha real (se hizo el 2026-11-05) | Solo marca el orden; ya está aplicada y no se renombra |
+| 2026-11-05 | **Fase 3, primera ronda (Bankroll), fusionada en `main`** (rama `fase-3-bankroll`, PR #4) | Migración aplicada en Supabase; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google (35 apuestas) |
