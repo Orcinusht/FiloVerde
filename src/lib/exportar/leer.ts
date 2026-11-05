@@ -2,11 +2,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   COLUMNAS_APUESTAS,
   COLUMNAS_SELECCIONES,
+  COLUMNAS_MOVIMIENTOS,
   generarCsv,
   leerTodo,
   ordenarSelecciones,
   type ApuestaExportar,
   type SeleccionExportar,
+  type MovimientoExportar,
 } from './csv.ts'
 
 // Copia de seguridad en CSV: lecturas para /api/exportar/*. Sin claves: usa el cliente con la
@@ -97,4 +99,29 @@ export async function exportarSelecciones(supabase: SupabaseClient, userId: stri
   })
   const ordenadas = ordenarSelecciones(selecciones, apuestas.map((a) => a.id))
   return { csv: generarCsv(COLUMNAS_SELECCIONES, ordenadas), filas: ordenadas.length }
+}
+
+// Movimientos de bankroll, del más antiguo al más reciente (fecha, creación, id).
+export async function exportarMovimientos(supabase: SupabaseClient, userId: string): Promise<Exportacion> {
+  type Fila = Omit<MovimientoExportar, 'casa' | 'casa_destino'> & { casa_id: string; casa_destino_id: string | null }
+  const filas = await leerTodo<Fila>(async (desde, hasta) => {
+    const { data, error } = await supabase
+      .from('movimientos_bankroll')
+      .select('id, fecha, tipo, importe, casa_id, casa_destino_id, notas, created_at, updated_at')
+      .eq('user_id', userId)
+      .order('fecha')
+      .order('created_at')
+      .order('id')
+      .range(desde, hasta)
+    if (error) throw error
+    return (data ?? []) as unknown as Fila[]
+  })
+  if (filas.length === 0) return { csv: '', filas: 0 }
+  const casas = await nombres(supabase, 'casas_apuestas', userId)
+  const movimientos: MovimientoExportar[] = filas.map(({ casa_id, casa_destino_id, ...m }) => ({
+    ...m,
+    casa: casas.get(casa_id) ?? null,
+    casa_destino: casa_destino_id ? (casas.get(casa_destino_id) ?? null) : null,
+  }))
+  return { csv: generarCsv(COLUMNAS_MOVIMIENTOS, movimientos), filas: movimientos.length }
 }

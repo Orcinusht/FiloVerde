@@ -43,7 +43,8 @@ with x as (insert into apuestas (casa_id, importe, cuota_total, notas)
 with x as (insert into selecciones (apuesta_id, evento, cuota)
            select v, 'PRUEBA-RLS', 1.85 from ids where k = 'apuesta' returning id)
   insert into ids select 'seleccion', id from x;
-with x as (insert into movimientos_bankroll (tipo, importe) values ('ajuste', 1) returning id)
+with x as (insert into movimientos_bankroll (tipo, importe, casa_id, notas)
+           select 'ajuste', 1, v, 'PRUEBA-RLS' from ids where k = 'casa' returning id)
   insert into ids select 'movimiento', id from x;
 with x as (insert into transcripciones (modelo, resultado) values ('PRUEBA-RLS', 'ok') returning id)
   insert into ids select 'transcripcion', id from x;
@@ -209,6 +210,43 @@ exception when others then
   insert into resultado values (20, 'A cambia el coste registrado de su propia lectura', 'rechazado', 'rechazado', true);
 end $$;
 
+-- Bankroll (Fase 3): movimientos por casa
+with x as (insert into casas_apuestas (nombre) values ('PRUEBA-RLS-2') returning id)
+  insert into ids select 'casa2', id from x;
+with x as (insert into movimientos_bankroll (tipo, importe, casa_id, casa_destino_id, notas)
+           select 'traspaso', 1, (select v from ids where k = 'casa'), (select v from ids where k = 'casa2'), 'PRUEBA-RLS'
+           returning id)
+  insert into ids select 'traspaso', id from x;
+insert into resultado
+  select 47, 'A hace un traspaso entre dos casas suyas (control)', '1', count(*)::text, count(*) = 1
+  from movimientos_bankroll where id in (select v from ids where k = 'traspaso');
+do $$
+begin
+  delete from casas_apuestas where id in (select v from ids where k = 'casa2');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (48, 'A borra una casa que tiene movimientos', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$
+begin
+  insert into movimientos_bankroll (tipo, importe, casa_id, fecha)
+    select 'deposito', 1, v, now() + interval '3 days' from ids where k = 'casa';
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (49, 'A registra un movimiento con fecha futura', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$
+begin
+  insert into movimientos_bankroll (tipo, importe, casa_id, casa_destino_id)
+    select 'traspaso', 1, v, v from ids where k = 'casa';
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (50, 'A hace un traspaso a la misma casa', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+
 reset role;
 
 -- ---------- 2. Como B: intentar acceder a lo de A ----------
@@ -330,6 +368,31 @@ insert into resultado
   from storage.objects where bucket_id = 'capturas'
     and (storage.foldername(name))[1] = (select a from params)::text;
 
+-- Bankroll (Fase 3)
+with x as (update movimientos_bankroll set importe = 999 where id in (select v from ids) returning 1)
+  insert into resultado select 51, 'B cambia un movimiento de bankroll de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+with x as (delete from movimientos_bankroll where id in (select v from ids) returning 1)
+  insert into resultado select 52, 'B borra un movimiento de bankroll de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+do $$
+begin
+  insert into movimientos_bankroll (tipo, importe, casa_id) select 'deposito', 1, v from ids where k = 'casa';
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (53, 'B crea un movimiento con la casa de A', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+with x as (insert into casas_apuestas (nombre) values ('PRUEBA-RLS-B') returning id)
+  insert into ids select 'casa_b', id from x;
+do $$
+begin
+  insert into movimientos_bankroll (tipo, importe, casa_id, casa_destino_id)
+    select 'traspaso', 1, (select v from ids where k = 'casa_b'), (select v from ids where k = 'casa');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (54, 'B hace un traspaso de su casa a una casa de A', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+
 reset role;
 
 -- ---------- 3. Sin sesión (visitante anónimo) ----------
@@ -359,9 +422,14 @@ insert into resultado
          coalesce(max(promo_tipo), 'BORRADA') || ' ' || coalesce(max(promo_credito)::text, '—'), max(promo_tipo) = 'asegurada' and max(promo_credito) = 700
   from apuestas where id in (select v from ids where k = 'apuesta_promo');
 
+insert into resultado
+  select 55, 'El movimiento de bankroll de A sigue intacto tras los intentos de B', 'importe 1',
+         'importe ' || coalesce(max(importe)::text, 'BORRADO'), coalesce(max(importe), 0) = 1
+  from movimientos_bankroll where id in (select v from ids where k = 'movimiento');
+
 delete from apuestas where id in (select v from ids);             -- borra también su selección
+delete from movimientos_bankroll where id in (select v from ids); -- antes que las casas (no se puede borrar una casa con movimientos)
 delete from casas_apuestas where id in (select v from ids);
-delete from movimientos_bankroll where id in (select v from ids);
 delete from transcripciones where id in (select v from ids);
 delete from deportes where id in (select v from ids);            -- borra también su liga
 

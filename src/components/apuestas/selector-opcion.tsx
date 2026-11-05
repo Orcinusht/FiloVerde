@@ -15,6 +15,8 @@ export function SelectorOpcion({
   sugerencia,
   onCambio,
   onCreada,
+  vacio,
+  etiqueta,
 }: {
   tipo: 'casa' | 'estrategia'
   opciones: Opcion[]
@@ -22,6 +24,8 @@ export function SelectorOpcion({
   sugerencia?: string | null
   onCambio: (id: string) => void
   onCreada: (o: Opcion) => void
+  vacio?: string // texto de la opción vacía (por defecto "Sin casa" / "Sin estrategia")
+  etiqueta?: string // aria-label si no hay <label> asociada
 }) {
   const [creando, setCreando] = useState(false)
   const [nombre, setNombre] = useState('')
@@ -51,6 +55,7 @@ export function SelectorOpcion({
       {!creando ? (
         <select
           id={id}
+          aria-label={etiqueta}
           value={valor}
           onChange={(e) => {
             if (e.target.value === NUEVA) {
@@ -60,7 +65,7 @@ export function SelectorOpcion({
           }}
           className={clase}
         >
-          <option value="">{tipo === 'casa' ? 'Sin casa' : 'Sin estrategia'}</option>
+          <option value="">{vacio ?? (tipo === 'casa' ? 'Sin casa' : 'Sin estrategia')}</option>
           {opciones.map((o) => (
             <option key={o.id} value={o.id}>
               {o.nombre}

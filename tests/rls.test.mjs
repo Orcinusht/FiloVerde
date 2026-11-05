@@ -61,7 +61,7 @@ before(async () => {
       )
     ).rows[0].id
     await tx.query(`insert into selecciones (apuesta_id, evento, cuota) values ($1, 'Betis - Sevilla', 1.85)`, [ids.apuesta])
-    await tx.query(`insert into movimientos_bankroll (tipo, importe) values ('deposito', 5000)`)
+    ids.movimiento = (await tx.query(`insert into movimientos_bankroll (tipo, importe, casa_id) values ('deposito', 5000, $1) returning id`, [ids.casa])).rows[0].id
     await tx.query(`insert into storage.objects (bucket_id, name) values ('capturas', $1)`, [`${ANA}/ticket.png`])
     await tx.query(
       `insert into transcripciones (imagen, modelo, resultado, tokens_entrada, tokens_salida, coste_usd)
@@ -626,4 +626,87 @@ test('Análisis: Beto, con las consultas de la pantalla Análisis y el id de Ana
     const a = await tx.query(`select id from apuestas where user_id = $1 and estado = any($2) order by fecha, created_at, id limit 1000`, [ANA, estados])
     assert.ok(a.rows.length >= 1, 'Ana sí ve las suyas')
   })
+})
+
+// ---------- Fase 3 · Bankroll: movimientos por casa ----------
+
+test('Bankroll: reglas de la base de datos para los movimientos', async () => {
+  await como(ANA, async (tx) => {
+    const otra = (await tx.query(`insert into casas_apuestas (nombre) values ('Otra casa de Ana') returning id`)).rows[0].id
+    const intenta = async (sql, params) => {
+      await tx.query('savepoint s')
+      try {
+        await tx.query(sql, params)
+        await tx.query('release savepoint s')
+        return 'ok'
+      } catch (e) {
+        await tx.query('rollback to savepoint s')
+        return e.message
+      }
+    }
+    const ins = (cols, vals, params) => intenta(`insert into movimientos_bankroll (${cols}) values (${vals})`, params)
+    assert.equal(await ins('tipo, importe, casa_id, casa_destino_id', `'traspaso', 100, $1, $2`, [ids.casa, otra]), 'ok')
+    assert.equal(await ins('tipo, importe, casa_id', `'ajuste', -250, $1`, [ids.casa]), 'ok', 'ajuste negativo')
+    assert.equal(await ins('tipo, importe, casa_id, notas', `'retirada', 10, $1, '=SUMA(A1)'`, [ids.casa]), 'ok')
+    assert.notEqual(await ins('tipo, importe', `'deposito', 100`, []), 'ok', 'sin casa')
+    assert.notEqual(await ins('tipo, importe, casa_id', `'deposito', 0, $1`, [ids.casa]), 'ok', 'importe 0')
+    assert.notEqual(await ins('tipo, importe, casa_id', `'retirada', -5, $1`, [ids.casa]), 'ok', 'retirada negativa')
+    assert.notEqual(await ins('tipo, importe, casa_id', `'traspaso', -5, $1`, [ids.casa]), 'ok', 'traspaso negativo')
+    assert.notEqual(await ins('tipo, importe, casa_id', `'ajuste', 0, $1`, [ids.casa]), 'ok', 'ajuste 0')
+    assert.notEqual(await ins('tipo, importe, casa_id', `'regalo', 5, $1`, [ids.casa]), 'ok', 'tipo inválido')
+    assert.notEqual(await ins('tipo, importe, casa_id, casa_destino_id', `'traspaso', 5, $1, $1`, [ids.casa]), 'ok', 'traspaso a la misma casa')
+    assert.notEqual(await ins('tipo, importe, casa_id', `'traspaso', 5, $1`, [ids.casa]), 'ok', 'traspaso sin destino')
+    assert.notEqual(await ins('tipo, importe, casa_id, casa_destino_id', `'deposito', 5, $1, $2`, [ids.casa, otra]), 'ok', 'destino fuera de traspaso')
+    assert.notEqual(await ins('tipo, importe, casa_id, notas', `'deposito', 5, $1, repeat('x', 501)`, [ids.casa]), 'ok', 'notas largas')
+    // Fecha: nada futuro (margen de un día por la zona horaria); al editar solo si cambia la fecha.
+    assert.match(await ins('tipo, importe, casa_id, fecha', `'deposito', 5, $1, now() + interval '2 days'`, [ids.casa]), /no puede ser futura/)
+    assert.equal(await ins('tipo, importe, casa_id, fecha', `'deposito', 5, $1, now() + interval '20 hours'`, [ids.casa]), 'ok', 'margen de un día')
+    assert.equal(await ins('tipo, importe, casa_id, fecha', `'deposito', 5, $1, '2020-01-01'`, [ids.casa]), 'ok', 'fechas antiguas sí')
+    assert.match(await intenta(`update movimientos_bankroll set fecha = now() + interval '3 days' where id = $1`, [ids.movimiento]), /no puede ser futura/)
+    assert.equal(await intenta(`update movimientos_bankroll set notas = 'editado' where id = $1`, [ids.movimiento]), 'ok')
+    const { rows } = await tx.query(`select updated_at > created_at as cambia from movimientos_bankroll where id = $1`, [ids.movimiento])
+    assert.ok(rows[0].cambia !== undefined)
+    // No se puede borrar una casa con movimientos.
+    assert.match(await intenta(`delete from casas_apuestas where id = $1`, [otra]), /foreign key|violates/)
+    await tx.query(`delete from movimientos_bankroll where casa_id = $1 or casa_destino_id = $1`, [otra])
+    assert.equal(await intenta(`delete from casas_apuestas where id = $1`, [otra]), 'ok', 'sin movimientos sí se puede')
+    await tx.query(`delete from movimientos_bankroll where id <> $1`, [ids.movimiento])
+  })
+})
+
+test('Bankroll: Beto no ve, cambia ni borra movimientos de Ana, ni usa sus casas', async () => {
+  let casaBeto
+  await como(BETO, async (tx) => {
+    casaBeto = (await tx.query(`insert into casas_apuestas (nombre) values ('Casa de Beto') returning id`)).rows[0].id
+    assert.equal((await tx.query(`select * from movimientos_bankroll where user_id = $1`, [ANA])).rows.length, 0)
+    assert.equal((await tx.query(`update movimientos_bankroll set importe = 1 where id = $1 returning 1`, [ids.movimiento])).rows.length, 0)
+    assert.equal((await tx.query(`delete from movimientos_bankroll where id = $1 returning 1`, [ids.movimiento])).rows.length, 0)
+  })
+  const falla = async (sql, params) =>
+    assert.rejects(como(BETO, (tx) => tx.query(sql, params)), undefined, sql)
+  await falla(`insert into movimientos_bankroll (tipo, importe, casa_id) values ('deposito', 100, $1)`, [ids.casa])
+  await falla(`insert into movimientos_bankroll (tipo, importe, casa_id, casa_destino_id) values ('traspaso', 100, $1, $2)`, [casaBeto, ids.casa])
+  await falla(`insert into movimientos_bankroll (user_id, tipo, importe, casa_id) values ($1, 'deposito', 100, $2)`, [ANA, ids.casa])
+  // Ana tampoco puede usar la casa de Beto como destino.
+  await assert.rejects(
+    como(ANA, (tx) => tx.query(`insert into movimientos_bankroll (tipo, importe, casa_id, casa_destino_id) values ('traspaso', 1, $1, $2)`, [ids.casa, casaBeto])),
+  )
+  await como(ANA, async (tx) => {
+    const { rows } = await tx.query(`select importe from movimientos_bankroll where id = $1`, [ids.movimiento])
+    assert.equal(Number(rows[0].importe), 5000, 'el movimiento de Ana sigue igual')
+  })
+})
+
+test('La migración de bankroll se puede pegar dos veces sin errores', async () => {
+  const sql = readFileSync(join(ROOT, 'supabase/migrations/20261106000001_fase3_bankroll.sql'), 'utf8')
+  await db.exec(sql)
+  await db.exec(sql)
+  const { rows } = await db.query(
+    `select conname from pg_constraint where conrelid = 'public.movimientos_bankroll'::regclass`,
+  )
+  const nombres = rows.map((r) => r.conname)
+  for (const c of ['tipo_valido', 'importe_valido', 'casa_obligatoria', 'destino_traspaso', 'destino_distinto', 'notas_largo', 'casa_fk', 'casa_destino_fk'])
+    assert.ok(nombres.includes(`movimientos_${c}`), c)
+  assert.ok(!nombres.includes('movimientos_bankroll_tipo_check') && !nombres.includes('movimientos_bankroll_check'), 'las reglas de la Fase 0 se sustituyen')
+  await como(ANA, async (tx) => assert.equal((await tx.query(`select count(*)::int n from movimientos_bankroll`)).rows[0].n, 1))
 })

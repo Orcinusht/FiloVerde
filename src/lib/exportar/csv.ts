@@ -86,7 +86,7 @@ export function generarCsv<T>(columnas: Columna<T>[], filas: T[]): string {
 }
 
 // "filoverde-apuestas-2026-11-04.csv" (día de hoy en España).
-export function nombreArchivo(que: 'apuestas' | 'selecciones', ahora = new Date()): string {
+export function nombreArchivo(que: 'apuestas' | 'selecciones' | 'bankroll', ahora = new Date()): string {
   return `filoverde-${que}-${isoALocal(ahora.toISOString()).slice(0, 10)}.csv`
 }
 
@@ -204,3 +204,29 @@ export function ordenarSelecciones(selecciones: SeleccionExportar[], idsApuestas
   const p = (s: SeleccionExportar) => pos.get(s.apuesta_id) ?? Number.MAX_SAFE_INTEGER
   return [...selecciones].sort((a, b) => p(a) - p(b) || a.apuesta_id.localeCompare(b.apuesta_id) || a.orden - b.orden || a.id.localeCompare(b.id))
 }
+
+// ---------- Bankroll (movimientos) ----------
+
+export type MovimientoExportar = {
+  id: string
+  fecha: string
+  tipo: string
+  importe: number // céntimos con signo (solo el ajuste puede ser negativo)
+  casa: string | null
+  casa_destino: string | null
+  notas: string | null
+  created_at: string
+  updated_at: string
+}
+
+export const COLUMNAS_MOVIMIENTOS: Columna<MovimientoExportar>[] = [
+  { cabecera: 'id', valor: (m) => celdaCodigo(m.id) },
+  { cabecera: 'fecha', valor: (m) => celdaFechaHora(m.fecha) },
+  { cabecera: 'tipo', valor: (m) => celdaCodigo(m.tipo) },
+  { cabecera: 'importe', valor: (m) => celdaDinero(m.importe) },
+  { cabecera: 'casa', valor: (m) => celdaTexto(m.casa) },
+  { cabecera: 'casa_destino', valor: (m) => celdaTexto(m.casa_destino) },
+  { cabecera: 'notas', valor: (m) => celdaTexto(m.notas) },
+  { cabecera: 'creada', valor: (m) => celdaFechaHora(m.created_at) },
+  { cabecera: 'modificada', valor: (m) => celdaFechaHora(m.updated_at) },
+]

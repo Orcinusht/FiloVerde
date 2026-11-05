@@ -46,9 +46,18 @@ archivo o panel ponerlas).
    pruebas de GitHub Actions en verde; sin migración): aciertos también por liga, cada fila abre el
    detalle con sus apuestas y se quita "En cifras". **Verificados en el móvil con la cuenta de email
    (5 apuestas).** Falta verificarlos en producción con la cuenta de Google (35 apuestas).
-3. Pendiente de definir.
+3. **Bankroll y evolución.** **Primera ronda: Bankroll** (rama `fase-3-bankroll`, desde el
+   2026-11-06; migración `20261106000001`, pendiente de pegar en Supabase): movimientos (depósito,
+   retirada, ajuste y traspaso entre casas), saldo global y por casa, en juego, disponible y ROI
+   sobre bankroll; CSV de movimientos. Pendiente de verificar en el móvil y de fusionar. La segunda
+   ronda (evolución en el tiempo, gestión de casas y estrategias) está sin empezar.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, tras fusionar los retoques del Análisis)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, al empezar la Fase 3 en `fase-3-bankroll`)
+- **Fase 3, segunda ronda:** evolución en el tiempo (beneficio acumulado, evolución del saldo, por
+  mes y día de la semana, drawdown) y **gestión de casas y estrategias** en Ajustes. Al borrar una
+  casa: impedirlo si tiene apuestas o movimientos ("Esta casa tiene N apuestas y M movimientos: no se
+  puede borrar. Puedes renombrarla"); renombrar es seguro (todo va por id). Hoy la BD ya impide
+  borrar una casa con movimientos (`on delete restrict`); con apuestas la dejaría en "Sin casa".
 - **Verificar el Análisis en producción con la cuenta de Google** (35 apuestas): cifras a mano con
   calculadora, filtro de fechas, "Muestra pequeña" y "En juego"; y los retoques (aciertos por liga,
   detalle de cada fila con el mismo recuento y vuelta al mismo sitio).
@@ -144,10 +153,12 @@ src/
                         dirección). /graficas redirige aquí (next.config.ts)
         detalle/          las apuestas que forman una fila (segmento o aciertos), con la tarjeta de
                           la lista, Todas/Verdes/Rojas en aciertos y páginas de 50
-      bankroll/
+      bankroll/         Fase 3: page.tsx (global, casas, movimientos con filtros) · casa/[id]/ (detalle de
+                        una casa; casa/sin = apuestas sin casa) · nuevo/ y [id]/ (formulario: editor.tsx
+                        carga, formulario-movimiento.tsx, actions.ts guarda y borra) · piezas.tsx · filtros.tsx
     api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada, solo en la revisión)
                       · reintentar/ (reintenta en silencio los borrados de imágenes que fallaron)
-    api/exportar/     GET apuestas/ y selecciones/ (copia de seguridad en CSV; responder.ts = común)
+    api/exportar/     GET apuestas/, selecciones/ y bankroll/ (copia de seguridad en CSV; responder.ts = común)
     login/            pantalla de entrada (providers.ts = proveedores, actions.ts = login en servidor)
     auth/callback/    vuelta de Google (?code) y del email de confirmación (#tokens) → sesión
     auth/confirm/     alternativa para el email si se usa plantilla con token_hash
@@ -172,7 +183,9 @@ src/
                       con la sesión, en tandas de 1000) · direccion.ts (enlaces de Análisis y del
                       detalle, y lectura de sus parámetros)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC) · volver-a-lista.ts (vuelta tras
-                      guardar/borrar; `rutaVueltaSegura`: ?volver= solo a /apuestas o /analisis…)
+                      guardar/borrar; `rutaVueltaSegura`: ?volver= solo a /apuestas, /analisis… o /bankroll…)
+    bankroll/         calculos.ts (funciones puras: saldos por casa y global, ROI, validación del
+                      movimiento y su fecha) · leer.ts (casas, movimientos y apuestas, en tandas de 1000)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
                       capturas.ts (bucket), datos.ts (lecturas de la BD), catalogo.ts y
@@ -182,7 +195,7 @@ src/
 supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
 tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts) + copia en CSV (exportar.test.ts)
-                      + análisis (analisis.test.ts)
+                      + análisis (analisis.test.ts) + bankroll (bankroll.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -204,7 +217,7 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 - El perfil se crea solo al registrarse (trigger en `auth.users`).
 - `divisa` en apuestas y movimientos: si no se indica, toma la del perfil (trigger).
 - Estados y tipos con `CHECK` (no enums). Para añadir un estado: nueva migración que cambie el `CHECK`.
-- Movimientos: `deposito` y `retirada` con importe positivo; `ajuste` puede ser +/−.
+- Movimientos (`movimientos_bankroll`, ampliada en la Fase 3): ver la sección "Bankroll (Fase 3)".
 - `guardar_apuesta(p_id, p_apuesta, p_selecciones)`: guarda apuesta + selecciones de una vez
   (todo o nada). Corre con los permisos del usuario (RLS aplica). Al editar sustituye las selecciones.
 - `selecciones.orden`: orden en el resguardo. `apuestas.imagen_origen` solo puede apuntar a la
@@ -355,6 +368,52 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 
 **Cambios en la base de datos = nueva migración** en `supabase/migrations/` (nunca editar una
 ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
+
+## Bankroll (Fase 3, primera ronda)
+
+**Modelo de datos** (migración `20261106000001_fase3_bankroll.sql`, solo aditiva y repetible): amplía
+`movimientos_bankroll` (existía desde la Fase 0, vacía; RLS: cada usuario ve, crea, edita y borra
+solo lo suyo). Columnas: `fecha`, `tipo` (`deposito` · `retirada` · `ajuste` · `traspaso`), `importe`
+(céntimos), `divisa` (la del perfil), `casa_id` (obligatoria), `casa_destino_id` (solo en traspasos),
+`notas` (≤ 500), `created_at`, `updated_at` (disparador). Reglas en la BD: importe > 0 en depósito,
+retirada y traspaso; ≠ 0 en ajuste (+/−); destino obligatorio solo en traspaso y distinto del origen;
+**casas del mismo usuario** por clave compuesta `(casa, user_id)` → `casas_apuestas (id, user_id)`
+(imposible usar la casa de otro) con **`on delete restrict`** (no se borra una casa con movimientos);
+**fecha no futura** (disparador `movimiento_sin_fecha_futura`, margen de 1 día por la zona horaria; al
+editar solo si cambia la fecha). La migración sustituye las dos comprobaciones de la Fase 0
+(`movimientos_bankroll_tipo_check` y `movimientos_bankroll_check`).
+
+**Reglas de cálculo** (`src/lib/bankroll/calculos.ts`, funciones puras probadas en `tests/bankroll.test.ts`):
+- **Saldo de una casa** = depósitos − retiradas ± ajustes + traspasos recibidos − traspasos enviados +
+  beneficio neto (`resultado_economico`) de sus apuestas RESUELTAS.
+- **Saldo global** = depósitos − retiradas ± ajustes + beneficio de TODAS las resueltas (también sin
+  casa). Los traspasos suman cero en el global.
+- Resueltas = ganada, perdida, cash out, media ganada, media perdida. Anuladas y pendientes no suman
+  beneficio. Las apuestas con crédito suman su resultado.
+- **En juego** = importes de las pendientes (por casa y global). **Disponible estimado** = saldo − en juego.
+- **Total depositado / retirado** = suma de depósitos / retiradas (ni traspasos ni ajustes).
+- **ROI sobre bankroll** = beneficio de las resueltas / total depositado; con 0 depositado, "—". Por
+  casa, igual con lo suyo: una casa que solo recibe traspasos muestra "—" con la nota "solo recibe
+  traspasos". Saldo y ROI son "hasta hoy" (no dependen del filtro de Análisis); la fecha no puede ser
+  futura, así que "hasta hoy" no incluye dinero que aún no se ha movido.
+- **"Sin casa"**: apuestas sin casa (resueltas o pendientes); su beneficio y en juego cuentan en el
+  global, sin saldo propio.
+
+**Pantallas** (`/bankroll`, pestaña que ya existía): global (7 cifras) · tarjeta por casa (abre
+`/bankroll/casa/[id]`: cifras, sus movimientos con su efecto en la casa y "Ver sus apuestas") · "Sin
+casa" · lista de movimientos (más recientes primero; filtros de casa y tipo en la dirección; páginas de
+50) · "+ Movimiento". Estado vacío: "Registra tus depósitos y retiradas pasados para que el saldo y el
+ROI sean correctos". **Formulario** (`/bankroll/nuevo`, `/bankroll/[id]`): tipo con 4 botones, día (hoy
+por defecto; hoy = hora actual, otro día = 12:00; sin futuros), importe con teclado numérico, "Suma /
+Resta" en ajustes, casa preseleccionada (la del último movimiento o la única) con "+ Nueva casa…",
+origen y destino en traspasos, notas. Borrar pide confirmación. Guardar o borrar vuelve a donde se
+abrió (`?volver=`) y refresca las cifras (`revalidatePath('/bankroll', 'layout')`). Todo con la sesión
+del usuario; la validación se repite en el servidor y la BD también lo impide. Errores en español y
+`[bankroll:…]` al log.
+
+**CSV**: Ajustes → "Descargar bankroll (CSV)" (`/api/exportar/bankroll`): id, fecha, tipo, importe
+(ajustes negativos como número), casa, casa_destino, notas (protegidas contra fórmulas), creada y
+modificada; mismo formato que los otros archivos.
 
 ## Análisis (Fase 2)
 
@@ -565,7 +624,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -718,3 +777,14 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-05 | **"En cifras" eliminado** (código y pruebas) | No pasaba los criterios: no se entendía en 5 segundos y no aportaba nada que no estuviera ya en tarjetas y tablas |
 | 2026-11-05 | Corregido: la cuenta de Google tiene 35 apuestas (el "39" era el total de las dos cuentas) | Dato del usuario |
 | 2026-11-05 | **Retoques del Análisis fusionados en `main`** (rama `fase-2-retoques-analisis`, PR #3) | Verificados en el móvil con la cuenta de email (5 apuestas); pruebas de GitHub Actions en verde; producción desplegada en Vercel; sin migración. Falta verificarlos en producción con la cuenta de Google (35 apuestas) |
+| 2026-11-06 | **Fase 3 empezada (primera ronda: Bankroll)** en la rama `fase-3-bankroll` | La evolución en el tiempo y la gestión de casas quedan para la segunda ronda |
+| 2026-11-06 | Se amplía `movimientos_bankroll` (de la Fase 0, vacía) en vez de crear otra tabla | Reutiliza su RLS, permisos, divisa por defecto y pruebas; no hay datos que migrar |
+| 2026-11-06 | Casas del movimiento comprobadas por clave compuesta `(casa, user_id)` | Más fuerte que una regla de RLS: la BD impide usar la casa de otro usuario venga de donde venga |
+| 2026-11-06 | `on delete restrict` en las casas de los movimientos | No se puede borrar una casa con movimientos; con apuestas, se bloqueará en la gestión de casas (segunda ronda) |
+| 2026-11-06 | Ajuste ≠ 0 (puede ser + o −); depósito, retirada y traspaso > 0 | Un ajuste de 0 no cambia nada |
+| 2026-11-06 | **Sin fechas futuras** en movimientos (servidor + disparador en la BD, margen de 1 día) | El saldo "hasta hoy" no incluye dinero que aún no se ha movido |
+| 2026-11-06 | ROI por casa con sus propios depósitos; "—" y nota si solo recibe traspasos | Los traspasos no son depósitos (regla del usuario) |
+| 2026-11-06 | Cálculos en funciones puras y lectura en el servidor en tandas de 1000; formulario con Server Actions | Probables con `npm test`; el móvil no habla directo con Supabase |
+| 2026-11-06 | La pestaña Bankroll ya existía: la barra sigue con 4 entradas | Sin saturar la navegación |
+| 2026-11-06 | `SelectorOpcion` admite el texto de la opción vacía ("Elige una casa") | La casa es obligatoria en los movimientos; en las apuestas no cambia nada |
+| 2026-11-06 | `comprobar_rls_en_vivo.sql` con 9 comprobaciones nuevas de bankroll (55 en total) | La versión de `main` (antes de fusionar) falla tras pegar la migración porque crea un movimiento sin casa: usar la de la rama |
