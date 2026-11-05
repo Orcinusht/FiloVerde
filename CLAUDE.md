@@ -51,27 +51,34 @@ archivo o panel ponerlas).
    **aplicada** en Supabase): movimientos (depósito, retirada, ajuste y traspaso entre casas), saldo
    global y por casa, en juego, disponible y ROI sobre bankroll; CSV de movimientos. **Verificada en
    el móvil con la cuenta de email.** Falta verificarla en producción con la cuenta de Google (35
-   apuestas). **Segunda ronda, parte 1: gestión de casas y estrategias** (rama
-   `fase-3-casas-estrategias`, desde el 2026-11-05; migración `20261107000001`, pendiente de pegar en
-   Supabase): Ajustes → "Casas de apuestas" y "Estrategias" (crear, renombrar, archivar y borrar sin
-   uso). Pendiente de verificar en el móvil y de fusionar. El resto de la segunda ronda, en Pendiente.
+   apuestas). **Segunda ronda, parte 1: gestión de casas y estrategias, fusionada el 2026-11-06**
+   (rama `fase-3-casas-estrategias`, PR #5; pruebas de GitHub Actions en verde; migración
+   `20261107000001` **aplicada** en Supabase): Ajustes → "Casas de apuestas" y "Estrategias" (crear,
+   renombrar, archivar y borrar sin uso). **Verificada en el móvil con la cuenta de email.** Falta
+   verificarla en producción con la cuenta de Google. El resto de la segunda ronda, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-05, al empezar la gestión de casas y estrategias)
-- **Verificar el Bankroll en producción con la cuenta de Google** (35 apuestas): saldos por casa y
-  global con calculadora, traspaso, ajuste, editar y borrar, y el CSV de bankroll.
-- **Fase 3, segunda ronda (lo que queda):** evolución en el tiempo (beneficio acumulado, evolución
-  del saldo, por mes y día de la semana, drawdown) e **importación** (de CSV). La gestión de casas y
-  estrategias está en la rama `fase-3-casas-estrategias`.
-- **Deportes y ligas (tarea propia, después de casas y estrategias):** en el catálogo, "Renombrar
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, tras fusionar la gestión de casas y estrategias)
+1. **Deportes y ligas** (siguiente tarea): en el catálogo, "Renombrar
   también en mis apuestas" con aviso previo ("Afecta a N selecciones en M apuestas") y confirmación;
   cambio de una vez con una función de la BD (todo o nada), solo dentro del mismo deporte para las
   ligas y recalculando el deporte resumen si cambia un deporte. Ojo: "LaLiga" y "LaLiga Hypermotion"
   son competiciones distintas (no se unen); el mismo partido con ligas distintas es un fallo de una
   apuesta concreta (se corrige abriéndola desde Análisis → Liga). Posible aviso "mismo partido con
   ligas distintas".
-- **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
-  de una a otra en una función de la BD; cuidado con los traspasos entre las dos. Solo si aparece un
-  duplicado real (la regla de nombre único evita los de mayúsculas, tildes y espacios).
+2. **Evolución en el tiempo** (Fase 3, segunda ronda): beneficio acumulado, evolución del saldo,
+   rendimiento por mes y por día de la semana, drawdown.
+3. **Importación** (de CSV, para restaurar una copia): los CSV de la copia ya usan los códigos internos
+   y los ids para poder hacerla.
+4. **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
+   de una a otra en una función de la BD; cuidado con los traspasos entre las dos. Solo si aparece un
+   duplicado real (la regla de nombre único evita los de mayúsculas, tildes y espacios).
+5. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
+
+Además:
+- **Verificar en producción con la cuenta de Google** (35 apuestas) la gestión de casas y estrategias
+  (recuentos, crear, repetidos y reservados rechazados, renombrar sin cambiar cifras, archivar y borrar).
+- **Verificar el Bankroll en producción con la cuenta de Google** (35 apuestas): saldos por casa y
+  global con calculadora, traspaso, ajuste, editar y borrar, y el CSV de bankroll.
 - **Verificar el Análisis en producción con la cuenta de Google** (35 apuestas): cifras a mano con
   calculadora, filtro de fechas, "Muestra pequeña" y "En juego"; y los retoques (aciertos por liga,
   detalle de cada fila con el mismo recuento y vuelta al mismo sitio).
@@ -84,8 +91,6 @@ archivo o panel ponerlas).
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
 - **API-Football** u otra fuente de datos deportivos (Fase 2 o 3).
-- **Importación de CSV** (restaurar una copia): no hecha; los CSV de la copia ya usan los códigos
-  internos y los ids para poder hacerla más adelante.
 - **Análisis del coste y del modelo de IA**: revisar en Ajustes el coste medio real por captura
   (por versión de instrucciones: v4 de promociones, v5 con caché y v6 de apuestas cortadas y fechas;
   comprobar en Vercel → Logs, `[ia:uso]`, que la caché se lee) y decidir si se mantiene `claude-sonnet-5-5` o se cambia.
@@ -837,3 +842,5 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-05 | Fusionar duplicadas: aparcado | Hoy no hay duplicados y la regla de nombre único evita los nuevos; mover datos tiene riesgo |
 | 2026-11-05 | Deportes y ligas con "renombrar también en mis apuestas": tarea propia después de esta | Las selecciones guardan el texto; requiere aviso previo y cambio todo o nada |
 | 2026-11-05 | `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (63 en total) | Nombres repetidos y reservados, borrado con apuestas y que otra cuenta no renombre, archive ni borre |
+| 2026-11-06 | **Gestión de casas y estrategias fusionada en `main`** (rama `fase-3-casas-estrategias`, PR #5) | Migración `20261107000001` aplicada en Supabase; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google |
+| 2026-11-06 | El nombre `20261107000001` de la migración no es una fecha real | Solo marca el orden; ya está aplicada y no se renombra |
