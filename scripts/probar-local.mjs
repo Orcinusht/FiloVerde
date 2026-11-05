@@ -1788,6 +1788,99 @@ assert.equal(selCarla.filas[0].cuota, '1,85', 'la cuota sigue siendo número')
 assert.equal(selCarla.filas[0].apuesta_id, csvCarla.filas[0].id, 'mismo orden que las apuestas')
 assert.ok(!selCarla.filas.some((s) => csvAna.filas.some((a) => a.id === s.apuesta_id)), 'nada de Ana')
 bien('Carla: 1205 apuestas y 1205 selecciones (más de 1000), negativos como número y fórmulas protegidas')
+
+// ---------- Fase 2 · Análisis ----------
+paso('Análisis: métricas de las apuestas resueltas (comparadas con la base de datos)')
+const eur = (c, conSigno = false) =>
+  new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, signDisplay: conSigno ? 'exceptZero' : 'auto' }).format(c / 100)
+const pct = (v) => `${new Intl.NumberFormat('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(v * 100)} %`
+const valorTarjeta = (p, t) => p.locator(`[data-tarjeta="${t}"] p`).nth(1).innerText()
+const RESUELTOS = `('ganada','perdida','cash_out','media_ganada','media_perdida')`
+async function esperado(userId, extra = '') {
+  const [f] = await sql(`select
+      count(*) filter (where estado in ${RESUELTOS})::int n,
+      coalesce(sum(importe) filter (where estado in ${RESUELTOS} and promo_tipo is distinct from 'credito'), 0)::bigint importe,
+      coalesce(sum(resultado_economico) filter (where estado in ${RESUELTOS}), 0)::bigint beneficio,
+      coalesce(sum(resultado_economico) filter (where estado in ${RESUELTOS} and promo_tipo is distinct from 'credito'), 0)::bigint propio,
+      count(*) filter (where estado in ${RESUELTOS} and promo_tipo is distinct from 'credito' and resultado_economico > 0)::int g,
+      count(*) filter (where estado in ${RESUELTOS} and promo_tipo is distinct from 'credito' and resultado_economico < 0)::int p,
+      count(*) filter (where estado = 'pendiente')::int pend
+    from apuestas where user_id = '${userId}' ${extra}`)
+  return { ...f, importe: Number(f.importe), beneficio: Number(f.beneficio), propio: Number(f.propio) }
+}
+async function comprobarTarjetas(p, e) {
+  assert.equal(await valorTarjeta(p, 'Apuestas resueltas'), String(e.n))
+  assert.equal(await valorTarjeta(p, 'En juego'), String(e.pend))
+  assert.equal(await valorTarjeta(p, 'Importe apostado'), eur(e.importe))
+  assert.equal(await valorTarjeta(p, 'Beneficio neto'), eur(e.beneficio, true))
+  assert.equal(await valorTarjeta(p, 'Yield'), e.importe ? pct(e.propio / e.importe) : '—')
+  assert.equal(await valorTarjeta(p, '% de acierto'), e.g + e.p ? pct(e.g / (e.g + e.p)) : '—')
+}
+await pag.goto(`${APP}/graficas`)
+await pag.waitForURL(`${APP}/analisis`)
+assert.equal(await pag.getByRole('link', { name: 'Análisis' }).getAttribute('aria-current'), 'page')
+const eAna = await esperado(ANA.id)
+assert.ok(eAna.n > 0, 'Ana tiene apuestas resueltas')
+await comprobarTarjetas(pag, eAna)
+await pag.getByText('Muestra pequeña').first().waitFor()
+await pag.getByText('Rachas (solo con las apuestas del periodo elegido)').waitFor()
+await pag.getByText('Lo no marcado como directo cuenta como pre-partido', { exact: false }).waitFor()
+await foto('80-analisis')
+bien(`Ana: ${eAna.n} resueltas, ${eurTxt(eAna.beneficio)} de beneficio, yield y acierto como en la BD; ${eAna.pend} en juego`)
+function eurTxt(c) { return eur(c, true) }
+// Cambiar de segmento y de orden.
+await pag.getByLabel('Segmento', { exact: true }).selectOption('cuota')
+await pag.waitForURL(/seg=cuota/)
+await pag.getByText('Hasta 1,50').or(pag.getByText('1,51 – 2,00')).or(pag.getByText('2,01 – 3,00')).or(pag.getByText('Más de 3,00')).first().waitFor()
+await pag.getByLabel('Ordenar', { exact: true }).selectOption('n')
+await pag.waitForURL(/orden=n/)
+await pag.getByLabel('Tipo de apuesta', { exact: true }).selectOption('mismo_partido')
+await pag.waitForURL(/tipo=mismo_partido/)
+await foto('81-analisis-segmento')
+// Filtro: este mes (en hora de España) y un periodo sin apuestas.
+await pag.getByLabel('Periodo', { exact: true }).selectOption('mes')
+await pag.waitForURL(/periodo=mes/)
+const eMes = await esperado(ANA.id, `and fecha >= (date_trunc('month', now() at time zone 'Europe/Madrid') at time zone 'Europe/Madrid')
+  and fecha < ((date_trunc('month', now() at time zone 'Europe/Madrid') + interval '1 month') at time zone 'Europe/Madrid')`)
+if (eMes.n > 0) await comprobarTarjetas(pag, eMes)
+else await pag.getByText('No hay apuestas resueltas en este periodo').waitFor()
+await pag.getByLabel('Periodo', { exact: true }).selectOption('personalizado')
+await pag.getByLabel('Desde').fill('2020-01-01')
+await pag.getByLabel('Hasta').fill('2020-12-31')
+await pag.getByRole('button', { name: 'Ver', exact: true }).click()
+await pag.waitForURL(/desde=2020-01-01/)
+await pag.getByText('No hay apuestas resueltas en este periodo').waitFor()
+bien(`Filtro de fechas: «Este mes» = ${eMes.n} resueltas (como la BD en hora de España); 2020 → sin apuestas`)
+
+// Carla: más de 1000 resueltas (Supabase corta en 1000 por consulta).
+await sql(`with x as (select id, row_number() over (order by fecha, id) rn from apuestas where user_id = '${CARLA.id}' and estado = 'pendiente')
+  update apuestas a set estado = case when x.rn % 2 = 0 then 'ganada' else 'perdida' end,
+    resultado_economico = case when x.rn % 2 = 0 then round(a.importe * 0.85) else -a.importe end
+  from x where a.id = x.id and x.rn <= 1199`)
+await pagCarla.goto(`${APP}/analisis`)
+const eCarla = await esperado(CARLA.id)
+assert.equal(eCarla.n, 1200)
+assert.equal(eCarla.pend, 5)
+await comprobarTarjetas(pagCarla, eCarla)
+await pagCarla.getByText('Rango de cuota:', { exact: false }).waitFor() // ya hay segmentos con muestra suficiente
+bien('Carla: 1200 resueltas y 5 en juego (más de 1000), cifras iguales que en la BD')
+
+paso('Análisis: maquetación a 320, 375, 390 y 430 px, modo claro y oscuro')
+for (const ancho of [320, 375, 390, 430]) {
+  for (const tema of ['light', 'dark']) {
+    const ctx = await navegador.newContext({ ...movil, viewport: { width: ancho, height: 800 }, colorScheme: tema })
+    await ctx.addCookies([cookieSesion(ANA)])
+    const p = await ctx.newPage()
+    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31']) {
+      await p.goto(`${APP}${ruta}`, { waitUntil: 'networkidle' })
+      const ancho2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+      assert.ok(ancho2 <= 0, `${ruta} a ${ancho}px (${tema}): scroll horizontal de ${ancho2}px`)
+    }
+    if (ancho === 390) await p.screenshot({ path: join(SALIDA, `82-analisis-390-${tema}.png`), fullPage: true })
+    await ctx.close()
+  }
+}
+bien('Sin scroll horizontal en los 4 anchos y los 2 modos')
 await ctxCarla.close()
 
 // Sin sesión: no hay archivo.
@@ -1815,6 +1908,10 @@ assert.equal(descargaBeto, false, 'sin archivo vacío')
 const rBetoCsv = await pagBeto.request.get(`${APP}/api/exportar/apuestas`)
 assert.equal(rBetoCsv.status(), 404)
 bien('Sin apuestas: mensaje claro y ningún archivo (la de Ana no le cuenta)')
+await pagBeto.goto(`${APP}/analisis`)
+await pagBeto.getByText('Todavía no hay apuestas resueltas.', { exact: false }).waitFor()
+await pagBeto.screenshot({ path: join(SALIDA, '83-analisis-vacio.png'), fullPage: true })
+bien('Análisis sin apuestas resueltas: estado vacío claro (nada de Ana)')
 await pagBeto.goto(`${APP}/ajustes/deportes`)
 await pagBeto.getByRole('button', { name: /^Tenis/ }).click()
 assert.equal(await pagBeto.getByLabel('Nombre de la liga Laver Cup 2026').count(), 0)

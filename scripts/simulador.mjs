@@ -115,6 +115,7 @@ function condiciones(params, valores) {
     else if (op === 'gte') where.push(`${col} >= $${valores.push(val)}`)
     else if (op === 'ilike') where.push(`${col} ilike $${valores.push(val.replace(/\*/g, '%'))}`)
     else if (op === 'gt') where.push(`${col} > $${valores.push(val)}`)
+    else if (op === 'lt') where.push(`${col} < $${valores.push(val)}`)
     else if (op === 'is' && val === 'null') where.push(`${col} is null`)
     else if (op === 'not' && val === 'is.null') where.push(`${col} is not null`)
     else if (op === 'in') {

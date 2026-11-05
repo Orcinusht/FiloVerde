@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation'
 // y crea su carpeta en src/app/(app)/.
 const SECCIONES = [
   { href: '/apuestas', label: 'Apuestas', icon: IconTicket },
-  { href: '/graficas', label: 'Gráficas', icon: IconChart },
+  { href: '/analisis', label: 'Análisis', icon: IconChart },
   { href: '/bankroll', label: 'Bankroll', icon: IconWallet },
   { href: '/ajustes', label: 'Ajustes', icon: IconSettings },
 ] as const

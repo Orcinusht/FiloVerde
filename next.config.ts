@@ -12,7 +12,11 @@ const nextConfig: NextConfig = {
     },
   },
   async redirects() {
-    return [{ source: '/', destination: '/apuestas', permanent: false }]
+    return [
+      { source: '/', destination: '/apuestas', permanent: false },
+      // Fase 2: la pestaña "Gráficas" pasó a ser "Análisis".
+      { source: '/graficas', destination: '/analisis', permanent: false },
+    ]
   },
   async headers() {
     return [
