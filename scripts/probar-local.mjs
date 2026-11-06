@@ -1818,8 +1818,18 @@ async function comprobarTarjetas(p, e) {
   assert.equal(await valorTarjeta(p, 'Yield'), e.importe ? pct(e.propio / e.importe) : '—')
   assert.equal(await valorTarjeta(p, '% de acierto'), e.g + e.p ? pct(e.g / (e.g + e.p)) : '—')
 }
-await pag.goto(`${APP}/graficas`)
-await pag.waitForURL(`${APP}/analisis`)
+// Filtro de periodo (fichas): pulsa la ficha y, en Personalizado, escribe los días.
+async function elegirPeriodo(p, valor, { desde, hasta, dentro = 'main' } = {}) {
+  await p.locator(`${dentro} [role="group"][aria-label="Periodo"]:visible [data-periodo="${valor}"]`).click()
+  if (valor === 'personalizado') {
+    await p.getByLabel('Desde').fill(desde)
+    await p.getByLabel('Hasta').fill(hasta)
+    await p.getByRole('button', { name: 'Ver', exact: true }).click()
+    await p.waitForURL(new RegExp(`desde=${desde}`))
+  } else if (valor === 'todo') await p.waitForURL((u) => !new URL(u).searchParams.has('periodo'))
+  else await p.waitForURL(new RegExp(`periodo=${valor}`))
+}
+await pag.goto(`${APP}/analisis`)
 assert.equal(await pag.getByRole('link', { name: 'Análisis' }).getAttribute('aria-current'), 'page')
 const eAna = await esperado(ANA.id)
 assert.ok(eAna.n > 0, 'Ana tiene apuestas resueltas')
@@ -1840,18 +1850,24 @@ await pag.getByLabel('Tipo de apuesta', { exact: true }).selectOption('mismo_par
 await pag.waitForURL(/tipo=mismo_partido/)
 await foto('81-analisis-segmento')
 // Filtro: este mes (en hora de España) y un periodo sin apuestas.
-await pag.getByLabel('Periodo', { exact: true }).selectOption('mes')
-await pag.waitForURL(/periodo=mes/)
+await elegirPeriodo(pag, 'mes')
 const eMes = await esperado(ANA.id, `and fecha >= (date_trunc('month', now() at time zone 'Europe/Madrid') at time zone 'Europe/Madrid')
   and fecha < ((date_trunc('month', now() at time zone 'Europe/Madrid') + interval '1 month') at time zone 'Europe/Madrid')`)
 if (eMes.n > 0) await comprobarTarjetas(pag, eMes)
 else await pag.getByText('No hay apuestas resueltas en este periodo').waitFor()
-await pag.getByLabel('Periodo', { exact: true }).selectOption('personalizado')
-await pag.getByLabel('Desde').fill('2020-01-01')
-await pag.getByLabel('Hasta').fill('2020-12-31')
-await pag.getByRole('button', { name: 'Ver', exact: true }).click()
-await pag.waitForURL(/desde=2020-01-01/)
+await elegirPeriodo(pag, 'personalizado', { desde: '2020-01-01', hasta: '2020-12-31' })
 await pag.getByText('No hay apuestas resueltas en este periodo').waitFor()
+// Periodos nuevos en Análisis: Hoy, Ayer y Últimos 7 días (en hora de España).
+const condDia = (desdeDias, hastaDias) => `and fecha >= ((date_trunc('day', now() at time zone 'Europe/Madrid') - interval '${desdeDias} day') at time zone 'Europe/Madrid')
+  and fecha < ((date_trunc('day', now() at time zone 'Europe/Madrid') - interval '${hastaDias} day') at time zone 'Europe/Madrid')`
+const CONDS = { hoy: condDia(0, -1), ayer: condDia(1, 0), '7d': condDia(6, -1) }
+for (const [per, cond] of Object.entries(CONDS)) {
+  await elegirPeriodo(pag, per)
+  const e = await esperado(ANA.id, cond)
+  if (e.n > 0) await comprobarTarjetas(pag, e)
+  else await pag.getByText('No hay apuestas resueltas en este periodo').waitFor()
+}
+bien('Periodos nuevos en Análisis: Hoy, Ayer y Últimos 7 días cuadran con la BD (hora de España)')
 bien(`Filtro de fechas: «Este mes» = ${eMes.n} resueltas (como la BD en hora de España); 2020 → sin apuestas`)
 
 // Carla: más de 1000 resueltas (Supabase corta en 1000 por consulta).
@@ -1985,22 +2001,13 @@ async function caidasBd(userId, extra = '') {
   for (const f of filas) { acc += Number(f.r); if (acc > pico) pico = acc; else max = Math.max(max, pico - acc) }
   return { n: filas.length, final: acc, max, actual: pico - acc }
 }
-await pag.goto(`${APP}/analisis`)
+await pag.goto(`${APP}/analisis?periodo=30d`)
 await evo(pag).waitFor()
-const cAna = await caidasBd(ANA.id)
-const grafBen = evo(pag).locator('[data-grafica="beneficio"]')
-assert.equal(Number(await grafBen.getAttribute('data-ultimo')), eAna.beneficio, 'el final de la curva = beneficio neto')
-assert.equal(cAna.final, eAna.beneficio)
-assert.equal(await valorTarjeta(pag, 'Mayor caída desde un máximo'), eur(cAna.max))
-assert.equal(await valorTarjeta(pag, 'Caída actual desde el máximo'), eur(cAna.actual))
+assert.equal(await pag.locator('main [data-grafica]:visible').count(), 0, 'Análisis ya no tiene la gráfica')
+assert.equal(await pag.locator('[data-tarjeta="Mayor caída desde un máximo"]:visible').count(), 0, 'ni las caídas')
 await evo(pag).getByText('Se usa la fecha de la apuesta (la fecha en que se resolvió no se guarda).', { exact: false }).waitFor()
-// Tocar la gráfica: etiqueta con la fecha y el valor.
-const cajaB = await grafBen.locator('[role="img"]').boundingBox()
-await grafBen.locator('[role="img"]').tap({ position: { x: cajaB.width - 2, y: cajaB.height / 2 } })
-const etq = await grafBen.locator('[data-etiqueta-grafica]').innerText()
-assert.ok(etq.includes(`Acumulado: ${eur(eAna.beneficio, true)}`), etq)
-await foto('85-evolucion')
-bien(`Curva: final ${eur(eAna.beneficio, true)} = beneficio neto; mayor caída ${eur(cAna.max)} y actual ${eur(cAna.actual)} como en la BD; al tocar, fecha y valor`)
+assert.equal(await evo(pag).locator('[data-enlace="ver-evolucion"]').getAttribute('href'), '/graficas?periodo=30d')
+bien('Análisis: sin la gráfica ni las caídas; «Ver evolución →» lleva a Gráficas con el mismo periodo')
 // Meses y días: misma cuenta que la BD (hora de España).
 const mesesBd = await sql(`select to_char(fecha at time zone 'Europe/Madrid', 'YYYY-MM') m, count(*)::int n from apuestas
   where user_id = '${ANA.id}' and estado in ${RESUELTOS} and resultado_economico is not null group by 1 order by 1 desc`)
@@ -2036,27 +2043,18 @@ function mismaDir(a, b) {
   const orden = (u) => [...u.searchParams].sort().join('&')
   return x.pathname === y.pathname && orden(x) === orden(y)
 }
-// Periodo: todo cambia con él.
+// Periodo: las tablas cambian con él.
 await pag.goto(`${APP}/analisis`)
-await pag.getByLabel('Periodo', { exact: true }).selectOption('mes')
-await pag.waitForURL(/periodo=mes/)
+await elegirPeriodo(pag, 'mes')
 const condMes = `and fecha >= (date_trunc('month', now() at time zone 'Europe/Madrid') at time zone 'Europe/Madrid')
   and fecha < ((date_trunc('month', now() at time zone 'Europe/Madrid') + interval '1 month') at time zone 'Europe/Madrid')`
 const cMes = await caidasBd(ANA.id, condMes)
-if (cMes.n > 0) {
-  await esperar(async () => Number(await evo(pag).locator('[data-grafica="beneficio"]').getAttribute('data-ultimo')) === cMes.final)
-  assert.equal(await valorTarjeta(pag, 'Mayor caída desde un máximo'), eur(cMes.max))
-  assert.equal(await filasDe(pag, 'meses').filter({ visible: true }).count(), 1, 'un solo mes')
-}
-bien(`«Este mes»: la curva acaba en ${eur(cMes.final, true)} y las caídas son las del mes (${cMes.n} resueltas)`)
-// Carla: 1200 resueltas → un punto por día.
+if (cMes.n > 0) await esperar(async () => (await filasDe(pag, 'meses').filter({ visible: true }).count()) === 1)
+bien(`«Este mes»: un solo mes en la tabla (${cMes.n} resueltas)`)
 await pagCarla.goto(`${APP}/analisis`)
-const grafCarla = evo(pagCarla).locator('[data-grafica="beneficio"]')
-assert.equal(Number(await grafCarla.getAttribute('data-ultimo')), eCarla.beneficio)
+await filasDe(pagCarla, 'meses').filter({ visible: true }).first().waitFor()
 const diasCarla = (await sql(`select count(distinct (fecha at time zone 'Europe/Madrid')::date)::int n from apuestas where user_id = '${CARLA.id}' and estado in ${RESUELTOS}`))[0].n
-assert.equal(Number(await grafCarla.getAttribute('data-puntos')), diasCarla + 1, 'un punto por día (+ el 0 inicial)')
 const cCarla = await caidasBd(CARLA.id)
-assert.equal(await valorTarjeta(pagCarla, 'Mayor caída desde un máximo'), eur(cCarla.max))
 assert.equal((await leerFilasDe(pagCarla, 'meses')).reduce((s, n) => s + n, 0), 1200)
 async function leerFilasDe(p, tabla) {
   const filas = filasDe(p, tabla).filter({ visible: true })
@@ -2064,7 +2062,167 @@ async function leerFilasDe(p, tabla) {
   for (let i = 0; i < (await filas.count()); i++) out.push(await numeroDato(filas.nth(i), 'Apuestas'))
   return out
 }
-bien(`Carla: 1200 resueltas → ${diasCarla} puntos diarios, final = beneficio neto, meses suman 1200`)
+bien('Carla: sus meses suman 1200')
+
+// ---------- Fase 3 · Pestaña Gráficas ----------
+paso('Gráficas: barra de 5 pestañas, beneficio acumulado y caídas (comparados con la base de datos)')
+const navLinks = pag.locator('nav[aria-label="Navegación principal"] a')
+assert.deepEqual(await navLinks.allInnerTexts(), ['Apuestas', 'Análisis', 'Gráficas', 'Bankroll', 'Ajustes'])
+await navLinks.nth(2).click()
+await pag.waitForURL(`${APP}/graficas`)
+assert.equal(await navLinks.nth(2).getAttribute('aria-current'), 'page')
+const graf = (p, id) => p.locator(`main [data-grafica="${id}"]:visible`)
+await graf(pag, 'beneficio').waitFor()
+assert.equal(Number(await graf(pag, 'beneficio').getAttribute('data-ultimo')), eAna.beneficio, 'final = beneficio neto de Análisis')
+assert.equal(await graf(pag, 'beneficio').getAttribute('data-tono'), eAna.beneficio > 0 ? 'positivo' : eAna.beneficio < 0 ? 'negativo' : 'neutro')
+assert.equal(await pag.locator('main [data-final]:visible').innerText(), eur(eAna.beneficio, true), 'el final se escribe con signo junto a la gráfica')
+const cAna = await caidasBd(ANA.id)
+assert.equal(cAna.final, eAna.beneficio)
+assert.equal(await valorTarjeta(pag, 'Mayor caída desde un máximo'), eur(cAna.max))
+assert.equal(await valorTarjeta(pag, 'Caída actual desde el máximo'), eur(cAna.actual))
+// Tocar el extremo derecho a media altura: se elige el punto más cercano al dedo; si hay varios
+// casi pegados (apuestas del mismo día), la etiqueta dice cuál es. Con las flechas, el último.
+const grafBen = graf(pag, 'beneficio')
+const cajaB = await grafBen.locator('[role="img"]').boundingBox()
+await grafBen.locator('[role="img"]').tap({ position: { x: cajaB.width - 1, y: cajaB.height / 2 } })
+const etqToque = await grafBen.locator('[data-etiqueta-grafica]').innerText()
+assert.ok(/\d{2}:\d{2} · apuesta \d+ de \d+/.test(etqToque), etqToque)
+const pegados = /\((\d+) de (\d+) aquí/.exec(etqToque)
+await grafBen.locator('[role="img"]').focus()
+await pag.keyboard.press('Escape')
+await pag.keyboard.press('ArrowLeft')
+const etq = await grafBen.locator('[data-etiqueta-grafica]').innerText()
+assert.ok(etq.includes(`Acumulado: ${eur(eAna.beneficio, true)}`) && /\d{2}:\d{2}/.test(etq), etq)
+await foto('86-graficas')
+if (pegados) bien(`Puntos casi pegados: la etiqueta dice «${pegados[1]} de ${pegados[2]} aquí» con fecha, hora y valor`)
+bien(`5 pestañas; final ${eur(eAna.beneficio, true)} (${await graf(pag, 'beneficio').getAttribute('data-tono')}) = beneficio neto; caídas ${eur(cAna.max)} / ${eur(cAna.actual)} como en la BD; etiqueta con fecha y hora`)
+
+paso('Gráficas por segmento: cada serie = su fila de Análisis; escala, orden, detalle con casa y vuelta')
+const leerSeries = async (p) => {
+  const lis = p.locator('main [data-lista="series"]:visible > li')
+  const out = []
+  for (let i = 0; i < (await lis.count()); i++) {
+    const li = lis.nth(i)
+    out.push({ etiqueta: await li.getAttribute('data-serie'), n: Number(await li.getAttribute('data-n')), beneficio: Number(await li.getAttribute('data-beneficio')) })
+  }
+  return out
+}
+const filasAnalisis = async (p, seg) => {
+  await p.goto(`${APP}/analisis?seg=${seg}&orden=n`)
+  const filas = filasDe(p, 'segmentos').filter({ visible: true })
+  await filas.first().waitFor()
+  const out = new Map()
+  for (let i = 0; i < (await filas.count()); i++) {
+    const f = filas.nth(i)
+    const et = (await f.locator('p').first().innerText()).trim()
+    const ben = (await f.locator('dt', { hasText: /^Beneficio$/ }).locator('xpath=following-sibling::dd').innerText()).trim()
+    out.set(et, { n: await numeroDato(f, 'Apuestas'), ben })
+  }
+  return out
+}
+for (const seg of ['cuota', 'tipo', 'liga']) {
+  const esperadas = await filasAnalisis(pag, seg)
+  await pag.goto(`${APP}/graficas?seg=${seg}`)
+  await pag.locator('main [data-lista="series"]:visible > li').first().waitFor()
+  const series = await leerSeries(pag)
+  assert.equal(series.length, Math.min(8, esperadas.size), `${seg}: una gráfica por valor (máx. 8)`)
+  for (const sr of series) {
+    const f = esperadas.get(sr.etiqueta)
+    assert.ok(f, `${seg}: «${sr.etiqueta}» está en Análisis`)
+    assert.equal(sr.n, f.n, `${seg} · ${sr.etiqueta}: nº`)
+    assert.equal(eur(sr.beneficio, true), f.ben, `${seg} · ${sr.etiqueta}: beneficio = el de su fila`)
+  }
+  for (let i = 1; i < series.length; i++) assert.ok(series[i - 1].n >= series[i].n, 'más apuestas primero')
+}
+bien('Rango de cuota, tipo y liga: cada gráfica tiene el mismo nº y beneficio que su fila de Análisis; orden por nº de apuestas')
+// Orden por beneficio y misma escala.
+await pag.goto(`${APP}/graficas?seg=cuota`)
+await pag.getByRole('group', { name: 'Ordenar' }).getByRole('button', { name: 'Beneficio' }).click()
+await pag.waitForURL(/orden=beneficio/)
+await esperar(async () => {
+  const sr = await leerSeries(pag)
+  return sr.every((x, i) => i === 0 || sr[i - 1].beneficio >= x.beneficio)
+})
+await pag.getByRole('group', { name: 'Escala del eje de euros' }).getByRole('button', { name: 'Misma escala' }).click()
+await pag.waitForURL(/escala=misma/)
+await foto('87-graficas-series')
+bien('Conmutadores: orden por beneficio y «Misma escala» en la dirección')
+// Pulsar la cabecera: el detalle tiene tantas apuestas como dice; abrir una y volver a Gráficas.
+const urlSeries = pag.url()
+const primera = pag.locator('main [data-lista="series"]:visible > li').first()
+const nPrimera = Number(await primera.getAttribute('data-n'))
+await primera.locator('a').first().click()
+await pag.waitForURL(/\/analisis\/detalle\?/)
+await pag.locator('[data-detalle="titulo"]').waitFor()
+const mRec = /(\d+) apuestas?$/.exec(await pag.locator('[data-detalle="recuento"]').innerText())
+assert.equal(Number(mRec[1]), nPrimera, 'recuento del detalle = cabecera')
+const urlDetG = pag.url()
+await pag.locator('[data-detalle="lista"] > li a').first().click()
+await esperarDetalle()
+await pag.getByRole('link', { name: '← Análisis' }).click()
+await pag.waitForURL((u) => mismaDir(u, urlDetG))
+await pag.getByRole('link', { name: '← Gráficas' }).click()
+await pag.waitForURL((u) => mismaDir(u, urlSeries))
+bien(`Cabecera → detalle con ${nPrimera} apuestas; apuesta abierta y vuelta a Gráficas con la misma escala y orden`)
+// Casa: todo cambia; «Casa» desaparece del segmento; una apuesta sin casa solo en Todas y Sin casa.
+const [casaG] = await sql(`select c.id, c.nombre from casas_apuestas c join apuestas a on a.casa_id = c.id where c.user_id = '${ANA.id}' and a.estado in ${RESUELTOS} group by c.id, c.nombre order by count(*) desc limit 1`)
+await pag.goto(`${APP}/graficas?seg=casa`)
+await pag.getByLabel('Casa', { exact: true }).selectOption(casaG.id)
+await pag.waitForURL(new RegExp(`casa=${casaG.id}`))
+const eCasaG = await esperado(ANA.id, `and casa_id = '${casaG.id}'`)
+await esperar(async () => Number(await graf(pag, 'beneficio').getAttribute('data-ultimo')) === eCasaG.beneficio)
+const opcSeg = await pag.getByLabel('Segmento', { exact: true }).locator('option').allTextContents()
+assert.ok(!opcSeg.includes('Casa'), 'con una casa elegida no se ofrece «Casa»')
+const cCasaG = await caidasBd(ANA.id, `and casa_id = '${casaG.id}'`)
+assert.equal(await valorTarjeta(pag, 'Mayor caída desde un máximo'), eur(cCasaG.max))
+const nSin = (await sql(`select count(*)::int n from apuestas where user_id = '${ANA.id}' and casa_id is null and estado in ${RESUELTOS}`))[0].n
+if (nSin > 0) {
+  await pag.getByLabel('Casa', { exact: true }).selectOption('sin')
+  await pag.waitForURL(/casa=sin/)
+  const eSin = await esperado(ANA.id, 'and casa_id is null')
+  await esperar(async () => Number(await graf(pag, 'beneficio').getAttribute('data-ultimo')) === eSin.beneficio)
+}
+bien(`Casa «${casaG.nombre}»: final ${eur(eCasaG.beneficio, true)} y caídas como en la BD; sin «Casa» en el segmento${nSin ? '; «Sin casa» también cuadra' : ''}`)
+// Periodos nuevos en Gráficas.
+await pag.goto(`${APP}/graficas`)
+for (const [per, cond] of Object.entries(CONDS)) {
+  await elegirPeriodo(pag, per)
+  const e = await esperado(ANA.id, cond)
+  if (e.n > 0) await esperar(async () => Number(await graf(pag, 'beneficio').getAttribute('data-ultimo')) === e.beneficio)
+  else await pag.locator('main [data-vacio="graficas"]:visible').waitFor()
+}
+bien('Gráficas con Hoy, Ayer y Últimos 7 días: el final cuadra con la BD')
+// Ver más (8 en 8) con Carla, por mercado o liga si tiene más de 8 valores.
+await pagCarla.goto(`${APP}/graficas`)
+assert.equal(Number(await graf(pagCarla, 'beneficio').getAttribute('data-ultimo')), eCarla.beneficio)
+assert.equal(Number(await graf(pagCarla, 'beneficio').getAttribute('data-puntos')), diasCarla + 1, 'un punto por día (+ el 0 inicial)')
+assert.equal(await valorTarjeta(pagCarla, 'Mayor caída desde un máximo'), eur(cCarla.max))
+let verMasProbado = false
+for (const seg of ['mercado', 'liga', 'cuota', 'tipo']) {
+  await pagCarla.goto(`${APP}/graficas?seg=${seg}`)
+  await pagCarla.locator('main [data-lista="series"]:visible > li').first().waitFor()
+  const total = Number((await pagCarla.locator('main [data-recuento="series"]:visible').innerText()).match(/^(\d+)/)[1])
+  const vistas = await pagCarla.locator('main [data-lista="series"]:visible > li').count()
+  assert.equal(vistas, Math.min(8, total))
+  if (total > 8) {
+    await pagCarla.locator('main [data-ver-mas]:visible').click()
+    await pagCarla.waitForURL(/mas=16/)
+    await esperar(async () => (await pagCarla.locator('main [data-lista="series"]:visible > li').count()) === Math.min(16, total))
+    verMasProbado = true
+    break
+  }
+}
+// Si Carla no tiene más de 8 valores, se crean ligas de prueba para comprobar "Ver más".
+if (!verMasProbado) {
+  await sql(`update selecciones s set liga = 'Liga ' || (abs(hashtext(s.apuesta_id::text)) % 12) from apuestas a where a.id = s.apuesta_id and a.user_id = '${CARLA.id}'`)
+  await pagCarla.goto(`${APP}/graficas?seg=liga`)
+  await pagCarla.locator('main [data-lista="series"]:visible > li').first().waitFor()
+  assert.equal(await pagCarla.locator('main [data-lista="series"]:visible > li').count(), 8)
+  await pagCarla.locator('main [data-ver-mas]:visible').click()
+  await pagCarla.waitForURL(/mas=16/)
+  await esperar(async () => (await pagCarla.locator('main [data-lista="series"]:visible > li').count()) > 8)
+}
+bien('Carla (1200): un punto por día, final y caídas como en la BD; «Ver más» de 8 en 8')
 
 paso('Análisis: maquetación a 320, 375, 390 y 430 px, modo claro y oscuro')
 for (const ancho of [320, 375, 390, 430]) {
@@ -2072,12 +2230,22 @@ for (const ancho of [320, 375, 390, 430]) {
     const ctx = await navegador.newContext({ ...movil, viewport: { width: ancho, height: 800 }, colorScheme: tema })
     await ctx.addCookies([cookieSesion(ANA)])
     const p = await ctx.newPage()
-    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/analisis/detalle?seg=dia&clave=%231', '/analisis?periodo=ano', '/bankroll', '/bankroll?periodo=30d', '/bankroll/nuevo', '/ajustes/casas', '/ajustes/estrategias', '/ajustes/deportes', '/ajustes/deportes/revisar']) {
+    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/analisis/detalle?seg=dia&clave=%231', '/analisis?periodo=ano', '/graficas', '/graficas?seg=liga&escala=misma&periodo=7d', '/graficas?periodo=hoy', '/bankroll', '/bankroll?periodo=30d', '/bankroll/nuevo', '/ajustes/casas', '/ajustes/estrategias', '/ajustes/deportes', '/ajustes/deportes/revisar']) {
       await p.goto(`${APP}${ruta}`, { waitUntil: 'networkidle' })
       const ancho2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
       assert.ok(ancho2 <= 0, `${ruta} a ${ancho}px (${tema}): scroll horizontal de ${ancho2}px`)
     }
+    // Barra de 5 pestañas: zonas táctiles de al menos 44 px y textos que caben.
+    const pestañas = await p.locator('nav[aria-label="Navegación principal"] a').evaluateAll((as) =>
+      as.map((a) => ({ w: a.getBoundingClientRect().width, h: a.getBoundingClientRect().height, cabe: a.scrollWidth <= a.clientWidth })),
+    )
+    assert.equal(pestañas.length, 5)
+    for (const t of pestañas) assert.ok(t.w >= 44 && t.h >= 44 && t.cabe, `pestaña a ${ancho}px: ${JSON.stringify(t)}`)
     if (ancho === 390) await p.screenshot({ path: join(SALIDA, `82-analisis-390-${tema}.png`), fullPage: true })
+    if (ancho === 320) {
+      await p.goto(`${APP}/graficas?seg=cuota`, { waitUntil: 'networkidle' })
+      await p.screenshot({ path: join(SALIDA, `88-graficas-320-${tema}.png`), fullPage: true })
+    }
     await ctx.close()
   }
 }
@@ -2261,6 +2429,9 @@ const ultimoSaldo = async (p) => Number(await grafSaldo(p).getAttribute('data-ul
 await pag.goto(`${APP}/bankroll`)
 const eGlob = await esperadoBk(ANA.id)
 assert.equal(await ultimoSaldo(pag), eGlob.saldo, 'Global: último punto = saldo')
+// Color: con «Todo» la variación es saldo final − 0.
+assert.equal(await grafSaldo(pag).getAttribute('data-tono'), eGlob.saldo > 0 ? 'positivo' : eGlob.saldo < 0 ? 'negativo' : 'neutro')
+assert.equal(Number(await pag.locator('[data-variacion-saldo]:visible').getAttribute('data-variacion-saldo')), eGlob.saldo)
 assert.equal(await cifraBk(pag, '[data-bloque="global"]', 'Saldo'), eur(eGlob.saldo))
 assert.ok((await grafSaldo(pag).locator('[data-marca="deposito"]').count()) >= 1, 'marca verde de depósito')
 assert.ok((await grafSaldo(pag).locator('[data-marca="retirada"]').count()) >= 1, 'marca roja de retirada')
@@ -2274,15 +2445,19 @@ await pag.waitForURL(new RegExp(`evo=${casaBk.id}`))
 const eCasa = await esperadoBk(ANA.id, casaBk.id)
 await esperar(async () => (await ultimoSaldo(pag)) === eCasa.saldo)
 bien(`Global ${eur(eGlob.saldo)} y «${casaBk.nombre}» ${eur(eCasa.saldo)}: el último punto es el saldo de su tarjeta; marcas y etiqueta al tocar`)
-await pag.locator('[data-seccion="evolucion-saldo"]:visible').getByLabel('Periodo', { exact: true }).selectOption('mes')
-await pag.waitForURL(/periodo=mes/)
+await elegirPeriodo(pag, 'mes')
 assert.ok(pag.url().includes(`evo=${casaBk.id}`), 'se conserva la casa')
 await esperar(async () => (await grafSaldo(pag).getAttribute('data-puntos')) != null)
 assert.equal(await ultimoSaldo(pag), eCasa.saldo, '«Este mes» también acaba en el saldo de hoy')
 // Periodo pasado: parte del saldo anterior y no llega a hoy.
 await pag.goto(`${APP}/bankroll?periodo=personalizado&desde=2020-01-01&hasta=2020-12-31`)
 await pag.locator('[data-seccion="evolucion-saldo"]:visible').getByText(/No hay movimientos ni apuestas resueltas en este periodo|Antes:/).first().waitFor()
-bien('Periodo: «Este mes» conserva la casa y acaba en el saldo; un periodo sin datos lo dice')
+for (const per of ['hoy', 'ayer', '7d']) {
+  await pag.goto(`${APP}/bankroll`)
+  await elegirPeriodo(pag, per)
+  await pag.locator('[data-seccion="evolucion-saldo"]:visible').waitFor()
+}
+bien('Periodo: «Este mes» conserva la casa y acaba en el saldo; Hoy, Ayer y 7 días funcionan; un periodo sin datos lo dice; línea en color con su variación')
 const ctxCarla3 = await navegador.newContext(movil)
 await ctxCarla3.addCookies([cookieSesion(CARLA)])
 const pagCarla3 = await ctxCarla3.newPage()

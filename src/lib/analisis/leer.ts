@@ -25,7 +25,13 @@ async function nombres(supabase: SupabaseClient, tabla: 'casas_apuestas' | 'estr
   return new Map(filas.map((f) => [f.id, f.nombre]))
 }
 
-export async function leerApuestasAnalisis(supabase: SupabaseClient, userId: string, rango: Pick<Rango, 'desde' | 'hasta'>): Promise<ApuestaAnalisis[]> {
+// `casa` (opcional, Gráficas): '' = todas, 'sin' = sin casa, o el id de una casa.
+export async function leerApuestasAnalisis(
+  supabase: SupabaseClient,
+  userId: string,
+  rango: Pick<Rango, 'desde' | 'hasta'>,
+  casa = '',
+): Promise<ApuestaAnalisis[]> {
   const filas = await leerTodo<Fila>(async (desde, hasta) => {
     let q = supabase
       .from('apuestas')
@@ -34,6 +40,8 @@ export async function leerApuestasAnalisis(supabase: SupabaseClient, userId: str
       .in('estado', [...ESTADOS_RESUELTOS, 'pendiente'])
     if (rango.desde) q = q.gte('fecha', rango.desde)
     if (rango.hasta) q = q.lt('fecha', rango.hasta)
+    if (casa === 'sin') q = q.is('casa_id', null)
+    else if (casa) q = q.eq('casa_id', casa)
     const { data, error } = await q.order('fecha').order('created_at').order('id').range(desde, hasta)
     if (error) throw error
     return (data ?? []) as unknown as Fila[]
@@ -69,6 +77,7 @@ export async function leerApuestasAnalisis(supabase: SupabaseClient, userId: str
     resultado_economico: a.resultado_economico == null ? null : Number(a.resultado_economico),
     cuota_total: a.cuota_total == null ? null : Number(a.cuota_total),
     casa: casa_id ? (casas.get(casa_id) ?? null) : null,
+    casa_id,
     estrategia: estrategia_id ? (estrategias.get(estrategia_id) ?? null) : null,
     // En el orden del resguardo (el primer evento es el que enseña la tarjeta del detalle).
     selecciones: (porApuesta.get(a.id) ?? []).sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0)),

@@ -25,13 +25,11 @@ import {
   type OrdenSegmento,
   type Segmento,
 } from '@/lib/analisis/calculos'
-import { enlaceDetalleAcierto, enlaceDetalleSegmento } from '@/lib/analisis/direccion'
+import { enlaceDetalleAcierto, enlaceDetalleSegmento, enlaceGraficas } from '@/lib/analisis/direccion'
 import { formatoImporte } from '@/lib/apuestas/dinero'
 import { NOMBRE_TIPO, TIPOS_APUESTA, esTipoApuesta } from '@/lib/apuestas/estados'
 import { FiltroFechas, Selector } from './controles'
-import { caidas, curvaBeneficio, porDiaSemana, porMes, textoDia, type Caida } from '@/lib/analisis/evolucion'
-import { formatoFecha } from '@/lib/apuestas/fechas'
-import { GraficaLinea, type PuntoGrafica } from '@/components/grafica-linea'
+import { porDiaSemana, porMes } from '@/lib/analisis/evolucion'
 
 type Busqueda = Promise<Record<string, string | string[] | undefined>>
 const uno = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? ''
@@ -129,7 +127,12 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
             )}
           </section>
 
-          <Evolucion apuestas={apuestas} dinero={dinero} enlace={(seg, clave) => enlaceDetalleSegmento(sp, seg, clave)} />
+          <Evolucion
+            apuestas={apuestas}
+            dinero={dinero}
+            enlace={(seg, clave) => enlaceDetalleSegmento(sp, seg, clave)}
+            enlaceGraficas={enlaceGraficas(sp)}
+          />
 
           <section aria-labelledby="t-segmentos" className="space-y-2">
             <h2 id="t-segmentos" className="text-sm font-semibold uppercase tracking-wide text-muted">
@@ -279,54 +282,33 @@ function ListaSegmento({
 
 type Dinero = (c: number | null, s?: boolean) => string
 
-function Evolucion({ apuestas, dinero, enlace }: { apuestas: ApuestaAnalisis[]; dinero: Dinero; enlace: (seg: Segmento, clave: string) => string }) {
-  const { puntos, porDia } = curvaBeneficio(apuestas)
-  const c = caidas(apuestas)
-  const fecha = (iso: string) => formatoFecha(iso, { conHora: false })
-  // Primer punto: el 0 de partida (antes de la primera apuesta del periodo).
-  const grafica: PuntoGrafica[] = [
-    { x: 0, y: 0, texto: 'Inicio del periodo\n0,00 €' },
-    ...puntos.map((p, i) => ({
-      x: i + 1,
-      y: p.valor,
-      texto: porDia
-        ? `${textoDia(p.dia)} · ${p.n} ${p.n === 1 ? 'apuesta' : 'apuestas'}\nAcumulado: ${dinero(p.valor, true)}`
-        : `${fecha(p.fecha)} · apuesta ${i + 1}\nAcumulado: ${dinero(p.valor, true)}`,
-    })),
-  ]
-  const tramo = (k: Caida) =>
-    k.importe === 0 ? 'Sin caídas' : `${k.desde ? fecha(k.desde) : 'Inicio del periodo'} → ${k.hasta ? fecha(k.hasta) : ''}`
+// La gráfica de beneficio acumulado y las caídas están en Gráficas (desde el 2026-11-06); aquí
+// quedan las tablas por mes y por día, con un enlace a Gráficas con el mismo periodo.
+function Evolucion({
+  apuestas,
+  dinero,
+  enlace,
+  enlaceGraficas,
+}: {
+  apuestas: ApuestaAnalisis[]
+  dinero: Dinero
+  enlace: (seg: Segmento, clave: string) => string
+  enlaceGraficas: string
+}) {
   return (
     <section aria-labelledby="t-evolucion" className="space-y-3" data-seccion="evolucion">
-      <h2 id="t-evolucion" className="text-sm font-semibold uppercase tracking-wide text-muted">
-        Evolución
-      </h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 id="t-evolucion" className="text-sm font-semibold uppercase tracking-wide text-muted">
+          Evolución
+        </h2>
+        <Link href={enlaceGraficas} className="flex h-11 items-center text-sm font-semibold text-brand" data-enlace="ver-evolucion">
+          Ver evolución →
+        </Link>
+      </div>
       <p className="rounded-2xl border border-border bg-surface p-3 text-xs text-muted">
-        Se usa la fecha de la apuesta (la fecha en que se resolvió no se guarda). Con pocas apuestas, estas cifras engañan.
+        Se usa la fecha de la apuesta (la fecha en que se resolvió no se guarda). Con pocas apuestas, estas cifras engañan. La
+        gráfica del beneficio acumulado y las caídas están en Gráficas.
       </p>
-
-      <div className="space-y-2 rounded-2xl border border-border bg-surface p-3">
-        <p className="text-sm font-medium">Beneficio acumulado</p>
-        <p className="text-xs text-muted">
-          {porDia ? 'Un punto por día (al final del día).' : 'Un punto por apuesta resuelta.'} Toca la gráfica para ver la fecha y el valor.
-        </p>
-        <GraficaLinea
-          id="beneficio"
-          titulo="Beneficio acumulado"
-          puntos={grafica}
-          inicio={puntos.length ? (porDia ? textoDia(puntos[0].dia) : fecha(puntos[0].fecha)) : ''}
-          fin={puntos.length ? `Final: ${dinero(puntos[puntos.length - 1].valor, true)}` : ''}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <Tarjeta titulo="Mayor caída desde un máximo" valor={c ? dinero(c.maxima.importe) : '—'} nota={c ? tramo(c.maxima) : undefined} />
-        <Tarjeta titulo="Caída actual desde el máximo" valor={c ? dinero(c.actual.importe) : '—'} nota={c ? tramo(c.actual) : undefined} />
-      </div>
-      <p className="text-xs text-muted">
-        Caída: lo que baja el beneficio acumulado desde su punto más alto, apuesta a apuesta (se empieza en 0).
-      </p>
-
       <h3 className="pt-1 text-sm font-medium">Por mes</h3>
       <ListaSegmento tabla="meses" filas={porMes(apuestas)} dinero={dinero} enlace={(clave) => enlace('mes', clave)} />
       <h3 className="pt-1 text-sm font-medium">Por día de la semana</h3>

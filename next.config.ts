@@ -14,8 +14,7 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: '/', destination: '/apuestas', permanent: false },
-      // Fase 2: la pestaña "Gráficas" pasó a ser "Análisis".
-      { source: '/graficas', destination: '/analisis', permanent: false },
+      // (Hasta el 2026-11-06, /graficas redirigía a /analisis; ahora es la pestaña Gráficas.)
     ]
   },
   async headers() {

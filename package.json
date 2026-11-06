@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types --no-warnings=ExperimentalWarning --test-reporter=spec tests/rls.test.mjs tests/logica.test.ts tests/exportar.test.ts tests/analisis.test.ts tests/bankroll.test.ts tests/opciones.test.ts tests/catalogo.test.ts tests/evolucion.test.ts",
+    "test": "node --test --experimental-strip-types --no-warnings=ExperimentalWarning --test-reporter=spec tests/rls.test.mjs tests/logica.test.ts tests/exportar.test.ts tests/analisis.test.ts tests/bankroll.test.ts tests/opciones.test.ts tests/catalogo.test.ts tests/evolucion.test.ts tests/graficas.test.ts",
     "typecheck": "tsc --noEmit",
     "iconos": "node scripts/generar-iconos.mjs",
     "probar:local": "node scripts/probar-local.mjs"

@@ -33,6 +33,7 @@ export type ApuestaAnalisis = {
   cuota_total: number | null
   resultado_economico: number | null
   casa: string | null
+  casa_id?: string | null // para el filtro de casa de Gráficas (Análisis no lo usa)
   estrategia: string | null
   deporte: string | null
   en_directo: boolean
@@ -391,7 +392,17 @@ export function detalle(apuestas: ApuestaAnalisis[], p: PeticionDetalle): Detall
 
 // ---------- Filtro de fechas (hora de España) ----------
 
-export const PERIODOS = { todo: 'Todo', mes: 'Este mes', '30d': 'Últimos 30 días', ano: 'Este año', personalizado: 'Personalizado' } as const
+// Orden = orden de las fichas del filtro. "hoy", "ayer" y "7d" desde el 2026-11-06.
+export const PERIODOS = {
+  hoy: 'Hoy',
+  ayer: 'Ayer',
+  '7d': 'Últimos 7 días',
+  mes: 'Este mes',
+  '30d': 'Últimos 30 días',
+  ano: 'Este año',
+  todo: 'Todo',
+  personalizado: 'Personalizado',
+} as const
 export type Periodo = keyof typeof PERIODOS
 export const esPeriodo = (v: unknown): v is Periodo => typeof v === 'string' && v in PERIODOS
 
@@ -411,6 +422,16 @@ export function rangoPeriodo(periodo: Periodo, desdeDia = '', hastaDia = '', aho
   const hoy = isoALocal(ahora.toISOString()).slice(0, 10)
   const [y, m] = hoy.split('-')
   switch (periodo) {
+    case 'hoy':
+      return { periodo, desde: inicioDia(hoy), hasta: inicioDia(sumarDias(hoy, 1)), desdeDia: hoy, hastaDia: hoy }
+    case 'ayer': {
+      const ayer = sumarDias(hoy, -1)
+      return { periodo, desde: inicioDia(ayer), hasta: inicioDia(hoy), desdeDia: ayer, hastaDia: ayer }
+    }
+    case '7d': {
+      const inicio = sumarDias(hoy, -6)
+      return { periodo, desde: inicioDia(inicio), hasta: inicioDia(sumarDias(hoy, 1)), desdeDia: inicio, hastaDia: hoy }
+    }
     case 'mes': {
       const inicio = `${y}-${m}-01`
       const siguiente = sumarDias(`${y}-${m}-28`, 7).slice(0, 8) + '01'

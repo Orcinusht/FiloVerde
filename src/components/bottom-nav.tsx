@@ -8,6 +8,7 @@ import { usePathname } from 'next/navigation'
 const SECCIONES = [
   { href: '/apuestas', label: 'Apuestas', icon: IconTicket },
   { href: '/analisis', label: 'Análisis', icon: IconChart },
+  { href: '/graficas', label: 'Gráficas', icon: IconLinea },
   { href: '/bankroll', label: 'Bankroll', icon: IconWallet },
   { href: '/ajustes', label: 'Ajustes', icon: IconSettings },
 ] as const
@@ -27,7 +28,7 @@ function Barra({ pathname }: { pathname: string }) {
       aria-label="Navegación principal"
       className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
     >
-      <ul className="mx-auto grid max-w-md grid-cols-4">
+      <ul className="mx-auto grid max-w-md grid-cols-5">
         {SECCIONES.map(({ href, label, icon: Icon }) => {
           const activa = pathname === href || pathname.startsWith(`${href}/`)
           return (
@@ -35,7 +36,7 @@ function Barra({ pathname }: { pathname: string }) {
               <Link
                 href={href}
                 aria-current={activa ? 'page' : undefined}
-                className={`flex h-16 flex-col items-center justify-center gap-1 text-xs font-medium transition-colors ${
+                className={`flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium leading-none transition-colors ${
                   activa ? 'text-brand' : 'text-muted'
                 }`}
               >
@@ -71,6 +72,15 @@ function IconChart() {
   return (
     <Svg>
       <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+    </Svg>
+  )
+}
+
+function IconLinea() {
+  return (
+    <Svg>
+      <path d="M3 20h18" />
+      <path d="M4 16l5-6 4 4 7-9" />
     </Svg>
   )
 }
