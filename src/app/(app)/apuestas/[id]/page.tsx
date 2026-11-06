@@ -37,7 +37,7 @@ export default function Page({ params, searchParams }: PageProps<'/apuestas/[id]
 async function Vuelta({ searchParams }: { searchParams: PageProps<'/apuestas/[id]'>['searchParams'] }) {
   const v = (await searchParams).volver
   const href = rutaVueltaSegura(Array.isArray(v) ? v[0] : v)
-  return <EnlaceVuelta href={href} texto={href.startsWith('/analisis') ? '← Análisis' : '← Lista'} />
+  return <EnlaceVuelta href={href} texto={href.startsWith('/analisis') ? '← Análisis' : href.startsWith('/ajustes') ? '← Revisar' : '← Lista'} />
 }
 
 function EnlaceVuelta({ href, texto }: { href: string; texto: string }) {

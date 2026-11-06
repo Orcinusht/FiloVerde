@@ -24,6 +24,8 @@ export function SelectorCatalogo({
   crear,
   onCambio,
   emoji,
+  archivada,
+  recuperar,
 }: {
   emoji?: (nombre: string) => string // decoración delante de cada opción (p. ej. deporte)
   valor: string
@@ -37,12 +39,18 @@ export function SelectorCatalogo({
   ayudaDeshabilitado?: string
   crear: (nombre: string) => Promise<Creacion>
   onCambio: (nombre: string) => void
+  // El valor elegido está ARCHIVADO (lo leyó la IA o es una apuesta antigua): se muestra con
+  // «(archivada)» y un botón para recuperarlo. `opciones` ya trae solo las no archivadas + esta.
+  archivada?: boolean
+  recuperar?: () => Promise<{ ok: boolean; error?: string }>
 }) {
   const { id, descripcion } = useIdCampo()
   const [creando, setCreando] = useState(false)
   const [nombre, setNombre] = useState('')
   const [mensaje, setMensaje] = useState<{ error: boolean; texto: string } | null>(null)
   const [pendiente, iniciar] = useTransition()
+  const [recuperada, setRecuperada] = useState(false)
+  const esArchivada = !!archivada && !recuperada
 
   const enCatalogo = opciones.some((o) => normalizar(o) === normalizar(valor))
   const fuera = valor.trim() !== '' && !enCatalogo
@@ -87,6 +95,7 @@ export function SelectorCatalogo({
           {opciones.map((o) => (
             <option key={o} value={o} aria-label={emoji ? o : undefined}>
               {emoji?.(o) ? `${emoji(o)} ${o}` : o}
+              {esArchivada && normalizar(o) === normalizar(valor) ? ' (archivada)' : ''}
             </option>
           ))}
           {!deshabilitado && <option value={NUEVO}>{textoNuevo}</option>}
@@ -146,6 +155,25 @@ export function SelectorCatalogo({
       )}
       {mensaje && (
         <p className={`text-sm ${mensaje.error ? 'text-red-600 dark:text-red-400' : 'text-muted'}`}>{mensaje.texto}</p>
+      )}
+      {!creando && esArchivada && recuperar && (
+        <div role="status" className="flex items-center justify-between gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          <span className="min-w-0">«{valor}» está archivada (no sale en las apuestas nuevas).</span>
+          <button
+            type="button"
+            disabled={pendiente}
+            onClick={() =>
+              iniciar(async () => {
+                const r = await recuperar()
+                if (r.ok) setRecuperada(true)
+                else setMensaje({ error: true, texto: r.error ?? 'No se ha podido recuperar.' })
+              })
+            }
+            className="h-11 shrink-0 rounded-xl border border-amber-600/50 px-3 font-semibold disabled:opacity-50"
+          >
+            {pendiente ? '…' : 'Recuperar'}
+          </button>
+        </div>
       )}
     </div>
   )

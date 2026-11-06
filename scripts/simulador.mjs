@@ -167,6 +167,13 @@ async function rest(req, res, url, cuerpo) {
       const nombres = Object.keys(args)
       const valores = nombres.map((n) => (args[n] !== null && typeof args[n] === 'object' ? JSON.stringify(args[n]) : args[n]))
       const lista = nombres.map((n, i) => `${ident(n)} => $${i + 1}`).join(', ')
+      // Como PostgREST: una función que devuelve FILAS (returns table / setof) responde con la
+      // lista de filas; una que devuelve un valor, con ese valor.
+      const { rows: f } = await tx.query(`select bool_or(proretset) as filas from pg_proc where proname = $1`, [partes[1]])
+      if (f[0]?.filas) {
+        const { rows } = await tx.query(`select * from public.${ident(partes[1])}(${lista})`, valores)
+        return { cuerpo: rows }
+      }
       const { rows } = await tx.query(`select public.${ident(partes[1])}(${lista}) as r`, valores)
       return { cuerpo: rows[0].r }
     }

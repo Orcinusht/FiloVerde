@@ -44,6 +44,7 @@ import {
   type ValoresSeleccion,
 } from '@/lib/apuestas/formulario'
 import {
+  buscarDeporte,
   buscarLiga,
   deporteResumen,
   ligasDe,
@@ -53,6 +54,7 @@ import {
 import { crearDeporte, crearLiga } from '@/app/(app)/apuestas/actions'
 import { IdCampo, useIdCampo } from './id-campo'
 import { SelectorCatalogo } from './selector-catalogo'
+import { recuperarCatalogo } from '@/app/(app)/ajustes/deportes/actions'
 import { emojiDeporte } from '@/lib/apuestas/emojis'
 import { SelectorOpcion } from './selector-opcion'
 import { VisorCaptura } from './visor-captura'
@@ -1346,7 +1348,13 @@ function CamposDeporteLiga({
   crearDeporte: (n: string) => Promise<{ ok: true; nombre: string; aviso?: string } | { ok: false; error: string }>
   crearLiga: (n: string) => Promise<{ ok: true; nombre: string; aviso?: string } | { ok: false; error: string }>
 }) {
-  const ligas = ligasDe(catalogo, deporte).map((l) => l.nombre)
+  // Archivados: fuera de las opciones, salvo el elegido (que se marca y ofrece "Recuperar").
+  const dElegido = buscarDeporte(catalogo, deporte)
+  const lElegida = buscarLiga(catalogo, deporte, liga)
+  const deportes = catalogo.deportes.filter((d) => !d.archivada || d.id === dElegido?.id).map((d) => d.nombre)
+  const ligas = ligasDe(catalogo, deporte)
+    .filter((l) => !l.archivada || l.id === lElegida?.id)
+    .map((l) => l.nombre)
   const deporteEnCatalogo = catalogo.deportes.some((d) => d.nombre === deporte)
   return (
     <div className="space-y-2">
@@ -1354,7 +1362,9 @@ function CamposDeporteLiga({
         <Campo etiqueta="Deporte" {...pDeporte}>
           <SelectorCatalogo
             valor={deporte}
-            opciones={catalogo.deportes.map((d) => d.nombre)}
+            opciones={deportes}
+            archivada={!!dElegido?.archivada}
+            recuperar={() => recuperarCatalogo('deporte', deporte)}
             vacio="Elige…"
             textoNuevo="+ Nuevo deporte…"
             emoji={emojiDeporte}
@@ -1369,6 +1379,8 @@ function CamposDeporteLiga({
           <SelectorCatalogo
             valor={liga}
             opciones={ligas}
+            archivada={!!lElegida?.archivada}
+            recuperar={() => recuperarCatalogo('liga', liga, deporte)}
             vacio="Sin liga"
             textoNuevo="+ Nueva liga…"
             marcado={!!pLiga.motivo}
