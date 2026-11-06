@@ -55,15 +55,16 @@ archivo o panel ponerlas).
    (rama `fase-3-casas-estrategias`, PR #5; pruebas de GitHub Actions en verde; migración
    `20261107000001` **aplicada** en Supabase): Ajustes → "Casas de apuestas" y "Estrategias" (crear,
    renombrar, archivar y borrar sin uso). **Verificada en el móvil con la cuenta de email.** Falta
-   verificarla en producción con la cuenta de Google. **Segunda ronda, parte 2: deportes y ligas**
-   (rama `fase-3-deportes-ligas`, desde el 2026-11-06; migración `20261108000001`, pendiente de pegar
-   en Supabase): renombrar en el catálogo y en las apuestas (con aviso "Afecta a N selecciones en M
-   apuestas", todo o nada), archivar/recuperar, borrar solo sin uso y "Revisar posibles errores".
-   Pendiente de verificar en el móvil y de fusionar. El resto de la segunda ronda, en Pendiente.
+   verificarla en producción con la cuenta de Google. **Segunda ronda, parte 2: deportes y ligas,
+   fusionada el 2026-11-06** (rama `fase-3-deportes-ligas`, PR #6; pruebas de GitHub Actions en
+   verde; migración `20261108000001` **aplicada** en Supabase): renombrar en el catálogo y en las
+   apuestas (con aviso "Afecta a N selecciones en M apuestas", todo o nada), archivar/recuperar, borrar
+   solo sin uso y "Revisar posibles errores". **Verificada en el móvil con la cuenta de email.** Falta
+   verificarla en producción con la cuenta de Google (el detector con los datos reales). El resto de
+   la segunda ronda, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, al empezar deportes y ligas)
-1. **Deportes y ligas**: hecho en la rama `fase-3-deportes-ligas` (pendiente de verificar y fusionar).
-   **"Unir ligas"** como paso posterior (solo ligas, no deportes): pasar las selecciones de una liga a
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, tras fusionar deportes y ligas)
+1. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
    otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
    aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
    son competiciones distintas.
@@ -77,6 +78,9 @@ archivo o panel ponerlas).
 5. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
 
 Además:
+- **Verificar en producción con la cuenta de Google** Deportes y ligas: el detector "Revisar posibles
+  errores" con los datos reales (Galatasaray SK - VfB Stuttgart y Deportivo de A Coruña - Osasuna),
+  renombrar con aviso y archivar.
 - **Verificar en producción con la cuenta de Google** (35 apuestas) la gestión de casas y estrategias
   (recuentos, crear, repetidos y reservados rechazados, renombrar sin cambiar cifras, archivar y borrar).
 - **Verificar el Bankroll en producción con la cuenta de Google** (35 apuestas): saldos por casa y
@@ -883,3 +887,5 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-06 | El simulador local responde a las funciones que devuelven filas como PostgREST (lista de filas) | Las funciones nuevas devuelven tablas (N y M) |
 | 2026-11-06 | `?volver=` acepta también `/ajustes…` (misma regla estricta) | Volver de una apuesta a "Revisar posibles errores" |
 | 2026-11-06 | `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (71 en total); la versión de main sigue pasando con la migración | Renombrar con aviso, en uso, reservados y que otra cuenta no vea ni toque nada |
+| 2026-11-06 | **Deportes y ligas fusionado en `main`** (rama `fase-3-deportes-ligas`, PR #6) | Migración `20261108000001` aplicada en Supabase; verificado en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarlo en producción con la cuenta de Google (el detector con los datos reales) |
+| 2026-11-06 | El nombre `20261108000001` de la migración no es una fecha real | Solo marca el orden; ya está aplicada y no se renombra |
