@@ -1,8 +1,8 @@
 // Catálogo de deportes y ligas del usuario. Lógica común (móvil y servidor).
 // Las apuestas guardan deporte y liga como TEXTO; el catálogo sirve para elegir.
 
-export type DeporteCat = { id: string; nombre: string }
-export type LigaCat = { id: string; nombre: string; deporte_id: string }
+export type DeporteCat = { id: string; nombre: string; archivada?: boolean }
+export type LigaCat = { id: string; nombre: string; deporte_id: string; archivada?: boolean }
 export type Catalogo = { deportes: DeporteCat[]; ligas: LigaCat[] }
 
 export const DEPORTE_MIXTO = 'Mixto'
@@ -60,9 +60,11 @@ export function deporteResumen(deportes: (string | null | undefined)[]): string 
 export const MAX_CATALOGO_IA = 4000 // caracteres (≈ 1.200 tokens como mucho)
 export function catalogoParaIA(cat: Catalogo, max = MAX_CATALOGO_IA): string {
   const obj: Record<string, string[]> = {}
-  for (const d of cat.deportes.slice(0, 60)) obj[d.nombre] = []
-  const porId = new Map(cat.deportes.map((d) => [d.id, d.nombre]))
-  for (const l of cat.ligas) {
+  // Las ARCHIVADAS no se envían (ni las ligas de un deporte archivado): no deben salir en la lectura.
+  const activos = cat.deportes.filter((d) => !d.archivada)
+  for (const d of activos.slice(0, 60)) obj[d.nombre] = []
+  const porId = new Map(activos.map((d) => [d.id, d.nombre]))
+  for (const l of cat.ligas.filter((x) => !x.archivada)) {
     const d = porId.get(l.deporte_id)
     if (d && obj[d]) obj[d].push(l.nombre)
   }

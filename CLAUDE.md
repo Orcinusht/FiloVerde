@@ -55,16 +55,18 @@ archivo o panel ponerlas).
    (rama `fase-3-casas-estrategias`, PR #5; pruebas de GitHub Actions en verde; migración
    `20261107000001` **aplicada** en Supabase): Ajustes → "Casas de apuestas" y "Estrategias" (crear,
    renombrar, archivar y borrar sin uso). **Verificada en el móvil con la cuenta de email.** Falta
-   verificarla en producción con la cuenta de Google. El resto de la segunda ronda, en Pendiente.
+   verificarla en producción con la cuenta de Google. **Segunda ronda, parte 2: deportes y ligas**
+   (rama `fase-3-deportes-ligas`, desde el 2026-11-06; migración `20261108000001`, pendiente de pegar
+   en Supabase): renombrar en el catálogo y en las apuestas (con aviso "Afecta a N selecciones en M
+   apuestas", todo o nada), archivar/recuperar, borrar solo sin uso y "Revisar posibles errores".
+   Pendiente de verificar en el móvil y de fusionar. El resto de la segunda ronda, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, tras fusionar la gestión de casas y estrategias)
-1. **Deportes y ligas** (siguiente tarea): en el catálogo, "Renombrar
-  también en mis apuestas" con aviso previo ("Afecta a N selecciones en M apuestas") y confirmación;
-  cambio de una vez con una función de la BD (todo o nada), solo dentro del mismo deporte para las
-  ligas y recalculando el deporte resumen si cambia un deporte. Ojo: "LaLiga" y "LaLiga Hypermotion"
-  son competiciones distintas (no se unen); el mismo partido con ligas distintas es un fallo de una
-  apuesta concreta (se corrige abriéndola desde Análisis → Liga). Posible aviso "mismo partido con
-  ligas distintas".
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, al empezar deportes y ligas)
+1. **Deportes y ligas**: hecho en la rama `fase-3-deportes-ligas` (pendiente de verificar y fusionar).
+   **"Unir ligas"** como paso posterior (solo ligas, no deportes): pasar las selecciones de una liga a
+   otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
+   aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
+   son competiciones distintas.
 2. **Evolución en el tiempo** (Fase 3, segunda ronda): beneficio acumulado, evolución del saldo,
    rendimiento por mes y por día de la semana, drawdown.
 3. **Importación** (de CSV, para restaurar una copia): los CSV de la copia ya usan los códigos internos
@@ -168,7 +170,8 @@ src/
                         copia de seguridad (copia-seguridad.tsx: descarga de los CSV),
                         casas/ y estrategias/ (gestión: crear, renombrar, archivar y borrar sin uso;
                         opciones/ = pantalla común pagina-opciones.tsx + gestion-opciones.tsx),
-                        deportes/ (catálogo: renombrar y borrar), cuenta
+                        deportes/ (catálogo: editor-catalogo.tsx con Renombrar —aviso N/M—, Archivar y
+                        Borrar sin uso; revisar/ = "Revisar posibles errores"), cuenta
       analisis/         pantalla Análisis (Fase 2): analisis.tsx (servidor: lee y calcula),
                         controles.tsx (periodo, segmento, orden, tipo y Mercado/Liga; todo en la
                         dirección). /graficas redirige aquí (next.config.ts)
@@ -193,6 +196,8 @@ src/
   lib/
     apuestas/         lógica común (móvil y servidor): estados, importes, cuotas, fechas,
                       cálculos, validación del formulario, esquema de la IA (propuesta.ts),
+                      catalogo-gestion.ts (deportes y ligas: nombres, reservados, uso, selecciones
+                      afectadas por un renombrado y detector de posibles errores),
                       opciones.ts (casas y estrategias: nombres válidos, reservados, uso, borrado,
                       archivadas y reconocer el nombre leído por la IA),
                       duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
@@ -220,6 +225,7 @@ supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
 tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts) + copia en CSV (exportar.test.ts)
                       + análisis (analisis.test.ts) + bankroll (bankroll.test.ts) + casas y estrategias (opciones.test.ts)
+                      + deportes y ligas (catalogo.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -296,7 +302,29 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   hace lo mismo). "Mixto" está reservado. Lista inicial (12 deportes y unas pocas ligas) creada
   por `sembrar_catalogo()` al registrarse (trigger en `auth.users`; si falla, el registro sigue).
   Borrar un deporte del catálogo borra sus ligas del catálogo. **Las selecciones guardan deporte y
-  liga como TEXTO**: renombrar o borrar en el catálogo no cambia las apuestas guardadas.
+  liga como TEXTO**; desde el 2026-11-06, **renombrar en el catálogo cambia también ese texto en las
+  apuestas** (ver "Deportes y ligas" más abajo) y no se puede borrar lo que se usa.
+- **Deportes y ligas** (migración `20261108000001`, solo aditiva y repetible): columna `archivada`;
+  reservados (deportes: Mixto, Sin dato, Varios; ligas: Sin dato, Varios); **no se borra en uso**
+  (disparador `catalogo_sin_uso`; "en uso" = alguna selección con ese deporte, o con esa liga Y su
+  deporte, sin mayúsculas, tildes ni espacios; no bloquea el borrado de la cuenta entera).
+  - **Renombrar** (siempre en el catálogo Y en las apuestas, sin opción "solo catálogo"):
+    `previsualizar_renombrado(tipo, id)` da N selecciones y M apuestas para el aviso;
+    `renombrar_en_catalogo(tipo, id, nombre, N, M)` lo hace TODO O NADA en una sola llamada: si N y M
+    ya no coinciden (algo cambió), no aplica nada (hint `cambiado`, se vuelve a pedir confirmación);
+    nombre repetido (sin mayúsculas ni tildes; la liga, dentro de su deporte) o reservado: rechazado,
+    no se mezcla. Una liga solo cambia en las selecciones de SU deporte. Al renombrar un deporte se
+    recalcula el deporte resumen (`deporte_resumen`) de cada apuesta afectada ("Mixto" ↔ uno).
+    Funciones `security invoker` (RLS), comprueban `auth.uid()`, sin permiso para `anon`.
+  - **Archivados:** fuera de los desplegables y del catálogo que se envía a la IA (`catalogoParaIA`);
+    la revisión de capturas los reconoce como existentes (con la escritura del catálogo, sin «nueva»)
+    y el desplegable muestra "Nombre (archivada)" con **Recuperar**.
+  - **"Revisar posibles errores"** (`/ajustes/deportes/revisar`, contador en Deportes y ligas): agrupa
+    selecciones por partido (sin mayúsculas, tildes ni espacios; "vs" y guiones iguales) y fecha del
+    evento; marca el grupo si hay más de una liga (contando "Sin liga") o más de un deporte. Ignora
+    las selecciones sin fecha. Muestra fecha, ligas (con nº de selecciones), cada apuesta con su liga
+    y enlace para corregirla a mano ("← Revisar" vuelve). Es una pista: solo junta partidos escritos
+    igual (p. ej. la selección de Galatasaray del 04/11 cae en otro grupo que las del 03/11).
 - `selecciones.deporte` es obligatorio al guardar (y no puede ser "Mixto").
   **`apuestas.deporte`** = deporte resumen: si todas las selecciones son del mismo deporte, ese;
   si hay varios, "Mixto". Lo calcula SIEMPRE `guardar_apuesta` (`deporte_resumen()`), al crear y
@@ -667,7 +695,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -736,7 +764,7 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-02 | Imagen borrada solo cuando ya no la usa ninguna apuesta ni queda nada por revisar | Varias apuestas comparten captura; el registro de coste se conserva |
 | 2026-11-02 | Migración `20261102000001` solo aditiva | No rompe la app publicada en `main` |
 | 2026-11-02 | Catálogo de deportes y ligas por usuario (tablas `deportes`, `ligas`) con desplegables y "+ Nuevo…" | Datos uniformes para las métricas; la IA elige de tu lista |
-| 2026-11-02 | Selecciones enlazadas al catálogo por TEXTO, no por id | Borrar o renombrar en el catálogo no toca las apuestas guardadas |
+| 2026-11-02 | Selecciones enlazadas al catálogo por TEXTO, no por id | Borrar o renombrar en el catálogo no toca las apuestas guardadas (cambiado el 2026-11-06: renombrar sí las actualiza) |
 | 2026-11-02 | `apuestas.deporte` (deporte resumen, "Mixto" si hay varios) calculado por la BD al guardar | Filtro y métricas simples; nunca se fía del navegador |
 | 2026-11-02 | Unicidad sin mayúsculas ni tildes; "Mixto" reservado | Evita duplicados como Futbol/Fútbol |
 | 2026-11-02 | Catálogo enviado a la IA como datos, compacto y con tope de 4.000 caracteres | ≈ +6 % de coste por captura; sin riesgo de instrucciones ocultas |
@@ -844,3 +872,14 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-05 | `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (63 en total) | Nombres repetidos y reservados, borrado con apuestas y que otra cuenta no renombre, archive ni borre |
 | 2026-11-06 | **Gestión de casas y estrategias fusionada en `main`** (rama `fase-3-casas-estrategias`, PR #5) | Migración `20261107000001` aplicada en Supabase; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google |
 | 2026-11-06 | El nombre `20261107000001` de la migración no es una fecha real | Solo marca el orden; ya está aplicada y no se renombra |
+| 2026-11-06 | **Fase 3, segunda ronda, parte 2: deportes y ligas** en la rama `fase-3-deportes-ligas` | Corregir nombres con seguridad y detectar errores de datos |
+| 2026-11-06 | Renombrar SIEMPRE en el catálogo y en las apuestas a la vez (sin "solo catálogo") | Renombrar solo el catálogo crea los descuadres entre catálogo y apuestas |
+| 2026-11-06 | Renombrado con funciones de la BD: aviso N/M y aplicación todo o nada que comprueba que N y M no han cambiado | Lo confirmado es exactamente lo que se cambia; nunca un bucle desde la app |
+| 2026-11-06 | No borrar deportes ni ligas en uso (disparador), sin bloquear el borrado de la cuenta | Borrar algo en uso dejaría apuestas con nombres fuera del catálogo |
+| 2026-11-06 | Archivados fuera del catálogo de la IA pero reconocidos en la revisión (con Recuperar) | Mismo criterio que casas y estrategias |
+| 2026-11-06 | Detector "Revisar posibles errores" por partido + fecha con ligas o deportes distintos, calculado en el servidor con funciones puras | Pista con pocos falsos positivos; sin corrección automática: decide el usuario |
+| 2026-11-06 | "Unir ligas" como paso posterior; no para deportes | Unir deportes obliga a juntar ligas que chocan; caso real solo de ligas |
+| 2026-11-06 | Catálogo leído en tandas de 1000 (antes, con límites de 200/2000) | Supabase devuelve como mucho 1000 filas por consulta |
+| 2026-11-06 | El simulador local responde a las funciones que devuelven filas como PostgREST (lista de filas) | Las funciones nuevas devuelven tablas (N y M) |
+| 2026-11-06 | `?volver=` acepta también `/ajustes…` (misma regla estricta) | Volver de una apuesta a "Revisar posibles errores" |
+| 2026-11-06 | `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (71 en total); la versión de main sigue pasando con la migración | Renombrar con aviso, en uso, reservados y que otra cuenta no vea ni toque nada |

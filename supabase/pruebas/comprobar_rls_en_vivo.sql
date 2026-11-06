@@ -286,6 +286,52 @@ exception when others then
     case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
 end $$;
 
+-- Deportes y ligas (Fase 3, segunda ronda): renombrar en el catálogo y en las apuestas
+with x as (select id from deportes order by created_at, id limit 1)
+  insert into ids select 'deporte_a', id from x;
+with x as (insert into ligas (deporte_id, nombre) select v, 'PRUEBA-RLS-L' from ids where k = 'deporte_a' returning id)
+  insert into ids select 'liga_a', id from x;
+with x as (insert into apuestas (importe, cuota_total, notas) values (1000, 2, 'PRUEBA-RLS') returning id)
+  insert into ids select 'apuesta_l', id from x;
+insert into selecciones (apuesta_id, evento, cuota, deporte, liga)
+  select (select v from ids where k = 'apuesta_l'), 'PRUEBA-RLS', 2,
+         (select nombre from deportes where id = (select v from ids where k = 'deporte_a')), 'prueba-rls-l';
+insert into resultado
+  select 64, 'A ve el aviso de renombrar su liga (control)', '1 selección en 1 apuesta',
+         p.selecciones || ' selección en ' || p.apuestas || ' apuesta', p.selecciones = 1 and p.apuestas = 1
+  from previsualizar_renombrado('liga', (select v from ids where k = 'liga_a')) p;
+do $$
+begin
+  delete from ligas where id in (select v from ids where k = 'liga_a');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (65, 'A borra una liga que está en uso', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$
+begin
+  perform * from renombrar_en_catalogo('liga', (select v from ids where k = 'liga_a'), 'PRUEBA-RLS-X', 5, 5);
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (66, 'A renombra con números distintos a los del aviso', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$
+begin
+  insert into deportes (nombre) values ('Varios');
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (67, 'A crea un deporte llamado «Varios»', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$ begin
+  perform * from renombrar_en_catalogo('liga', (select v from ids where k = 'liga_a'), 'PRUEBA-RLS-L2', 1, 1);
+end $$;
+insert into resultado
+  select 68, 'A renombra su liga: cambia también en su apuesta (control)', 'PRUEBA-RLS-L2',
+         coalesce(max(s.liga), '—'), max(s.liga) = 'PRUEBA-RLS-L2'
+  from selecciones s where s.apuesta_id = (select v from ids where k = 'apuesta_l');
+
 reset role;
 
 -- ---------- 2. Como B: intentar acceder a lo de A ----------
@@ -440,6 +486,26 @@ with x as (update casas_apuestas set archivada = true where id in (select v from
 with x as (delete from estrategias where id in (select v from ids where k = 'estrategia') returning 1)
   insert into resultado select 62, 'B borra una estrategia de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
 
+-- Deportes y ligas (Fase 3, segunda ronda)
+do $$
+begin
+  perform * from previsualizar_renombrado('liga', (select v from ids where k = 'liga_a'));
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (69, 'B ve el aviso de renombrar una liga de A', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+do $$
+begin
+  perform * from renombrar_en_catalogo('liga', (select v from ids where k = 'liga_a'), 'HACK', 1, 1);
+  raise exception 'PERMITIDO';
+exception when others then
+  insert into resultado values (70, 'B renombra una liga de A (y sus apuestas)', 'rechazado',
+    case when sqlerrm = 'PERMITIDO' then 'PERMITIDO' else 'rechazado' end, sqlerrm <> 'PERMITIDO');
+end $$;
+with x as (update ligas set archivada = true where id in (select v from ids where k = 'liga_a') returning 1)
+  insert into resultado select 71, 'B archiva una liga de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+
 reset role;
 
 -- ---------- 3. Sin sesión (visitante anónimo) ----------
@@ -484,6 +550,7 @@ delete from apuestas where id in (select v from ids);             -- borra tambi
 delete from movimientos_bankroll where id in (select v from ids); -- antes que las casas (no se puede borrar una casa con movimientos)
 delete from casas_apuestas where id in (select v from ids);       -- ya sin apuestas ni movimientos
 delete from estrategias where id in (select v from ids);
+delete from ligas where id in (select v from ids);               -- ya sin apuestas que la usen
 delete from transcripciones where id in (select v from ids);
 delete from deportes where id in (select v from ids);            -- borra también su liga
 

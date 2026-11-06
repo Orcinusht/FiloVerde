@@ -808,3 +808,180 @@ test('La migración de casas y estrategias se puede pegar dos veces sin errores'
   assert.equal(rows[0].n, 2)
   await como(ANA, async (tx) => assert.equal((await tx.query(`select count(*)::int n from casas_apuestas where archivada`)).rows[0].n, 0))
 })
+
+// ---------- Fase 3 · Deportes y ligas: renombrar en el catálogo y en las apuestas ----------
+
+const apuestaCon = (tx, tipo, sels) =>
+  tx
+    .query(`select guardar_apuesta(null, $1::jsonb, $2::jsonb) id`, [
+      JSON.stringify({ importe: 100, tipo, estado: 'pendiente', cuota_total: 2 }),
+      JSON.stringify(sels.map(([deporte, liga]) => ({ deporte, liga, evento: 'X - Y', mercado: 'm', pronostico: 'p', cuota: tipo === 'mismo_partido' ? null : 1.5, estado: 'pendiente' }))),
+    ])
+    .then((r) => r.rows[0].id)
+const idDe = async (tx, sql, p) => (await tx.query(sql, p)).rows[0].id
+
+test('Renombrar un deporte cambia sus selecciones y recalcula el deporte resumen ("Mixto" → un deporte)', async () => {
+  await como(ANA, async (tx) => {
+    const tenis = await idDe(tx, `select id from deportes where nombre = 'Tenis'`)
+    const padel = await idDe(tx, `insert into deportes (nombre) values ('Pádel PRUEBA') returning id`)
+    const mixta = await apuestaCon(tx, 'combinada', [['Tenis', null], ['pádel prueba', null]])
+    const soloTenis = await apuestaCon(tx, 'simple', [['TENIS', null]])
+    assert.equal((await tx.query(`select deporte from apuestas where id = $1`, [mixta])).rows[0].deporte, 'Mixto')
+    const prev = (await tx.query(`select * from previsualizar_renombrado('deporte', $1)`, [padel])).rows[0]
+    assert.deepEqual(prev, { selecciones: 1, apuestas: 1 })
+    // Pádel PRUEBA → "Tenis" no se puede (ya existe: no se mezcla).
+    await tx.query('savepoint s')
+    await assert.rejects(tx.query(`select * from renombrar_en_catalogo('deporte', $1, 'tenis', 1, 1)`, [padel]), /deportes_nombre_unico/)
+    await tx.query('rollback to savepoint s')
+    // Renombrar Tenis → "Tenis ATP": su selección de la mixta y la de la simple; la mixta sigue Mixto.
+    const r = (await tx.query(`select * from renombrar_en_catalogo('deporte', $1, '  Tenis   ATP ', 2, 2)`, [tenis])).rows[0]
+    assert.deepEqual(r, { selecciones: 2, apuestas: 2 }, 'N y M = lo actualizado')
+    const sels = (await tx.query(`select apuesta_id, deporte from selecciones where apuesta_id in ($1, $2) order by apuesta_id, orden`, [mixta, soloTenis])).rows
+    assert.ok(sels.filter((x) => x.deporte === 'Tenis ATP').length === 2)
+    assert.equal((await tx.query(`select deporte from apuestas where id = $1`, [soloTenis])).rows[0].deporte, 'Tenis ATP', 'resumen recalculado')
+    // Un deporte escrito distinto en el catálogo y en las apuestas («golf prueba»): al renombrarlo se unifica.
+    const otra = await apuestaCon(tx, 'combinada', [['Golf PRUEBA', null], ['golf prueba', null]])
+    assert.equal((await tx.query(`select deporte from apuestas where id = $1`, [otra])).rows[0].deporte, 'Golf PRUEBA')
+    const golf = await idDe(tx, `insert into deportes (nombre) values ('Golf PRUEBA') returning id`)
+    await tx.query(`select * from renombrar_en_catalogo('deporte', $1, 'Golf', 2, 1)`, [golf])
+    assert.equal((await tx.query(`select deporte from apuestas where id = $1`, [otra])).rows[0].deporte, 'Golf')
+    await tx.query(`delete from apuestas where id = any($1)`, [[mixta, soloTenis, otra]])
+    await tx.query(`update deportes set nombre = 'Tenis' where id = $1`, [tenis])
+    await tx.query(`delete from deportes where id = any($1)`, [[padel, golf]])
+  })
+})
+
+test('Renombrar: una apuesta "Mixto" pasa a un solo deporte cuando sus deportes quedan escritos igual', async () => {
+  await como(ANA, async (tx) => {
+    // Una apuesta guardada como "Mixto" cuyas selecciones acaban siendo del mismo deporte (por ejemplo,
+    // tras corregir una a mano): al renombrar ese deporte, el resumen se recalcula y deja de ser "Mixto".
+    const f7 = await idDe(tx, `insert into deportes (nombre) values ('Futbol 7 PRUEBA') returning id`)
+    const ap = await apuestaCon(tx, 'combinada', [['Fútbol', null], ['Futbol 7 PRUEBA', null]])
+    assert.equal((await tx.query(`select deporte from apuestas where id = $1`, [ap])).rows[0].deporte, 'Mixto')
+    // Corrección a mano de la selección de Fútbol (sin pasar por guardar_apuesta: el resumen sigue "Mixto").
+    await tx.query(`update selecciones set deporte = 'Futbol 7 PRUEBA' where apuesta_id = $1`, [ap])
+    await tx.query(`select * from renombrar_en_catalogo('deporte', $1, 'Fútbol 7', 2, 1)`, [f7])
+    assert.equal((await tx.query(`select deporte from apuestas where id = $1`, [ap])).rows[0].deporte, 'Fútbol 7', 'Mixto → un solo deporte')
+    await tx.query(`delete from apuestas where id = $1`, [ap])
+    await tx.query(`delete from deportes where id = $1`, [f7])
+  })
+})
+
+test('Renombrar una liga no toca la del mismo nombre en otro deporte', async () => {
+  await como(ANA, async (tx) => {
+    const futbol = await idDe(tx, `select id from deportes where nombre = 'Fútbol'`)
+    const volei = await idDe(tx, `select id from deportes where nombre = 'Voleibol'`)
+    const lf = await idDe(tx, `insert into ligas (deporte_id, nombre) values ($1, 'Superliga PRUEBA') returning id`, [futbol])
+    await tx.query(`insert into ligas (deporte_id, nombre) values ($1, 'Superliga PRUEBA')`, [volei])
+    const a1 = await apuestaCon(tx, 'simple', [['Fútbol', 'superliga prueba']])
+    const a2 = await apuestaCon(tx, 'simple', [['Voleibol', 'Superliga PRUEBA']])
+    assert.deepEqual((await tx.query(`select * from previsualizar_renombrado('liga', $1)`, [lf])).rows[0], { selecciones: 1, apuestas: 1 })
+    await tx.query(`select * from renombrar_en_catalogo('liga', $1, 'Superliga Fútbol', 1, 1)`, [lf])
+    assert.equal((await tx.query(`select liga from selecciones where apuesta_id = $1`, [a1])).rows[0].liga, 'Superliga Fútbol')
+    assert.equal((await tx.query(`select liga from selecciones where apuesta_id = $1`, [a2])).rows[0].liga, 'Superliga PRUEBA', 'la de voleibol no cambia')
+    await tx.query(`delete from apuestas where id = any($1)`, [[a1, a2]])
+    await tx.query(`delete from ligas where nombre in ('Superliga Fútbol', 'Superliga PRUEBA')`)
+  })
+})
+
+test('Renombrar es todo o nada: números distintos, nombre repetido o reservado, o un fallo a mitad', async () => {
+  await como(ANA, async (tx) => {
+    const futbol = await idDe(tx, `select id from deportes where nombre = 'Fútbol'`)
+    const l = await idDe(tx, `insert into ligas (deporte_id, nombre) values ($1, 'Liga TON') returning id`, [futbol])
+    const a = await apuestaCon(tx, 'simple', [['Fútbol', 'Liga TON']])
+    const intenta = async (sql, p) => {
+      await tx.query('savepoint s')
+      try {
+        await tx.query(sql, p)
+        await tx.query('release savepoint s')
+        return 'ok'
+      } catch (e) {
+        await tx.query('rollback to savepoint s')
+        return e.message
+      }
+    }
+    assert.match(await intenta(`select * from renombrar_en_catalogo('liga', $1, 'Liga X', 2, 1)`, [l]), /han cambiado/)
+    assert.match(await intenta(`select * from renombrar_en_catalogo('liga', $1, 'Varios', 1, 1)`, [l]), /ligas_nombre_no_reservado/)
+    ids.ligaTon = l
+    ids.apuestaTon = a
+  })
+  // Fallo a MITAD (después de cambiar el catálogo): un disparador de prueba (creado como
+  // administrador) rompe al tocar las selecciones. No debe quedar nada cambiado.
+  await db.exec(`create function public.romper_prueba() returns trigger language plpgsql as $$ begin raise exception 'fallo simulado'; end $$;
+    create trigger romper_prueba before update on public.selecciones for each row execute function public.romper_prueba();`)
+  await assert.rejects(
+    como(ANA, (tx) => tx.query(`select * from renombrar_en_catalogo('liga', $1, 'Liga Nueva', 1, 1)`, [ids.ligaTon])),
+    /fallo simulado/,
+  )
+  await db.exec(`drop trigger romper_prueba on public.selecciones; drop function public.romper_prueba();`)
+  await como(ANA, async (tx) => {
+    assert.equal((await tx.query(`select nombre from ligas where id = $1`, [ids.ligaTon])).rows[0].nombre, 'Liga TON', 'el catálogo no cambió')
+    assert.equal((await tx.query(`select liga from selecciones where apuesta_id = $1`, [ids.apuestaTon])).rows[0].liga, 'Liga TON', 'las apuestas tampoco')
+    await tx.query(`delete from apuestas where id = $1`, [ids.apuestaTon])
+    await tx.query(`delete from ligas where id = $1`, [ids.ligaTon])
+  })
+})
+
+test('Deportes y ligas: reservados, borrar solo sin uso, Beto no toca nada de Ana, visitante sin acceso', async () => {
+  let lA, aA
+  await como(ANA, async (tx) => {
+    const futbol = await idDe(tx, `select id from deportes where nombre = 'Fútbol'`)
+    for (const r of ['Sin dato', 'VARIOS', 'mixto']) {
+      await tx.query('savepoint s')
+      await assert.rejects(tx.query(`insert into deportes (nombre) values ($1)`, [r]), /no_reservado|no_mixto/, r)
+      await tx.query('rollback to savepoint s')
+    }
+    lA = await idDe(tx, `insert into ligas (deporte_id, nombre) values ($1, 'Liga de Ana') returning id`, [futbol])
+    aA = await apuestaCon(tx, 'simple', [['Fútbol', 'liga de ana']])
+    await tx.query('savepoint s')
+    await assert.rejects(tx.query(`delete from ligas where id = $1`, [lA]), /en uso/)
+    await tx.query('rollback to savepoint s')
+    await tx.query('savepoint s')
+    await assert.rejects(tx.query(`delete from deportes where id = $1`, [futbol]), /en uso/)
+    await tx.query('rollback to savepoint s')
+    const libre = await idDe(tx, `insert into ligas (deporte_id, nombre) values ($1, 'Liga libre') returning id`, [futbol])
+    assert.equal((await tx.query(`delete from ligas where id = $1 returning 1`, [libre])).rows.length, 1)
+  })
+  await como(BETO, async (tx) => {
+    for (const sql of [
+      `select * from previsualizar_renombrado('liga', $1)`,
+      `select * from renombrar_en_catalogo('liga', $1, 'Hack', 1, 1)`,
+    ]) {
+      await tx.query('savepoint s')
+      await assert.rejects(tx.query(sql, [lA]), /no existe/)
+      await tx.query('rollback to savepoint s')
+    }
+    assert.equal((await tx.query(`update ligas set nombre = 'Hack', archivada = true where id = $1 returning 1`, [lA])).rows.length, 0)
+    assert.equal((await tx.query(`delete from ligas where id = $1 returning 1`, [lA])).rows.length, 0)
+  })
+  await assert.rejects(como(null, (tx) => tx.query(`select * from previsualizar_renombrado('liga', $1)`, [lA])), /permission denied/)
+  await como(ANA, async (tx) => {
+    assert.equal((await tx.query(`select liga from selecciones where apuesta_id = $1`, [aA])).rows[0].liga, 'liga de ana', 'intacta')
+    await tx.query(`delete from apuestas where id = $1`, [aA])
+    await tx.query(`delete from ligas where id = $1`, [lA])
+  })
+})
+
+test('Borrar una cuenta entera con deportes y ligas en uso sigue funcionando', async () => {
+  const DAVID = '00000000-0000-0000-0000-00000000000d'
+  await db.query(`insert into auth.users (id, email) values ($1, 'david@test')`, [DAVID])
+  await como(DAVID, async (tx) => {
+    const futbol = await idDe(tx, `select id from deportes where nombre = 'Fútbol'`)
+    await tx.query(`insert into ligas (deporte_id, nombre) values ($1, 'Liga David')`, [futbol])
+    await apuestaCon(tx, 'simple', [['Fútbol', 'Liga David']])
+  })
+  await db.query(`delete from auth.users where id = $1`, [DAVID])
+  const { rows } = await db.query(
+    `select (select count(*) from deportes where user_id = $1)::int d, (select count(*) from ligas where user_id = $1)::int l, (select count(*) from selecciones where user_id = $1)::int s`,
+    [DAVID],
+  )
+  assert.deepEqual(rows[0], { d: 0, l: 0, s: 0 })
+})
+
+test('La migración de deportes y ligas se puede pegar dos veces sin errores', async () => {
+  const sql = readFileSync(join(ROOT, 'supabase/migrations/20261108000001_fase3_deportes_ligas.sql'), 'utf8')
+  await db.exec(sql)
+  await db.exec(sql)
+  const { rows } = await db.query(`select count(*)::int n from pg_trigger where tgname in ('deportes_sin_uso', 'ligas_sin_uso')`)
+  assert.equal(rows[0].n, 2)
+})
