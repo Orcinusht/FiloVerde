@@ -61,17 +61,19 @@ archivo o panel ponerlas).
    apuestas (con aviso "Afecta a N selecciones en M apuestas", todo o nada), archivar/recuperar, borrar
    solo sin uso y "Revisar posibles errores". **Verificada en el móvil con la cuenta de email.** Falta
    verificarla en producción con la cuenta de Google (el detector con los datos reales). **Segunda
-   ronda, parte 3: evolución en el tiempo** (rama `fase-3-evolucion`, desde el 2026-11-06; sin
-   migración): Análisis → "Evolución" (beneficio acumulado, caídas desde un máximo, por mes y por día
-   de la semana) y Bankroll → "Evolución del saldo". Pendiente de verificar en el móvil y de fusionar.
-   El resto de la segunda ronda, en Pendiente.
+   ronda, parte 3: evolución en el tiempo, fusionada el 2026-11-06** (rama `fase-3-evolucion`, PR #7;
+   pruebas de GitHub Actions en verde; sin migración): Análisis → "Evolución" (beneficio acumulado,
+   caídas desde un máximo, por mes y por día de la semana) y Bankroll → "Evolución del saldo".
+   **Verificada en el móvil con la cuenta de email.** Falta verificarla en producción con la cuenta
+   de Google. El resto, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, al empezar evolución)
-1. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, tras fusionar evolución)
+1. **Pestaña Gráficas**: selector de casa y una gráfica por segmento, y nuevos periodos Hoy, Ayer y
+   Últimos 7 días.
+2. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
    otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
    aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
    son competiciones distintas.
-2. **Evolución en el tiempo**: hecha en la rama `fase-3-evolucion` (pendiente de verificar y fusionar).
 3. **Importación** (de CSV, para restaurar una copia): los CSV de la copia ya usan los códigos internos
    y los ids para poder hacerla.
 4. **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
@@ -80,6 +82,9 @@ archivo o panel ponerlas).
 5. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
 
 Además:
+- **Verificar en producción con la cuenta de Google** la evolución en el tiempo: curva, caídas, meses
+  y días con calculadora (final = beneficio neto), detalle de una fila, y el saldo en el tiempo (último
+  punto = saldo de la tarjeta, Global y por casa).
 - **Verificar en producción con la cuenta de Google** Deportes y ligas: el detector "Revisar posibles
   errores" con los datos reales (Galatasaray SK - VfB Stuttgart y Deportivo de A Coruña - Osasuna),
   renombrar con aviso y archivar.
@@ -735,7 +740,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -930,3 +935,5 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-06 | Caídas calculadas apuesta a apuesta y desde 0; la curva pasa a un punto por día con más de 60 apuestas | La caída real no se esconde dentro de un día; la gráfica se sigue leyendo con muchas apuestas |
 | 2026-11-06 | Saldo en el tiempo: el dinero de una apuesta se mueve en su fecha; las de fecha futura, hoy | El último punto coincide siempre con el saldo "hasta hoy" de la tarjeta |
 | 2026-11-06 | Mes y día de la semana como segmentos `mes`/`dia` (fuera del selector) para reutilizar el detalle | La fila y su lista salen de la misma fuente: el recuento no puede diferir |
+| 2026-11-06 | **Evolución en el tiempo fusionada en `main`** (rama `fase-3-evolucion`, PR #7) | Sin migración; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google |
+| 2026-11-06 | Siguiente pendiente: pestaña Gráficas (selector de casa, una gráfica por segmento, periodos Hoy, Ayer y Últimos 7 días) | Orden fijado por el usuario, antes de Unir ligas |
