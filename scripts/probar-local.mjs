@@ -1973,13 +1973,106 @@ for (const malo of ['//evil.com', '/%2F%2Fevil.com', '/analisis@evil.com', 'http
 }
 bien('Un ?volver= externo se ignora (vuelve a /apuestas)')
 
+// ---------- Fase 3 · Evolución en el tiempo ----------
+paso('Análisis → Evolución: beneficio acumulado, caídas, meses y días (comparados con la base de datos)')
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+const DIAS_ES = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+const evo = (p) => p.locator('[data-seccion="evolucion"]:visible')
+async function caidasBd(userId, extra = '') {
+  const filas = await sql(`select resultado_economico::bigint r from apuestas where user_id = '${userId}' and estado in ${RESUELTOS}
+    and resultado_economico is not null ${extra} order by fecha, created_at, id`)
+  let acc = 0, pico = 0, max = 0
+  for (const f of filas) { acc += Number(f.r); if (acc > pico) pico = acc; else max = Math.max(max, pico - acc) }
+  return { n: filas.length, final: acc, max, actual: pico - acc }
+}
+await pag.goto(`${APP}/analisis`)
+await evo(pag).waitFor()
+const cAna = await caidasBd(ANA.id)
+const grafBen = evo(pag).locator('[data-grafica="beneficio"]')
+assert.equal(Number(await grafBen.getAttribute('data-ultimo')), eAna.beneficio, 'el final de la curva = beneficio neto')
+assert.equal(cAna.final, eAna.beneficio)
+assert.equal(await valorTarjeta(pag, 'Mayor caída desde un máximo'), eur(cAna.max))
+assert.equal(await valorTarjeta(pag, 'Caída actual desde el máximo'), eur(cAna.actual))
+await evo(pag).getByText('Se usa la fecha de la apuesta (la fecha en que se resolvió no se guarda).', { exact: false }).waitFor()
+// Tocar la gráfica: etiqueta con la fecha y el valor.
+const cajaB = await grafBen.locator('[role="img"]').boundingBox()
+await grafBen.locator('[role="img"]').tap({ position: { x: cajaB.width - 2, y: cajaB.height / 2 } })
+const etq = await grafBen.locator('[data-etiqueta-grafica]').innerText()
+assert.ok(etq.includes(`Acumulado: ${eur(eAna.beneficio, true)}`), etq)
+await foto('85-evolucion')
+bien(`Curva: final ${eur(eAna.beneficio, true)} = beneficio neto; mayor caída ${eur(cAna.max)} y actual ${eur(cAna.actual)} como en la BD; al tocar, fecha y valor`)
+// Meses y días: misma cuenta que la BD (hora de España).
+const mesesBd = await sql(`select to_char(fecha at time zone 'Europe/Madrid', 'YYYY-MM') m, count(*)::int n from apuestas
+  where user_id = '${ANA.id}' and estado in ${RESUELTOS} and resultado_economico is not null group by 1 order by 1 desc`)
+const diasBd = await sql(`select extract(isodow from fecha at time zone 'Europe/Madrid')::int d, count(*)::int n from apuestas
+  where user_id = '${ANA.id}' and estado in ${RESUELTOS} and resultado_economico is not null group by 1 order by 1`)
+const leerFilas = async (tabla) => {
+  const out = []
+  const filas = filasDe(pag, tabla).filter({ visible: true })
+  for (let i = 0; i < (await filas.count()); i++) out.push([(await filas.nth(i).locator('p').first().innerText()).trim(), await numeroDato(filas.nth(i), 'Apuestas')])
+  return out
+}
+assert.deepEqual(await leerFilas('meses'), mesesBd.map((f) => [`${MESES_ES[Number(f.m.slice(5)) - 1]} ${f.m.slice(0, 4)}`, f.n]))
+assert.deepEqual(await leerFilas('dias'), diasBd.map((f) => [DIAS_ES[f.d], f.n]))
+bien(`Por mes (${mesesBd.length}) y por día de la semana (${diasBd.length}): mismas apuestas que la BD en hora de España`)
+// Pulsar un mes y un día: el detalle cuenta lo mismo; abrir una apuesta y volver.
+for (const tabla of ['meses', 'dias']) {
+  await pag.goto(`${APP}/analisis`)
+  const fila = filasDe(pag, tabla).filter({ visible: true }).first()
+  const cifra = await numeroDato(fila, 'Apuestas')
+  const { desde } = await abrirYContar(pag, fila, { esperado: cifra })
+  const urlDet = pag.url()
+  await pag.locator('[data-detalle="lista"] > li a').first().click()
+  await esperarDetalle()
+  await pag.getByRole('link', { name: '← Análisis' }).click()
+  await pag.waitForURL((u) => mismaDir(u, urlDet))
+  await pag.locator('[data-detalle="titulo"]').waitFor()
+  await pag.getByRole('link', { name: '← Análisis' }).click()
+  await pag.waitForURL((u) => mismaDir(u, desde))
+}
+bien('Fila de un mes y de un día: el detalle tiene las mismas apuestas; se abre una y se vuelve con «← Análisis»')
+function mismaDir(a, b) {
+  const [x, y] = [new URL(a), new URL(b)]
+  const orden = (u) => [...u.searchParams].sort().join('&')
+  return x.pathname === y.pathname && orden(x) === orden(y)
+}
+// Periodo: todo cambia con él.
+await pag.goto(`${APP}/analisis`)
+await pag.getByLabel('Periodo', { exact: true }).selectOption('mes')
+await pag.waitForURL(/periodo=mes/)
+const condMes = `and fecha >= (date_trunc('month', now() at time zone 'Europe/Madrid') at time zone 'Europe/Madrid')
+  and fecha < ((date_trunc('month', now() at time zone 'Europe/Madrid') + interval '1 month') at time zone 'Europe/Madrid')`
+const cMes = await caidasBd(ANA.id, condMes)
+if (cMes.n > 0) {
+  await esperar(async () => Number(await evo(pag).locator('[data-grafica="beneficio"]').getAttribute('data-ultimo')) === cMes.final)
+  assert.equal(await valorTarjeta(pag, 'Mayor caída desde un máximo'), eur(cMes.max))
+  assert.equal(await filasDe(pag, 'meses').filter({ visible: true }).count(), 1, 'un solo mes')
+}
+bien(`«Este mes»: la curva acaba en ${eur(cMes.final, true)} y las caídas son las del mes (${cMes.n} resueltas)`)
+// Carla: 1200 resueltas → un punto por día.
+await pagCarla.goto(`${APP}/analisis`)
+const grafCarla = evo(pagCarla).locator('[data-grafica="beneficio"]')
+assert.equal(Number(await grafCarla.getAttribute('data-ultimo')), eCarla.beneficio)
+const diasCarla = (await sql(`select count(distinct (fecha at time zone 'Europe/Madrid')::date)::int n from apuestas where user_id = '${CARLA.id}' and estado in ${RESUELTOS}`))[0].n
+assert.equal(Number(await grafCarla.getAttribute('data-puntos')), diasCarla + 1, 'un punto por día (+ el 0 inicial)')
+const cCarla = await caidasBd(CARLA.id)
+assert.equal(await valorTarjeta(pagCarla, 'Mayor caída desde un máximo'), eur(cCarla.max))
+assert.equal((await leerFilasDe(pagCarla, 'meses')).reduce((s, n) => s + n, 0), 1200)
+async function leerFilasDe(p, tabla) {
+  const filas = filasDe(p, tabla).filter({ visible: true })
+  const out = []
+  for (let i = 0; i < (await filas.count()); i++) out.push(await numeroDato(filas.nth(i), 'Apuestas'))
+  return out
+}
+bien(`Carla: 1200 resueltas → ${diasCarla} puntos diarios, final = beneficio neto, meses suman 1200`)
+
 paso('Análisis: maquetación a 320, 375, 390 y 430 px, modo claro y oscuro')
 for (const ancho of [320, 375, 390, 430]) {
   for (const tema of ['light', 'dark']) {
     const ctx = await navegador.newContext({ ...movil, viewport: { width: ancho, height: 800 }, colorScheme: tema })
     await ctx.addCookies([cookieSesion(ANA)])
     const p = await ctx.newPage()
-    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/bankroll', '/bankroll/nuevo', '/ajustes/casas', '/ajustes/estrategias', '/ajustes/deportes', '/ajustes/deportes/revisar']) {
+    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/analisis/detalle?seg=dia&clave=%231', '/analisis?periodo=ano', '/bankroll', '/bankroll?periodo=30d', '/bankroll/nuevo', '/ajustes/casas', '/ajustes/estrategias', '/ajustes/deportes', '/ajustes/deportes/revisar']) {
       await p.goto(`${APP}${ruta}`, { waitUntil: 'networkidle' })
       const ancho2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
       assert.ok(ancho2 <= 0, `${ruta} a ${ancho}px (${tema}): scroll horizontal de ${ancho2}px`)
@@ -2161,6 +2254,42 @@ assert.equal(csvCarlaBk.filas.length, 1150)
 assert.equal(csvCarlaBk.filas[0].notas, "'@importe", 'protección de fórmulas')
 await ctxCarla2.close()
 bien('Carla: 1150 movimientos (más de 1000), saldos como en la BD y CSV completo')
+
+paso('Bankroll → Evolución del saldo: Global y por casa, periodo, marcas; el último punto = saldo de la tarjeta')
+const grafSaldo = (p) => p.locator('[data-seccion="evolucion-saldo"]:visible [data-grafica="saldo"]')
+const ultimoSaldo = async (p) => Number(await grafSaldo(p).getAttribute('data-ultimo'))
+await pag.goto(`${APP}/bankroll`)
+const eGlob = await esperadoBk(ANA.id)
+assert.equal(await ultimoSaldo(pag), eGlob.saldo, 'Global: último punto = saldo')
+assert.equal(await cifraBk(pag, '[data-bloque="global"]', 'Saldo'), eur(eGlob.saldo))
+assert.ok((await grafSaldo(pag).locator('[data-marca="deposito"]').count()) >= 1, 'marca verde de depósito')
+assert.ok((await grafSaldo(pag).locator('[data-marca="retirada"]').count()) >= 1, 'marca roja de retirada')
+await pag.locator('[data-seccion="evolucion-saldo"]:visible').getByText('Depósito', { exact: true }).waitFor()
+const cajaS = await grafSaldo(pag).locator('[role="img"]').boundingBox()
+await grafSaldo(pag).locator('[role="img"]').tap({ position: { x: cajaS.width - 2, y: cajaS.height / 2 } })
+assert.ok((await grafSaldo(pag).locator('[data-etiqueta-grafica]').innerText()).includes(`Saldo: ${eur(eGlob.saldo)}`))
+await foto('93-bankroll-evolucion')
+await pag.getByLabel('Saldo de', { exact: true }).selectOption(casaBk.id)
+await pag.waitForURL(new RegExp(`evo=${casaBk.id}`))
+const eCasa = await esperadoBk(ANA.id, casaBk.id)
+await esperar(async () => (await ultimoSaldo(pag)) === eCasa.saldo)
+bien(`Global ${eur(eGlob.saldo)} y «${casaBk.nombre}» ${eur(eCasa.saldo)}: el último punto es el saldo de su tarjeta; marcas y etiqueta al tocar`)
+await pag.locator('[data-seccion="evolucion-saldo"]:visible').getByLabel('Periodo', { exact: true }).selectOption('mes')
+await pag.waitForURL(/periodo=mes/)
+assert.ok(pag.url().includes(`evo=${casaBk.id}`), 'se conserva la casa')
+await esperar(async () => (await grafSaldo(pag).getAttribute('data-puntos')) != null)
+assert.equal(await ultimoSaldo(pag), eCasa.saldo, '«Este mes» también acaba en el saldo de hoy')
+// Periodo pasado: parte del saldo anterior y no llega a hoy.
+await pag.goto(`${APP}/bankroll?periodo=personalizado&desde=2020-01-01&hasta=2020-12-31`)
+await pag.locator('[data-seccion="evolucion-saldo"]:visible').getByText(/No hay movimientos ni apuestas resueltas en este periodo|Antes:/).first().waitFor()
+bien('Periodo: «Este mes» conserva la casa y acaba en el saldo; un periodo sin datos lo dice')
+const ctxCarla3 = await navegador.newContext(movil)
+await ctxCarla3.addCookies([cookieSesion(CARLA)])
+const pagCarla3 = await ctxCarla3.newPage()
+await pagCarla3.goto(`${APP}/bankroll`)
+assert.equal(await ultimoSaldo(pagCarla3), (await esperadoBk(CARLA.id)).saldo)
+await ctxCarla3.close()
+bien('Carla (1150 movimientos y 1200 apuestas): la curva acaba en su saldo')
 
 // ---------- Fase 3 · Gestión de casas y estrategias ----------
 paso('Ajustes: casas y estrategias (crear, repetidos, reservados, renombrar, archivar y borrar)')

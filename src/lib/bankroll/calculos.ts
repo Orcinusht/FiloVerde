@@ -30,6 +30,9 @@ export type Movimiento = {
 }
 
 export type ApuestaBankroll = {
+  id?: string
+  fecha?: string // para la curva del saldo (Evolución)
+  created_at?: string
   casa_id: string | null
   estado: string
   importe: number

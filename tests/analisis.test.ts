@@ -427,7 +427,7 @@ test('detalle: el recuento de la lista es IGUAL a la cifra en todos los segmento
   const datos = variado()
   const resueltas = new Set(datos.filter((a) => ['ganada', 'perdida', 'cash_out', 'media_ganada', 'media_perdida'].includes(a.estado)).map((a) => a.id))
   const vistas = new Set<string>()
-  for (const seg of Object.keys(SEGMENTOS) as Segmento[]) {
+  for (const seg of Object.keys(SEGMENTOS) as (keyof typeof SEGMENTOS)[]) {
     const filas = segmentar(datos, seg)
     assert.equal(filas.reduce((s, f) => s + f.n, 0), resueltas.size, `${seg}: cada resuelta en una sola fila`)
     for (const f of filas) {

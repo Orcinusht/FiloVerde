@@ -7,6 +7,7 @@ import {
   esAgrupacionAcierto,
   esColor,
   esSegmento,
+  esSegmentoSelector,
   type AgrupacionAcierto,
   type Color,
   type PeticionDetalle,
@@ -35,8 +36,11 @@ function consulta(p: Params, extra: Record<string, string> = {}): string {
 }
 
 // "/analisis?…" con el mismo periodo, segmento y filtros (sin lo propio del detalle).
+// Si el detalle era de un mes o un día (Evolución), "seg" no es del selector: no se lleva.
 export function enlaceAnalisis(p: Params): string {
-  const s = consulta(p)
+  const q = new URLSearchParams(consulta(p))
+  if (q.has('seg') && !esSegmentoSelector(q.get('seg'))) q.delete('seg')
+  const s = q.toString()
   return s ? `/analisis?${s}` : '/analisis'
 }
 

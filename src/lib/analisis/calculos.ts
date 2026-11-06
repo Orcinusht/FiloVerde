@@ -165,8 +165,22 @@ export const SEGMENTOS = {
   directo: 'Directo',
   precipitada: 'Precipitada',
 } as const
-export type Segmento = keyof typeof SEGMENTOS
-export const esSegmento = (v: unknown): v is Segmento => typeof v === 'string' && v in SEGMENTOS
+// Agrupaciones que solo se usan en Evolución (y en su detalle), no en el selector "Por segmento".
+export const SEGMENTOS_TODOS = { ...SEGMENTOS, mes: 'Mes', dia: 'Día de la semana' } as const
+export type Segmento = keyof typeof SEGMENTOS_TODOS
+export const esSegmento = (v: unknown): v is Segmento => typeof v === 'string' && v in SEGMENTOS_TODOS
+export const esSegmentoSelector = (v: unknown): v is keyof typeof SEGMENTOS => typeof v === 'string' && v in SEGMENTOS
+
+// Mes (AAAA-MM) y día de la semana (1 = lunes … 7 = domingo) de una fecha, en hora de España.
+const fmtMadrid = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' })
+const DIAS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+export function enMadrid(iso: string): { dia: string; mes: string; diaSemana: number } {
+  const p = Object.fromEntries(fmtMadrid.formatToParts(new Date(iso)).map((x) => [x.type, x.value]))
+  return { dia: `${p.year}-${p.month}-${p.day}`, mes: `${p.year}-${p.month}`, diaSemana: DIAS_EN.indexOf(p.weekday) + 1 }
+}
+export const NOMBRE_DIA = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+export const nombreMes = (mes: string) => `${MESES[Number(mes.slice(5, 7)) - 1]} ${mes.slice(0, 4)}`
 
 export const RANGOS_CUOTA = ['Hasta 1,50', '1,51 – 2,00', '2,01 – 3,00', 'Más de 3,00'] as const
 
@@ -216,6 +230,14 @@ export function claveSegmento(a: ApuestaAnalisis, s: Segmento): { clave: string;
       return fijo(!a.en_directo ? 'Pre-partido' : a.viendo_partido ? 'Directo viendo' : 'Directo sin ver')
     case 'precipitada':
       return fijo(a.precipitada ? 'Sí' : 'No')
+    case 'mes': {
+      const { mes } = enMadrid(a.fecha)
+      return { clave: `#${mes}`, texto: nombreMes(mes) }
+    }
+    case 'dia': {
+      const { diaSemana } = enMadrid(a.fecha)
+      return { clave: `#${diaSemana}`, texto: NOMBRE_DIA[diaSemana] }
+    }
   }
 }
 
@@ -358,7 +380,7 @@ export function detalle(apuestas: ApuestaAnalisis[], p: PeticionDetalle): Detall
   if (p.vista === 'seg') {
     const fila = segmentar(apuestas, p.seg).find((f) => f.clave === p.clave)
     if (!fila) return null
-    return { titulo: `${SEGMENTOS[p.seg]}: ${fila.etiqueta}`, etiqueta: fila.etiqueta, ids: fila.ids, n: fila.n }
+    return { titulo: `${SEGMENTOS_TODOS[p.seg]}: ${fila.etiqueta}`, etiqueta: fila.etiqueta, ids: fila.ids, n: fila.n }
   }
   const fila = aciertos(apuestas, p.por, p.tipo).find((f) => f.clave === p.clave)
   if (!fila) return null
