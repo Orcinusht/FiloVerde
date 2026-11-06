@@ -65,26 +65,30 @@ archivo o panel ponerlas).
    pruebas de GitHub Actions en verde; sin migración): Análisis → "Evolución" (beneficio acumulado,
    caídas desde un máximo, por mes y por día de la semana) y Bankroll → "Evolución del saldo".
    **Verificada en el móvil con la cuenta de email.** Falta verificarla en producción con la cuenta
-   de Google. **Segunda ronda, parte 4: pestaña Gráficas** (rama `fase-3-graficas`, desde el
-   2026-11-06; sin migración): pestaña nueva con selector de casa, beneficio acumulado y caídas
-   (movidos desde Análisis) y una gráfica por valor del segmento; periodos Hoy, Ayer y Últimos 7 días
-   en todas las pantallas (fichas); color de la línea del saldo en Bankroll. Pendiente de verificar en
-   el móvil y de fusionar. El resto, en Pendiente.
+   de Google. **Segunda ronda, parte 4: pestaña Gráficas y periodos
+   nuevos, fusionada el 2026-11-06** (rama `fase-3-graficas`, PR #8; pruebas de GitHub Actions en verde;
+   sin migración): pestaña nueva con selector de casa, beneficio acumulado y caídas (movidos desde
+   Análisis) y una gráfica por valor del segmento; periodos Hoy, Ayer y Últimos 7 días en todas las
+   pantallas (fichas); color de la línea del saldo en Bankroll. **Verificada en el móvil con la cuenta
+   de email.** Falta verificarla en producción con la cuenta de Google (35 apuestas). El resto, en
+   Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, al empezar Gráficas)
-1. **Pestaña Gráficas**: hecha en la rama `fase-3-graficas` (pendiente de verificar y fusionar).
-2. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, tras fusionar Gráficas)
+1. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
    otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
    aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
    son competiciones distintas.
-3. **Importación** (de CSV, para restaurar una copia): los CSV de la copia ya usan los códigos internos
+2. **Importación** (de CSV, para restaurar una copia): los CSV de la copia ya usan los códigos internos
    y los ids para poder hacerla.
-4. **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
+3. **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
    de una a otra en una función de la BD; cuidado con los traspasos entre las dos. Solo si aparece un
    duplicado real (la regla de nombre único evita los de mayúsculas, tildes y espacios).
-5. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
+4. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
 
 Además:
+- **Verificar en producción con la cuenta de Google** (35 apuestas) la pestaña Gráficas y los periodos
+  nuevos: final = beneficio neto, cada serie = su fila de Análisis, detalle con el mismo recuento,
+  casa, Hoy / Ayer / 7 días y el color del saldo en Bankroll.
 - **Verificar en producción con la cuenta de Google** la evolución en el tiempo: curva, caídas, meses
   y días con calculadora (final = beneficio neto), detalle de una fila, y el saldo en el tiempo (último
   punto = saldo de la tarjeta, Global y por casa).
@@ -191,11 +195,11 @@ src/
                         dirección; FiltroFechas = fichas de periodo, Selector y Conmutador, usados
                         también en Gráficas y Bankroll). Sección "Evolución": tablas por mes y día y
                         enlace "Ver evolución →" a Gráficas
-      graficas/         pestaña Gráficas (Fase 3): graficas.tsx (servidor: casa, periodo, beneficio
-                        acumulado con caídas y una gráfica por valor del segmento con "Ver más")
         detalle/          las apuestas que forman una fila (segmento o aciertos), con la tarjeta de
                           la lista, Todas/Verdes/Rojas en aciertos y páginas de 50; también las de
                           una serie de Gráficas (con ?casa= y ?volver=/graficas…, "← Gráficas")
+      graficas/         pestaña Gráficas (Fase 3): graficas.tsx (servidor: casa, periodo, beneficio
+                        acumulado con caídas y una gráfica por valor del segmento con "Ver más")
       bankroll/         Fase 3: page.tsx (global, casas, movimientos con filtros) · casa/[id]/ (detalle de
                         una casa; casa/sin = apuestas sin casa) · nuevo/ y [id]/ (formulario: editor.tsx
                         carga, formulario-movimiento.tsx, actions.ts guarda y borra) · piezas.tsx · filtros.tsx
@@ -1004,3 +1008,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-06 | Color de las líneas: verde > 0, rojo < 0, neutro 0, siempre con el valor y su signo al lado (también el saldo de Bankroll, por su variación en el periodo) | El color nunca es el único indicador |
 | 2026-11-06 | `/graficas` deja de redirigir a `/analisis` y pasa a `?volver=` | Es la pestaña nueva; la redirección era temporal (no la guardó ningún navegador) |
 | 2026-11-06 | Sin cambios en `comprobar_rls_en_vivo.sql` | Sin tablas, permisos ni funciones nuevas: solo lecturas con la sesión (el filtro de casa es un filtro más de la consulta, ya cubierta por RLS) |
+| 2026-11-06 | **Pestaña Gráficas y periodos nuevos fusionados en `main`** (rama `fase-3-graficas`, PR #8) | Sin migración; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google (35 apuestas) |
