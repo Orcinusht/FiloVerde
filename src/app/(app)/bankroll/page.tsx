@@ -12,6 +12,7 @@ import { FiltroFechas } from '../analisis/controles'
 import { PERIODOS, esPeriodo, rangoPeriodo } from '@/lib/analisis/calculos'
 import { curvaSaldo, indiceDia, textoDia, type ApuestaSaldo } from '@/lib/analisis/evolucion'
 import { GraficaLinea } from '@/components/grafica-linea'
+import { tonoDe } from '@/lib/graficas/geometria'
 
 export const metadata = { title: 'Bankroll · Filoverde' }
 
@@ -201,6 +202,8 @@ function EvolucionSaldo({
 }) {
   const puntos = curvaSaldo({ movimientos, apuestas, casaId, desdeDia: rango.desdeDia, hastaDia: rango.hastaDia })
   const conMarcas = puntos.some((p) => p.depositos || p.retiradas)
+  // Verde si el saldo acaba el periodo por encima de como lo empezó, rojo si por debajo.
+  const variacion = puntos.length ? puntos[puntos.length - 1].valor - puntos[0].valor : 0
   const grafica = puntos.map((p) => ({
     x: indiceDia(p.dia),
     y: p.valor,
@@ -232,9 +235,18 @@ function EvolucionSaldo({
               titulo={`Evolución del saldo · ${casaId ? (casas.find(([id]) => id === casaId)?.[1] ?? 'Casa') : 'Global'}`}
               puntos={grafica}
               conMarcas={conMarcas}
+              tono={tonoDe(variacion)}
               inicio={`${rango.desdeDia ? 'Antes' : 'Inicio'}: ${eur(puntos[0].valor)}`}
               fin={`${textoDia(puntos[puntos.length - 1].dia)}: ${eur(puntos[puntos.length - 1].valor)}`}
             />
+            <p className="text-sm" data-variacion-saldo={variacion}>
+              Variación en el periodo:{' '}
+              <span
+                className={`font-semibold tabular-nums ${variacion > 0 ? 'text-green-700 dark:text-green-400' : variacion < 0 ? 'text-red-600 dark:text-red-400' : ''}`}
+              >
+                {eur(variacion, true)}
+              </span>
+            </p>
             {conMarcas && (
               <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                 <span className="flex items-center gap-1.5">

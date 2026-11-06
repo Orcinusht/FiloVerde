@@ -65,11 +65,14 @@ archivo o panel ponerlas).
    pruebas de GitHub Actions en verde; sin migración): Análisis → "Evolución" (beneficio acumulado,
    caídas desde un máximo, por mes y por día de la semana) y Bankroll → "Evolución del saldo".
    **Verificada en el móvil con la cuenta de email.** Falta verificarla en producción con la cuenta
-   de Google. El resto, en Pendiente.
+   de Google. **Segunda ronda, parte 4: pestaña Gráficas** (rama `fase-3-graficas`, desde el
+   2026-11-06; sin migración): pestaña nueva con selector de casa, beneficio acumulado y caídas
+   (movidos desde Análisis) y una gráfica por valor del segmento; periodos Hoy, Ayer y Últimos 7 días
+   en todas las pantallas (fichas); color de la línea del saldo en Bankroll. Pendiente de verificar en
+   el móvil y de fusionar. El resto, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, tras fusionar evolución)
-1. **Pestaña Gráficas**: selector de casa y una gráfica por segmento, y nuevos periodos Hoy, Ayer y
-   Últimos 7 días.
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, al empezar Gráficas)
+1. **Pestaña Gráficas**: hecha en la rama `fase-3-graficas` (pendiente de verificar y fusionar).
 2. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
    otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
    aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
@@ -185,10 +188,14 @@ src/
                         Borrar sin uso; revisar/ = "Revisar posibles errores"), cuenta
       analisis/         pantalla Análisis (Fase 2): analisis.tsx (servidor: lee y calcula),
                         controles.tsx (periodo, segmento, orden, tipo y Mercado/Liga; todo en la
-                        dirección; el filtro de fechas lo usa también Bankroll). Incluye la sección
-                        "Evolución". /graficas redirige aquí (next.config.ts)
+                        dirección; FiltroFechas = fichas de periodo, Selector y Conmutador, usados
+                        también en Gráficas y Bankroll). Sección "Evolución": tablas por mes y día y
+                        enlace "Ver evolución →" a Gráficas
+      graficas/         pestaña Gráficas (Fase 3): graficas.tsx (servidor: casa, periodo, beneficio
+                        acumulado con caídas y una gráfica por valor del segmento con "Ver más")
         detalle/          las apuestas que forman una fila (segmento o aciertos), con la tarjeta de
-                          la lista, Todas/Verdes/Rojas en aciertos y páginas de 50
+                          la lista, Todas/Verdes/Rojas en aciertos y páginas de 50; también las de
+                          una serie de Gráficas (con ?casa= y ?volver=/graficas…, "← Gráficas")
       bankroll/         Fase 3: page.tsx (global, casas, movimientos con filtros) · casa/[id]/ (detalle de
                         una casa; casa/sin = apuestas sin casa) · nuevo/ y [id]/ (formulario: editor.tsx
                         carga, formulario-movimiento.tsx, actions.ts guarda y borra) · piezas.tsx · filtros.tsx
@@ -202,7 +209,9 @@ src/
     manifest.ts       datos de instalación de la PWA
   components/         piezas de interfaz reutilizables
     grafica-linea.tsx gráfica de línea propia en SVG (sin librerías): eje en euros, línea del 0,
-                      etiqueta al tocar (y con las flechas), puntos verdes/rojos de depósito/retirada
+                      color según el resultado, eje de fechas y escala compartibles, etiqueta del
+                      punto más cercano al dedo (y con las flechas), puntos de depósito/retirada
+    bottom-nav.tsx    barra inferior de 5 pestañas (Apuestas, Análisis, Gráficas, Bankroll, Ajustes)
     apuestas/         formulario de revisión, flujo de capturas (registro-capturas.tsx: cola con
                       Anterior/Siguiente y resumen), eleccion-apuestas.tsx ("¿Cuáles quieres
                       guardar?"), lista, tarjeta-apuesta.tsx (la tarjeta de la lista, también en el
@@ -226,8 +235,11 @@ src/
                       por mes/día y curva del saldo de Bankroll) · leer.ts (consultas
                       con la sesión, en tandas de 1000) · direccion.ts (enlaces de Análisis y del
                       detalle, y lectura de sus parámetros)
+    graficas/         series.ts (funciones puras: filtro de casa, curva con fecha real, una serie
+                      por valor de segmento = su fila de Análisis, eje común, "Ver más") ·
+                      geometria.ts (sin React: marcas del eje, color, punto más cercano al dedo)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC) · volver-a-lista.ts (vuelta tras
-                      guardar/borrar; `rutaVueltaSegura`: ?volver= solo a /apuestas, /analisis… o /bankroll…)
+                      guardar/borrar; `rutaVueltaSegura`: ?volver= solo a /apuestas, /analisis…, /graficas…, /bankroll… o /ajustes…)
     bankroll/         calculos.ts (funciones puras: saldos por casa y global, ROI, validación del
                       movimiento y su fecha) · leer.ts (casas, movimientos y apuestas, en tandas de 1000)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
@@ -241,7 +253,7 @@ supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
 tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts) + copia en CSV (exportar.test.ts)
                       + análisis (analisis.test.ts) + bankroll (bankroll.test.ts) + casas y estrategias (opciones.test.ts)
-                      + deportes y ligas (catalogo.test.ts) + evolución en el tiempo (evolucion.test.ts)
+                      + deportes y ligas (catalogo.test.ts) + evolución en el tiempo (evolucion.test.ts) + gráficas (graficas.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -502,11 +514,55 @@ del usuario; la validación se repite en el servidor y la BD también lo impide.
 (ajustes negativos como número), casa, casa_destino, notas (protegidas contra fórmulas), creada y
 modificada; mismo formato que los otros archivos.
 
+## Pestaña Gráficas (Fase 3, segunda ronda, parte 4)
+
+Pantalla `/graficas` (pestaña nueva; antes `/graficas` redirigía a Análisis). Cálculos en
+`src/lib/graficas/series.ts` y `geometria.ts` (funciones puras, probadas en `tests/graficas.test.ts`);
+lectura con `leerApuestasAnalisis` (servidor, sesión del usuario, tandas de 1000). Sin migración.
+Error → mensaje en español y `[graficas:leer]` al log.
+
+- **Barra inferior de 5 pestañas** (Apuestas · Análisis · Gráficas · Bankroll · Ajustes): 5 columnas
+  iguales (64 px de ancho a 320 px), 64 px de alto, icono de 24 px y texto de 11 px. El botón de subir
+  captura sigue en la cabecera de Apuestas.
+- **Filtros en la dirección**: `?casa=` (vacío = todas; un id; `sin` = "Sin casa", que solo sale si hay
+  apuestas sin casa en el periodo; las archivadas aparecen marcadas), periodo (fichas), `seg` (por
+  defecto Rango de cuota; sin "Casa" si hay una casa elegida), `orden` (`n` por defecto o
+  `beneficio`), `escala` (`propia` por defecto o `misma`) y `mas` ("Ver más").
+- **Beneficio acumulado** (movido desde Análisis): mismas reglas que "Evolución" (apuesta a apuesta;
+  por día con más de 60; caídas desde el 0 inicial), respetando la casa. Junto a la gráfica, el final
+  con signo. **Color de la línea**: verde si el final > 0, rojo si < 0, neutro si 0 (`tonoDe`); el color
+  nunca va solo.
+- **Una gráfica por valor del segmento** (los 9 de Análisis, con "Varios", "Sin dato", "Sin casa"…):
+  cada serie son las apuestas de su fila de `segmentar` (los MISMOS ids), así que su beneficio final es
+  el de su fila en Análisis → Por segmento (con casa "Todas"). Cabecera: nombre, nº, beneficio con
+  signo, yield, mayor caída y "Muestra pequeña" (n < 10). Las 8 primeras y "Ver más" de 8 en 8 (el
+  servidor solo calcula y envía las que se ven). **Eje de fechas común** a todas: de las 00:00
+  (España) del día de la primera apuesta resuelta (con esa casa y periodo) a la última; cada punto en
+  su fecha real. "Misma escala" usa el mínimo y el máximo de las series visibles (con el 0).
+- **Tocar** elige el punto **más cercano al dedo** (en horizontal y vertical, en píxeles), así se
+  distinguen varias apuestas del mismo día; la etiqueta da fecha y HORA, "apuesta k de N" y el valor,
+  y si hay otros puntos casi pegados dice "(2 de 3 aquí…)". Con las flechas se recorren uno a uno.
+- **Cabecera → detalle** (`/analisis/detalle` con `casa` y `volver=/graficas?…`): misma lista e igual
+  recuento que la cabecera; "← Gráficas" vuelve como estaba (con el periodo que tenga el detalle).
+- **Análisis**: sin la gráfica ni las dos tarjetas de caída; se quedan "Por mes" y "Por día de la
+  semana" con "Ver evolución →" (a Gráficas con el mismo periodo).
+
+**Periodos** (todas las pantallas con filtro: Análisis, detalle, Gráficas y Bankroll): Hoy, Ayer,
+Últimos 7 días (contando hoy), Este mes, Últimos 30 días, Este año, Todo y Personalizado, con días
+naturales de **España** (los días del cambio de hora tienen 23 o 25 horas). Fichas con desplazamiento
+horizontal (44 px de alto; la elegida en verde y centrada). Las direcciones antiguas (`?periodo=mes`…)
+siguen valiendo. Cambiar el periodo vuelve a la primera página y quita "Ver más".
+
+**Bankroll → "Evolución del saldo"**: la línea es verde si el saldo acaba el periodo por encima del
+punto inicial, roja si por debajo y neutra si igual, con "Variación en el periodo" escrita con signo.
+
 ## Evolución en el tiempo (Fase 3, segunda ronda, parte 3)
 
 Cálculos en `src/lib/analisis/evolucion.ts` (funciones puras, probadas en `tests/evolucion.test.ts`).
 Sin migración: usa la fecha de la apuesta (la de resolución no se guarda; lo dice un aviso fijo).
 
+- **Desde el 2026-11-06 la gráfica y las caídas están en la pestaña Gráficas** (ver arriba); en
+  Análisis quedan las tablas por mes y por día.
 - **Análisis → "Evolución"** (respeta el filtro de fechas): **beneficio acumulado** con un punto por
   apuesta resuelta (orden: fecha, creación, id) empezando en 0, o un punto por día (hora de España,
   valor al final del día) con más de 60; al tocar, fecha y valor; el final = "Beneficio neto".
@@ -522,7 +578,7 @@ Sin migración: usa la fecha de la apuesta (la de resolución no se guarda; lo d
   apostado, yield ni acierto. Resultado 0: fuera del acierto, dentro del apostado y el yield.
   División por cero → "—".
 - **Bankroll → "Evolución del saldo"**: selector Global / cada casa (`?evo=`, por defecto Global) y
-  periodo (`?periodo=`, `desde`, `hasta`: Todo, Este mes, Últimos 30 días, Este año, Personalizado).
+  periodo (`?periodo=`, `desde`, `hasta`; desde el 2026-11-06 también Hoy, Ayer y Últimos 7 días).
   Un punto por día con movimientos o apuestas: parte del saldo acumulado antes del periodo (punto
   inicial, el día anterior) y suma movimientos y resultados de apuestas resueltas el día de su fecha.
   Las apuestas con fecha futura suman **hoy** y la curva acaba hoy (o en el último día de un periodo
@@ -540,8 +596,8 @@ apuestas resueltas y pendientes del periodo (las anuladas no se leen), en tandas
 fijo (fecha, creación, id), sus selecciones (por lotes de 150 ids) y los nombres de casa y
 estrategia. Error → mensaje en español y `[analisis:leer]` al log. Sin migración.
 
-- **Filtro de fechas** (en la dirección: `?periodo=mes|30d|ano|personalizado&desde=&hasta=`): Todo,
-  Este mes, Últimos 30 días (contando hoy), Este año y Personalizado (los dos días incluidos; al
+- **Filtro de fechas** (en la dirección: `?periodo=hoy|ayer|7d|mes|30d|ano|personalizado&desde=&hasta=`): Hoy,
+  Ayer, Últimos 7 días, Este mes, Últimos 30 días (contando hoy), Este año, Todo y Personalizado (los dos días incluidos; al
   revés se dan la vuelta). Por `apuestas.fecha`, con los días de **España**. Se filtra en la
   consulta. **Todo** respeta el filtro: resumen, "En juego", rachas, segmentos y aciertos.
 - **Resueltas** = `ganada`, `perdida`, `cash_out`, `media_ganada`, `media_perdida` con resultado
@@ -589,7 +645,7 @@ estrategia. Error → mensaje en español y `[analisis:leer]` al log. Sin migrac
   del detalle). "← Análisis" y guardar o borrar en la apuesta vuelven al mismo sitio (sin el aviso
   breve, que es de la lista). `lib/analisis/direccion.ts` construye y lee las direcciones
   (URLSearchParams codifica tildes, espacios y símbolos).
-- **`?volver=` seguro** (`rutaVueltaSegura`): solo `/apuestas` o `/analisis` seguido de nada, "/" o
+- **`?volver=` seguro** (`rutaVueltaSegura`): solo `/apuestas` o `/analisis` (y `/graficas`, `/bankroll`, `/ajustes`) seguido de nada, "/" o
   "/" + minúsculas, cifras y guiones, y después opcionalmente "?…". Rechaza `//dominio`, `/\dominio`,
   `/analisisx`, `/analisis@dominio`, sus versiones con `%2F`/`%5C` y cualquier dirección externa
   (si no vale, vuelve a `/apuestas`).
@@ -740,7 +796,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -937,3 +993,14 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-06 | Mes y día de la semana como segmentos `mes`/`dia` (fuera del selector) para reutilizar el detalle | La fila y su lista salen de la misma fuente: el recuento no puede diferir |
 | 2026-11-06 | **Evolución en el tiempo fusionada en `main`** (rama `fase-3-evolucion`, PR #7) | Sin migración; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google |
 | 2026-11-06 | Siguiente pendiente: pestaña Gráficas (selector de casa, una gráfica por segmento, periodos Hoy, Ayer y Últimos 7 días) | Orden fijado por el usuario, antes de Unir ligas |
+| 2026-11-06 | **Pestaña Gráficas** en la rama `fase-3-graficas` (sin migración) | Ver la evolución del beneficio por casa y por cada valor de un segmento |
+| 2026-11-06 | Barra inferior de 5 pestañas iguales con texto de 11 px | Cabe de 320 a 430 px con zonas táctiles de 64 × 64 px; el botón de captura está en la cabecera de Apuestas |
+| 2026-11-06 | Filtro de periodo como fichas con desplazamiento horizontal (componente único) | Un toque para cambiar y se ve el elegido; 8 opciones no caben en una fila |
+| 2026-11-06 | En Gráficas cada punto va en su fecha real y todas las series comparten el eje de fechas | Comparar de verdad entre gráficas; el eje va de la primera a la última apuesta (no del periodo entero) para no aplastarlas |
+| 2026-11-06 | Al tocar se elige el punto más cercano al dedo en x e y, con "k de N aquí" si están casi pegados | Varias apuestas el mismo día quedan en la misma vertical; la etiqueta lleva fecha y hora |
+| 2026-11-06 | Una serie = las apuestas de su fila de `segmentar` (mismos ids) | Su beneficio final no puede diferir del de Análisis |
+| 2026-11-06 | "Ver más" en la dirección (`?mas=`) y el servidor calcula solo las series visibles | Fluido en el móvil con más de 1000 apuestas; recargar o volver mantiene lo visto |
+| 2026-11-06 | Gráfica de beneficio acumulado y caídas movidas de Análisis a Gráficas | Una sola pantalla para la evolución; Análisis queda con cifras y tablas |
+| 2026-11-06 | Color de las líneas: verde > 0, rojo < 0, neutro 0, siempre con el valor y su signo al lado (también el saldo de Bankroll, por su variación en el periodo) | El color nunca es el único indicador |
+| 2026-11-06 | `/graficas` deja de redirigir a `/analisis` y pasa a `?volver=` | Es la pestaña nueva; la redirección era temporal (no la guardó ningún navegador) |
+| 2026-11-06 | Sin cambios en `comprobar_rls_en_vivo.sql` | Sin tablas, permisos ni funciones nuevas: solo lecturas con la sesión (el filtro de casa es un filtro más de la consulta, ya cubierta por RLS) |

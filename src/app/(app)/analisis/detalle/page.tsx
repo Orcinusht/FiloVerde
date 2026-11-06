@@ -8,7 +8,9 @@ import { registrarError, usuarioActual } from '@/lib/server/capturas'
 import type { FilaApuesta } from '@/lib/server/datos'
 import { leerApuestasAnalisis } from '@/lib/analisis/leer'
 import { PERIODOS, detalle, esPeriodo, rangoPeriodo, type ApuestaAnalisis, type Color } from '@/lib/analisis/calculos'
-import { enlaceAnalisis, enlaceDetalleAcierto, enlaceDetalleSegmento, leerPeticionDetalle } from '@/lib/analisis/direccion'
+import { enlaceDetalleAcierto, enlaceDetalleSegmento, leerPeticionDetalle, vueltaDetalle } from '@/lib/analisis/direccion'
+import { leerCasa } from '@/lib/graficas/series'
+import { FiltroFechas } from '../controles'
 import { NOMBRE_TIPO, esTipoApuesta, type EstadoApuesta, type TipoApuesta } from '@/lib/apuestas/estados'
 
 export const metadata = { title: 'Detalle · Análisis · Filoverde' }
@@ -27,7 +29,7 @@ export default function Page({ searchParams }: PageProps<'/analisis/detalle'>) {
       <PageHeader
         title="Detalle"
         accion={
-          <Suspense fallback={<Volver href="/analisis" />}>
+          <Suspense fallback={<Volver href="/analisis" texto="← Análisis" />}>
             <VolverAAnalisis searchParams={searchParams} />
           </Suspense>
         }
@@ -39,14 +41,16 @@ export default function Page({ searchParams }: PageProps<'/analisis/detalle'>) {
   )
 }
 
+// "← Análisis", o "← Gráficas" si el detalle se abrió desde allí.
 async function VolverAAnalisis({ searchParams }: { searchParams: Busqueda }) {
-  return <Volver href={enlaceAnalisis(await searchParams)} />
+  const v = vueltaDetalle(await searchParams)
+  return <Volver href={v.href} texto={v.texto} />
 }
 
-function Volver({ href }: { href: string }) {
+function Volver({ href, texto }: { href: string; texto: string }) {
   return (
     <Link href={href} className="flex h-11 items-center px-2 text-sm font-semibold text-muted">
-      ← Análisis
+      {texto}
     </Link>
   )
 }
@@ -66,7 +70,7 @@ function Aviso({ children, volver }: { children: React.ReactNode; volver: string
     <div role="alert" className="mx-4 mt-4 space-y-2 rounded-2xl border border-border bg-surface p-4 text-sm">
       <p>{children}</p>
       <Link href={volver} className="inline-flex h-11 items-center font-semibold text-brand">
-        Volver al análisis
+        Volver
       </Link>
     </div>
   )
@@ -77,7 +81,8 @@ const plural = (n: number, una: string, varias: string) => `${n} ${n === 1 ? una
 async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
   const sp = await searchParams
   await connection() // datos del momento: nunca se prerenderizan
-  const volver = enlaceAnalisis(sp)
+  const volver = vueltaDetalle(sp).href
+  const casa = leerCasa(uno(sp.casa)) // solo desde Gráficas: '' = todas
   const peticion = leerPeticionDetalle(sp)
   if (!peticion) return <Aviso volver={volver}>Esta dirección no corresponde a ninguna fila del análisis.</Aviso>
   const periodo = esPeriodo(uno(sp.periodo)) ? uno(sp.periodo) : 'todo'
@@ -91,7 +96,7 @@ async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
     const supabase = await createClient()
     const userId = await usuarioActual(supabase)
     if (!userId) fallo = 'sesion'
-    else apuestas = await leerApuestasAnalisis(supabase, userId, rango)
+    else apuestas = await leerApuestasAnalisis(supabase, userId, rango, casa)
   } catch (e) {
     registrarError('analisis:detalle', e)
     fallo = 'error'
@@ -101,7 +106,15 @@ async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
 
   // Mismo cálculo que la tabla de Análisis: la lista y la cifra no pueden diferir.
   const d = detalle(apuestas, peticion)
-  if (!d) return <Aviso volver={volver}>No hay apuestas en esta fila con el periodo y los filtros elegidos.</Aviso>
+  if (!d)
+    return (
+      <>
+        <div className="px-4 pt-2">
+          <FiltroFechas periodo={rango.periodo} desde={rango.desdeDia} hasta={rango.hastaDia} periodos={PERIODOS} />
+        </div>
+        <Aviso volver={volver}>No hay apuestas en esta fila con el periodo y los filtros elegidos.</Aviso>
+      </>
+    )
 
   const porId = new Map(apuestas.map((a) => [a.id, a]))
   const total = d.ids.length
@@ -123,6 +136,7 @@ async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
 
   return (
     <div className="space-y-3 px-4 pb-6 pt-2">
+      <FiltroFechas periodo={rango.periodo} desde={rango.desdeDia} hasta={rango.hastaDia} periodos={PERIODOS} />
       <div className="space-y-1 rounded-2xl border border-border bg-surface p-3">
         <p className="break-words text-base font-semibold" data-detalle="titulo">
           {d.titulo}
