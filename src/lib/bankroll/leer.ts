@@ -41,7 +41,7 @@ export async function leerApuestasBankroll(supabase: SupabaseClient, userId: str
   const filas = await leerTodo<ApuestaBankroll & { id: string }>(async (desde, hasta) => {
     const { data, error } = await supabase
       .from('apuestas')
-      .select('id, casa_id, estado, importe, resultado_economico')
+      .select('id, fecha, created_at, casa_id, estado, importe, resultado_economico')
       .eq('user_id', userId)
       .in('estado', ['ganada', 'perdida', 'cash_out', 'media_ganada', 'media_perdida', 'pendiente'])
       .order('fecha')
@@ -52,6 +52,9 @@ export async function leerApuestasBankroll(supabase: SupabaseClient, userId: str
     return (data ?? []) as unknown as (ApuestaBankroll & { id: string })[]
   })
   return filas.map((a) => ({
+    id: a.id,
+    fecha: a.fecha,
+    created_at: a.created_at,
     casa_id: a.casa_id,
     estado: a.estado,
     importe: Number(a.importe),

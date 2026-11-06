@@ -6,8 +6,12 @@ import { createClient } from '@/lib/supabase/server'
 import { registrarError, usuarioActual } from '@/lib/server/capturas'
 import { leerTodoBankroll } from '@/lib/bankroll/leer'
 import { NOMBRE_MOVIMIENTO, SIN_CASA, TIPOS_MOVIMIENTO, calcularBankroll, esTipoMovimiento } from '@/lib/bankroll/calculos'
-import { AvisoError, BloqueCifras, ListaMovimientos, Paginacion, TarjetaCasa } from './piezas'
+import { AvisoError, BloqueCifras, eur, ListaMovimientos, Paginacion, TarjetaCasa } from './piezas'
 import { FiltroDireccion } from './filtros'
+import { FiltroFechas } from '../analisis/controles'
+import { PERIODOS, esPeriodo, rangoPeriodo } from '@/lib/analisis/calculos'
+import { curvaSaldo, indiceDia, textoDia, type ApuestaSaldo } from '@/lib/analisis/evolucion'
+import { GraficaLinea } from '@/components/grafica-linea'
 
 export const metadata = { title: 'Bankroll · Filoverde' }
 
@@ -70,8 +74,14 @@ async function Bankroll({ searchParams }: { searchParams: Busqueda }) {
   const pagina = Math.max(0, Math.min(10000, Number.parseInt(uno(sp.pagina) || '0', 10) || 0))
   const filtrados = movimientos.filter((m) => (!casa || m.casa_id === casa || m.casa_destino_id === casa) && (!tipo || m.tipo === tipo))
   const visibles = filtrados.slice(pagina * POR_PAGINA, (pagina + 1) * POR_PAGINA)
+  // Evolución del saldo: Global o una casa, en el periodo elegido (en la dirección).
+  const evo = porId.has(uno(sp.evo)) ? uno(sp.evo) : ''
+  const periodo = esPeriodo(uno(sp.periodo)) ? uno(sp.periodo) : 'todo'
+  const rango = rangoPeriodo(periodo as keyof typeof PERIODOS, uno(sp.desde), uno(sp.hasta))
+
   const enlaceLista = (p: number) => {
     const q = new URLSearchParams()
+    for (const k of ['evo', 'periodo', 'desde', 'hasta']) if (uno(sp[k])) q.set(k, uno(sp[k]))
     if (casa) q.set('casa', casa)
     if (tipo) q.set('tipo', tipo)
     if (p > 0) q.set('pagina', String(p))
@@ -101,6 +111,14 @@ async function Bankroll({ searchParams }: { searchParams: Busqueda }) {
           entre casas no cambian el global). ROI = beneficio de apuestas ÷ total depositado.
         </p>
       </section>
+
+      <EvolucionSaldo
+        movimientos={movimientos}
+        apuestas={apuestas.filter((a) => a.id && a.fecha && a.created_at) as ApuestaSaldo[]}
+        casaId={evo || null}
+        casas={casas.map((c) => [c.id, c.nombre] as [string, string])}
+        rango={rango}
+      />
 
       <section aria-labelledby="t-casas" className="space-y-2">
         <h2 id="t-casas" className="text-sm font-semibold uppercase tracking-wide text-muted">
@@ -165,5 +183,76 @@ async function Bankroll({ searchParams }: { searchParams: Busqueda }) {
         </Link>
       </section>
     </div>
+  )
+}
+
+function EvolucionSaldo({
+  movimientos,
+  apuestas,
+  casaId,
+  casas,
+  rango,
+}: {
+  movimientos: Parameters<typeof curvaSaldo>[0]['movimientos']
+  apuestas: ApuestaSaldo[]
+  casaId: string | null
+  casas: [string, string][]
+  rango: ReturnType<typeof rangoPeriodo>
+}) {
+  const puntos = curvaSaldo({ movimientos, apuestas, casaId, desdeDia: rango.desdeDia, hastaDia: rango.hastaDia })
+  const conMarcas = puntos.some((p) => p.depositos || p.retiradas)
+  const grafica = puntos.map((p) => ({
+    x: indiceDia(p.dia),
+    y: p.valor,
+    deposito: p.depositos > 0,
+    retirada: p.retiradas > 0,
+    texto: [
+      p.inicial ? (rango.desdeDia ? 'Saldo antes del periodo' : 'Antes del primer movimiento') : textoDia(p.dia),
+      `Saldo: ${eur(p.valor)}`,
+      p.depositos ? `Depósitos: ${eur(p.depositos, true)}` : '',
+      p.retiradas ? `Retiradas: ${eur(-p.retiradas, true)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  }))
+  return (
+    <section aria-labelledby="t-evolucion-saldo" className="space-y-2" data-seccion="evolucion-saldo">
+      <h2 id="t-evolucion-saldo" className="text-sm font-semibold uppercase tracking-wide text-muted">
+        Evolución del saldo
+      </h2>
+      <FiltroDireccion nombre="evo" etiqueta="Saldo de" valor={casaId ?? ''} opciones={[['', 'Global'], ...casas]} />
+      <FiltroFechas periodo={rango.periodo} desde={rango.desdeDia} hasta={rango.hastaDia} periodos={PERIODOS} />
+      <div className="space-y-2 rounded-2xl border border-border bg-surface p-3">
+        {puntos.length === 0 ? (
+          <p className="text-sm text-muted">No hay movimientos ni apuestas resueltas {rango.periodo === 'todo' ? 'todavía' : 'en este periodo'}.</p>
+        ) : (
+          <>
+            <GraficaLinea
+              id="saldo"
+              titulo={`Evolución del saldo · ${casaId ? (casas.find(([id]) => id === casaId)?.[1] ?? 'Casa') : 'Global'}`}
+              puntos={grafica}
+              conMarcas={conMarcas}
+              inicio={`${rango.desdeDia ? 'Antes' : 'Inicio'}: ${eur(puntos[0].valor)}`}
+              fin={`${textoDia(puntos[puntos.length - 1].dia)}: ${eur(puntos[puntos.length - 1].valor)}`}
+            />
+            {conMarcas && (
+              <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-green-600 dark:bg-green-400" aria-hidden="true" /> Depósito
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-red-600 dark:bg-red-400" aria-hidden="true" /> Retirada
+                </span>
+              </p>
+            )}
+          </>
+        )}
+      </div>
+      <p className="text-xs text-muted">
+        Un punto por día. Parte del saldo acumulado antes del periodo y suma movimientos y resultados de apuestas resueltas en su
+        fecha (las de fecha futura, hoy). En el global los traspasos no cuentan; las apuestas sin casa, solo en el global. Con
+        «Todo», el último punto es el saldo de hoy.
+      </p>
+    </section>
   )
 }

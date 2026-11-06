@@ -1,14 +1,15 @@
 'use client'
 
-import { useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 
-// Controles de la pantalla Análisis. Todo se guarda en la dirección (se puede recargar o volver
+// Controles de Análisis (y del filtro de fechas de Bankroll). Todo se guarda en la dirección (se puede recargar o volver
 // atrás sin perderlo) y el servidor recalcula con lo elegido.
 
 function useIr() {
   const router = useRouter()
   const sp = useSearchParams()
+  const ruta = usePathname()
   return (cambios: Record<string, string>) => {
     const q = new URLSearchParams(sp.toString())
     for (const [k, v] of Object.entries(cambios)) {
@@ -16,7 +17,7 @@ function useIr() {
       else q.delete(k)
     }
     const s = q.toString()
-    router.replace(s ? `/analisis?${s}` : '/analisis', { scroll: false })
+    router.replace(s ? `${ruta}?${s}` : ruta, { scroll: false })
   }
 }
 

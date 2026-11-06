@@ -60,16 +60,18 @@ archivo o panel ponerlas).
    verde; migración `20261108000001` **aplicada** en Supabase): renombrar en el catálogo y en las
    apuestas (con aviso "Afecta a N selecciones en M apuestas", todo o nada), archivar/recuperar, borrar
    solo sin uso y "Revisar posibles errores". **Verificada en el móvil con la cuenta de email.** Falta
-   verificarla en producción con la cuenta de Google (el detector con los datos reales). El resto de
-   la segunda ronda, en Pendiente.
+   verificarla en producción con la cuenta de Google (el detector con los datos reales). **Segunda
+   ronda, parte 3: evolución en el tiempo** (rama `fase-3-evolucion`, desde el 2026-11-06; sin
+   migración): Análisis → "Evolución" (beneficio acumulado, caídas desde un máximo, por mes y por día
+   de la semana) y Bankroll → "Evolución del saldo". Pendiente de verificar en el móvil y de fusionar.
+   El resto de la segunda ronda, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, tras fusionar deportes y ligas)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, al empezar evolución)
 1. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
    otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
    aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
    son competiciones distintas.
-2. **Evolución en el tiempo** (Fase 3, segunda ronda): beneficio acumulado, evolución del saldo,
-   rendimiento por mes y por día de la semana, drawdown.
+2. **Evolución en el tiempo**: hecha en la rama `fase-3-evolucion` (pendiente de verificar y fusionar).
 3. **Importación** (de CSV, para restaurar una copia): los CSV de la copia ya usan los códigos internos
    y los ids para poder hacerla.
 4. **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
@@ -178,7 +180,8 @@ src/
                         Borrar sin uso; revisar/ = "Revisar posibles errores"), cuenta
       analisis/         pantalla Análisis (Fase 2): analisis.tsx (servidor: lee y calcula),
                         controles.tsx (periodo, segmento, orden, tipo y Mercado/Liga; todo en la
-                        dirección). /graficas redirige aquí (next.config.ts)
+                        dirección; el filtro de fechas lo usa también Bankroll). Incluye la sección
+                        "Evolución". /graficas redirige aquí (next.config.ts)
         detalle/          las apuestas que forman una fila (segmento o aciertos), con la tarjeta de
                           la lista, Todas/Verdes/Rojas en aciertos y páginas de 50
       bankroll/         Fase 3: page.tsx (global, casas, movimientos con filtros) · casa/[id]/ (detalle de
@@ -193,6 +196,8 @@ src/
     api/diagnostico/  comprueba la configuración de Supabase (sin mostrar claves)
     manifest.ts       datos de instalación de la PWA
   components/         piezas de interfaz reutilizables
+    grafica-linea.tsx gráfica de línea propia en SVG (sin librerías): eje en euros, línea del 0,
+                      etiqueta al tocar (y con las flechas), puntos verdes/rojos de depósito/retirada
     apuestas/         formulario de revisión, flujo de capturas (registro-capturas.tsx: cola con
                       Anterior/Siguiente y resumen), eleccion-apuestas.tsx ("¿Cuáles quieres
                       guardar?"), lista, tarjeta-apuesta.tsx (la tarjeta de la lista, también en el
@@ -211,7 +216,9 @@ src/
     exportar/         csv.ts (formato: celdas, columnas, lectura en tandas) · leer.ts (consultas
                       con la sesión del usuario; sin claves, se prueba con un cliente falso)
     analisis/         calculos.ts (funciones puras: métricas, segmentos y aciertos con los ids de
-                      sus apuestas, detalle, rachas, periodos, MUESTRA_MINIMA) · leer.ts (consultas
+                      sus apuestas, detalle, rachas, periodos, MUESTRA_MINIMA, mes y día de la semana en hora
+                      de España) · evolucion.ts (funciones puras: beneficio acumulado, caídas,
+                      por mes/día y curva del saldo de Bankroll) · leer.ts (consultas
                       con la sesión, en tandas de 1000) · direccion.ts (enlaces de Análisis y del
                       detalle, y lectura de sus parámetros)
     navegador/        reducir-imagen.ts (1.600 px, JPEG, HEIC) · volver-a-lista.ts (vuelta tras
@@ -229,7 +236,7 @@ supabase/migrations/  esquema de la base de datos (SQL, en orden)
 supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no deja datos)
 tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts) + copia en CSV (exportar.test.ts)
                       + análisis (analisis.test.ts) + bankroll (bankroll.test.ts) + casas y estrategias (opciones.test.ts)
-                      + deportes y ligas (catalogo.test.ts)
+                      + deportes y ligas (catalogo.test.ts) + evolución en el tiempo (evolucion.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -489,6 +496,35 @@ del usuario; la validación se repite en el servidor y la BD también lo impide.
 **CSV**: Ajustes → "Descargar bankroll (CSV)" (`/api/exportar/bankroll`): id, fecha, tipo, importe
 (ajustes negativos como número), casa, casa_destino, notas (protegidas contra fórmulas), creada y
 modificada; mismo formato que los otros archivos.
+
+## Evolución en el tiempo (Fase 3, segunda ronda, parte 3)
+
+Cálculos en `src/lib/analisis/evolucion.ts` (funciones puras, probadas en `tests/evolucion.test.ts`).
+Sin migración: usa la fecha de la apuesta (la de resolución no se guarda; lo dice un aviso fijo).
+
+- **Análisis → "Evolución"** (respeta el filtro de fechas): **beneficio acumulado** con un punto por
+  apuesta resuelta (orden: fecha, creación, id) empezando en 0, o un punto por día (hora de España,
+  valor al final del día) con más de 60; al tocar, fecha y valor; el final = "Beneficio neto".
+  **Mayor caída desde un máximo** (€, con fechas de inicio y fin) y **caída actual desde el máximo**,
+  apuesta a apuesta; el 0 inicial es el primer máximo ("Inicio del periodo"); solo ganancias →
+  0,00 € ("Sin caídas"); sin datos → "—". **Por mes** (del más reciente) y **por día de la semana**
+  (lunes a domingo), en hora de España: apuestas, apostado, beneficio, yield, acierto y "Muestra
+  pequeña" (n < 10). Son segmentos `mes`/`dia` de `calculos.ts` (`SEGMENTOS_TODOS`), fuera del
+  selector "Por segmento": cada fila abre `/analisis/detalle?seg=mes|dia` con las mismas apuestas;
+  "← Análisis" vuelve sin ese `seg`.
+- **Reglas**: solo resueltas con resultado (ganada, perdida, cash_out, media_ganada, media_perdida);
+  anuladas y pendientes fuera. Con crédito: suman al beneficio acumulado y al saldo, pero no al
+  apostado, yield ni acierto. Resultado 0: fuera del acierto, dentro del apostado y el yield.
+  División por cero → "—".
+- **Bankroll → "Evolución del saldo"**: selector Global / cada casa (`?evo=`, por defecto Global) y
+  periodo (`?periodo=`, `desde`, `hasta`: Todo, Este mes, Últimos 30 días, Este año, Personalizado).
+  Un punto por día con movimientos o apuestas: parte del saldo acumulado antes del periodo (punto
+  inicial, el día anterior) y suma movimientos y resultados de apuestas resueltas el día de su fecha.
+  Las apuestas con fecha futura suman **hoy** y la curva acaba hoy (o en el último día de un periodo
+  pasado), así que con "Todo" el último punto = el saldo de la tarjeta. Traspasos: no mueven el
+  Global, sí cada casa. Apuestas sin casa: solo en el Global. Puntos verdes (depósito) y rojos
+  (retirada) con leyenda y en la etiqueta al tocar. La lectura de apuestas de Bankroll trae ahora
+  también id, fecha y creación.
 
 ## Análisis (Fase 2)
 
@@ -889,3 +925,8 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-06 | `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (71 en total); la versión de main sigue pasando con la migración | Renombrar con aviso, en uso, reservados y que otra cuenta no vea ni toque nada |
 | 2026-11-06 | **Deportes y ligas fusionado en `main`** (rama `fase-3-deportes-ligas`, PR #6) | Migración `20261108000001` aplicada en Supabase; verificado en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarlo en producción con la cuenta de Google (el detector con los datos reales) |
 | 2026-11-06 | El nombre `20261108000001` de la migración no es una fecha real | Solo marca el orden; ya está aplicada y no se renombra |
+| 2026-11-06 | **Evolución en el tiempo empezada** en la rama `fase-3-evolucion` (sin migración) | Beneficio acumulado, caídas, por mes y día, y saldo en el tiempo; con la fecha de la apuesta |
+| 2026-11-06 | Gráficas en SVG propio (`components/grafica-linea.tsx`), sin librería de gráficas | Una sola línea, poco peso en el móvil y control total del aspecto y de la etiqueta al tocar |
+| 2026-11-06 | Caídas calculadas apuesta a apuesta y desde 0; la curva pasa a un punto por día con más de 60 apuestas | La caída real no se esconde dentro de un día; la gráfica se sigue leyendo con muchas apuestas |
+| 2026-11-06 | Saldo en el tiempo: el dinero de una apuesta se mueve en su fecha; las de fecha futura, hoy | El último punto coincide siempre con el saldo "hasta hoy" de la tarjeta |
+| 2026-11-06 | Mes y día de la semana como segmentos `mes`/`dia` (fuera del selector) para reutilizar el detalle | La fila y su lista salen de la misma fuente: el recuento no puede diferir |
