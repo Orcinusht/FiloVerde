@@ -35,11 +35,15 @@ export function localAIso(local: string, zona = ZONA_HORARIA): string | null | u
   if (!r) return undefined
   const [y, m, d, h, min] = [r[1], r[2], r[3], r[4] ?? '12', r[5] ?? '00'].map(Number)
   if (m < 1 || m > 12 || d < 1 || d > 31 || h > 23 || min > 59) return undefined
-  // Se calcula el desfase de la zona en ese momento (cambia en verano/invierno).
+  // Se calcula el desfase de la zona en ese momento (cambia en verano/invierno). Dos pasadas: la
+  // primera puede caer al otro lado del cambio de hora (p. ej. 01:30 del último domingo de marzo).
+  // Una hora que no existe (02:30 ese domingo) pasa a la siguiente válida (03:30).
   const comoUtc = Date.UTC(y, m - 1, d, h, min)
-  const p = partes(new Date(comoUtc), zona)
-  const desfase = Date.UTC(p.y, p.m - 1, p.d, p.h, p.min) - comoUtc
-  const real = new Date(comoUtc - desfase)
+  const desfaseEn = (instante: number) => {
+    const p = partes(new Date(instante), zona)
+    return Date.UTC(p.y, p.m - 1, p.d, p.h, p.min) - instante
+  }
+  const real = new Date(comoUtc - desfaseEn(comoUtc - desfaseEn(comoUtc)))
   if (Number.isNaN(real.getTime()) || y < 2000 || y > 2100) return undefined
   return real.toISOString()
 }

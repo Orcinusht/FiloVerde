@@ -502,7 +502,26 @@ APUESTAS.fechas = apuesta({
     selJugador('Local', '1.90', '1X2', { evento: 'Fecha - Solo hora', evento_fecha_texto: '21:00' }),
   ],
 })
+// Partidos conocidos (registro): fechas relativas a hoy (hora de España) para la regla de 30 días.
+const diaMas = (n) => {
+  const hoy = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date())
+  const [y, m, d] = hoy.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+export const DIA_PARTIDO = diaMas(3)
+const sinPartido = { evento_fecha: null, evento_hora: null, liga: null, deporte: null }
+// 1) Un partido con día y hora (madrugada: 00:30) → fecha de la apuesta = ese día.
+APUESTAS.partido_base = apuesta({ importe: 7, cuota_total: '1.70', ganancia_potencial: 11.9, selecciones: [sel('Elche - Levante', 'Elche', '1.70', { evento_fecha: DIA_PARTIDO, evento_hora: '00:30' })] })
+// 2) El mismo partido escrito distinto y sin día, hora, liga ni deporte.
+APUESTAS.partido_conocido = apuesta({ importe: 9, cuota_total: '3.10', ganancia_potencial: 27.9, selecciones: [sel('elche vs levante', 'Empate', '3.10', sinPartido)] })
+// 3) Tanda: la 1.ª trae el partido completo; la 2.ª, el mismo sin datos.
+APUESTAS.tanda_1 = apuesta({ importe: 4, cuota_total: '2.20', ganancia_potencial: 8.8, selecciones: [sel('Leganés - Tenerife', 'Leganés', '2.20', { evento_fecha: diaMas(5), evento_hora: '18:15' })] })
+APUESTAS.tanda_2 = apuesta({ importe: 6, cuota_total: '3.30', ganancia_potencial: 19.8, selecciones: [sel('Leganes - Tenerife', 'Empate', '3.30', sinPartido)] })
 const RESPUESTAS = {
+  partido_base: con(APUESTAS.partido_base),
+  partido_conocido: con(APUESTAS.partido_conocido),
+  tanda_1: con(APUESTAS.tanda_1),
+  tanda_2: con(APUESTAS.tanda_2),
   bet365_1: con(cortada(), APUESTAS.gueye, cortada({ tipo: 'mismo_partido', importe: 4.89, selecciones: [selJugador('Resultado final: Inter de', null, 'Crear apuesta')] })),
   bet365_2: con(
     cortada(),

@@ -17,6 +17,7 @@ import {
 } from './estados.ts'
 import { localAIso, validarDia, validarHora } from './fechas.ts'
 import { diaEnMadrid } from './fecha-evento.ts'
+import { instanteDelPartido, ultimoPartido, type DiaHora } from './partidos.ts'
 
 const dos2 = (n: number) => String(n).padStart(2, '0')
 export function diaEnMadridTexto(instante: Date): string {
@@ -24,18 +25,29 @@ export function diaEnMadridTexto(instante: Date): string {
   return `${d.y}-${dos2(d.m)}-${dos2(d.d)}`
 }
 
-// Hora de la apuesta (cuándo se hizo): NO se pide ni se muestra. Se guarda:
+// Hora de la apuesta: NO se pide ni se muestra. Se guarda:
 //  · al editar sin cambiar el día → la fecha que ya tenía, tal cual;
+//  · el día del último partido de la apuesta (desde el 2026-11-08) → el día y la hora de ese
+//    partido (sin hora, las 12:00);
 //  · día de hoy → la hora actual;
 //  · otro día (pasado o futuro) → las 12:00 de España.
 // Devuelve el ISO, o undefined si el día no es válido.
-export function fechaDeLaApuesta(dia: string, original: string | null | undefined, ahora: Date = new Date()): string | undefined {
+export function fechaDeLaApuesta(
+  dia: string,
+  original: string | null | undefined,
+  ahora: Date = new Date(),
+  partido: DiaHora | null = null,
+): string | undefined {
   const t = dia.trim().slice(0, 10)
   const d = t === '' ? diaEnMadridTexto(ahora) : validarDia(t)
   if (!d) return undefined
   if (original) {
     const o = new Date(original)
     if (!Number.isNaN(o.getTime()) && diaEnMadridTexto(o) === d) return o.toISOString()
+  }
+  if (partido && partido.dia === d) {
+    const iso = instanteDelPartido(partido)
+    if (iso) return iso
   }
   if (d === diaEnMadridTexto(ahora)) return ahora.toISOString()
   return localAIso(`${d}T12:00`) ?? undefined
@@ -269,8 +281,6 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
   const estado = texto(e.estado)
   if (!esEstadoApuesta(estado)) errores.estado = 'Elige el estado.'
 
-  const fecha = fechaDeLaApuesta(texto(e.fecha), texto(bruto.fecha_original) || null)
-  if (fecha === undefined) errores.fecha = 'Día no válido.'
 
   const importe = textoACentimos(texto(e.importe))
   if (importe == null) errores.importe = 'Escribe el importe apostado.'
@@ -415,6 +425,10 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
     promo: promoTipo,
   })
   avisos.push(...avisosPromo)
+
+  // Día de la apuesta (con la hora del último partido si es su día).
+  const fecha = fechaDeLaApuesta(texto(e.fecha), texto(bruto.fecha_original) || null, new Date(), ultimoPartido(selecciones))
+  if (fecha === undefined) errores.fecha = 'Día no válido.'
 
   if (Object.keys(errores).length > 0) return { ok: false, errores, avisos }
 

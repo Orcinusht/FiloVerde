@@ -72,8 +72,16 @@ archivo o panel ponerlas).
    pantallas (fichas); color de la línea del saldo en Bankroll. **Verificada en el móvil con la cuenta
    de email.** Falta verificarla en producción con la cuenta de Google (35 apuestas). El resto, en
    Pendiente.
+4. **Mejoras del registro** (tanda de 3 tareas). **Tarea 1: fecha del partido y partidos conocidos**
+   (rama `registro-fecha-partido`, desde el 2026-11-08; sin migración): la fecha de una apuesta nueva
+   es la del último partido; día, hora, liga y deporte de un partido que ya registraste (o de la
+   misma tanda) se rellenan solos, marcados. Pendiente de verificar en el móvil y de fusionar. Tareas
+   2 (detección de la casa) y 3 (API-Football): después.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-06, tras fusionar Gráficas)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-08, al empezar el registro)
+0. **Mejoras del registro**: tarea 1 hecha en la rama `registro-fecha-partido` (pendiente de verificar
+   y fusionar); después, tarea 2 (detección de la casa) y tarea 3 (API-Football). **"En juego" con
+   fechas futuras**: propuesta pendiente de visto bueno (ver "Registro: fecha del partido").
 1. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
    otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
    aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
@@ -84,6 +92,10 @@ archivo o panel ponerlas).
    de una a otra en una función de la BD; cuidado con los traspasos entre las dos. Solo si aparece un
    duplicado real (la regla de nombre único evita los de mayúsculas, tildes y espacios).
 4. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
+5. **Recalcular la fecha de las apuestas antiguas** (anotado el 2026-11-08, NO construido): herramienta
+   con vista previa ("N apuestas cambiarían de día", con la lista) que ponga a las apuestas ya
+   guardadas la fecha de su último partido, todo o nada y solo en las que tienen día de partido. Útil
+   solo si se quiere que Análisis y Gráficas cuenten las antiguas por el día del partido.
 
 Además:
 - **Verificar en producción con la cuenta de Google** (35 apuestas) la pestaña Gráficas y los periodos
@@ -230,7 +242,9 @@ src/
                       duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
                       asegurada y crédito: cálculos en céntimos), reintentos-ia.ts (errores de la
                       IA: clasificación, cuáles se reintentan, esperas y mensajes), fecha-evento.ts
-                      (traduce el texto de la fecha del evento), cola.ts (estados de la cola)
+                      (traduce el texto de la fecha del evento), cola.ts (estados de la cola),
+                      partidos.ts (fecha de la apuesta = último partido y partidos conocidos) y
+                      partidos-leer.ts (lee tus selecciones guardadas: sesión, tandas de 1000)
     exportar/         csv.ts (formato: celdas, columnas, lectura en tandas) · leer.ts (consultas
                       con la sesión del usuario; sin claves, se prueba con un cliente falso)
     analisis/         calculos.ts (funciones puras: métricas, segmentos y aciertos con los ids de
@@ -258,6 +272,7 @@ supabase/pruebas/     comprobación de RLS en vivo (pegar en el SQL Editor; no d
 tests/                prueba de seguridad RLS + lógica de apuestas (logica.test.ts) + copia en CSV (exportar.test.ts)
                       + análisis (analisis.test.ts) + bankroll (bankroll.test.ts) + casas y estrategias (opciones.test.ts)
                       + deportes y ligas (catalogo.test.ts) + evolución en el tiempo (evolucion.test.ts) + gráficas (graficas.test.ts)
+                      + registro: fecha del partido y partidos conocidos (partidos.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -432,8 +447,9 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   `selector-hora.tsx`), porque Safari de iPhone ignora el paso del control nativo. Un minuto que no
   es múltiplo de 5 (leído por la IA o guardado) se muestra como una opción más y **nunca se redondea
   solo**. Admite "—" (sin hora) y no puede haber hora sin día.
-- **Día de la apuesta** (cuándo se hizo; desde el 2026-11-04, v6): el formulario (revisión, a mano y
-  "Editar apuesta") pide **solo el día** (hoy por defecto). La hora NO se pide ni se muestra
+- **Día de la apuesta** (cuándo se hizo; desde el 2026-11-04, v6; desde el 2026-11-08, por defecto el
+  día del último partido: ver "Registro: fecha del partido y partidos conocidos"): el formulario
+  (revisión, a mano y "Editar apuesta") pide **solo el día** (hoy por defecto). La hora NO se pide ni se muestra
   (`fechaDeLaApuesta` en `formulario.ts`, en el servidor): día de hoy → la hora actual; otro día
   (pasado o futuro) → 12:00 de España; al editar sin cambiar el día → se conserva lo guardado. Misma
   columna `apuestas.fecha` (`timestamptz`), sin migración. Ninguna métrica la usa por la hora; la
@@ -471,6 +487,49 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 
 **Cambios en la base de datos = nueva migración** en `supabase/migrations/` (nunca editar una
 ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
+
+## Registro: fecha del partido y partidos conocidos (mejoras del registro, tarea 1)
+
+Cálculos en `src/lib/apuestas/partidos.ts` (funciones puras, probadas en `tests/partidos.test.ts`);
+lectura en `partidos-leer.ts` + acción `buscarPartidosConocidos` (`apuestas/actions.ts`), con la
+sesión del usuario (RLS) y filtrando por su id. Sin migración ni índice: se leen tus selecciones en
+tandas de 1000 y se comparan en el servidor (cientos o pocos miles de filas: inmediato).
+
+- **Fecha de la apuesta = día del último partido** (apuestas NUEVAS: captura y registro a mano): de
+  las selecciones con día, la más tardía (día + hora; sin hora, 12:00), en hora de España (un partido
+  a las 00:30 del día 9 → la apuesta es del 9). Se ve solo el día, con la nota "Fecha tomada del
+  partido (8 nov, 21:00)"; la hora se guarda sin pedirla. El SERVIDOR la recalcula con las
+  selecciones (`fechaDeLaApuesta` con `ultimoPartido`): si el día elegido es el del último partido,
+  usa su hora; si no, como antes (hoy → ahora; otro día → 12:00; al editar sin cambiar el día → lo
+  guardado). Sin día de partido, como antes.
+- La fecha sigue al partido mientras no se cambie a mano (`diaSegunPartido`); cambiada a mano, ya
+  no se pisa y la nota desaparece. **Al editar una guardada nunca cambia sola**: botón "Usar la fecha
+  del partido (…)" si el día no coincide. Las apuestas antiguas no se tocan.
+- **Partidos conocidos**: clave = evento con la normalización del detector (`clavePartido`: sin
+  mayúsculas, tildes ni espacios; "vs", "v" y guiones iguales) y solo si tiene DOS lados ("A - B").
+  Se agrupan tus selecciones guardadas por partido y día; en cada día, la hora, la liga y el deporte
+  más repetidos (empate: el más reciente). Regla (`proponerPartido`): **solo se rellenan campos
+  VACÍOS** (nunca se pisa lo que trae la captura, aunque esté en ámbar). Con día en la captura: solo
+  datos de ese mismo día. Sin día: el día más reciente de los **últimos 30 días o futuro** (día, hora,
+  liga y deporte) y los demás días recientes como fichas "Otros días" (un toque cambia día y hora, y
+  liga y deporte si los había rellenado); si solo hay días más antiguos, **solo liga y deporte**.
+  Marca ámbar "deducido de otra apuesta tuya" + aviso "Deducido de otra apuesta tuya: partido del 8
+  nov, 21:00 · LaLiga. Compruébalo." Todo editable.
+- Cuándo: al abrir la revisión y ~0,6 s después de cambiar un partido; una vez por selección y
+  partido. Nunca al editar una guardada. Si la búsqueda falla, no bloquea (`[apuestas:partidos]` al log).
+- **Tanda**: la cola pasa al formulario las selecciones de las apuestas ANTERIORES (guardadas o con lo
+  editado aunque no se haya guardado; las descartadas no cuentan). Se usan antes que las guardadas,
+  con la misma regla, y se marcan "deducido de una apuesta anterior de esta tanda".
+- **Límites**: solo junta partidos escritos igual ("Betis - Sevilla" ≠ "Real Betis - Sevilla FC"), no
+  reconoce equipos al revés y, si un dato guardado estaba mal, lo propone mal (marcado y editable).
+- **Corrección** (2026-11-08): `localAIso` calculaba mal las horas de la madrugada del cambio de hora
+  de marzo (01:30 → 00:30); ahora hace dos pasadas (una hora inexistente, 02:30, pasa a las 03:30).
+  Las medianoches de los periodos no cambian.
+- **Efecto**: una apuesta pendiente de un partido futuro queda con fecha futura (Bankroll ya la suma
+  hoy; Análisis y Gráficas la cuentan en el día del partido) y en la lista sale arriba.
+- **"En juego" y fechas futuras** (propuesta, pendiente de visto bueno): hoy solo afecta a la tarjeta
+  "En juego" de Análisis (respeta el periodo), que dejaría fuera las pendientes de partidos futuros en
+  periodos que acaban hoy. Gráficas y el detalle no muestran pendientes; Bankroll ya cuenta todas.
 
 ## Bankroll (Fase 3, primera ronda)
 
@@ -800,7 +859,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas + partidos (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -1009,3 +1068,13 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-06 | `/graficas` deja de redirigir a `/analisis` y pasa a `?volver=` | Es la pestaña nueva; la redirección era temporal (no la guardó ningún navegador) |
 | 2026-11-06 | Sin cambios en `comprobar_rls_en_vivo.sql` | Sin tablas, permisos ni funciones nuevas: solo lecturas con la sesión (el filtro de casa es un filtro más de la consulta, ya cubierta por RLS) |
 | 2026-11-06 | **Pestaña Gráficas y periodos nuevos fusionados en `main`** (rama `fase-3-graficas`, PR #8) | Sin migración; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google (35 apuestas) |
+| 2026-11-08 | **Mejoras del registro, tarea 1: fecha del partido y partidos conocidos** en la rama `registro-fecha-partido` (sin migración) | Registrar con menos trabajo |
+| 2026-11-08 | Fecha de una apuesta nueva = día y hora del último partido; se ve solo el día con la nota "Fecha tomada del partido"; el servidor la recalcula con las selecciones | La apuesta se resuelve con el último partido; la hora no se pide; no se fía del navegador |
+| 2026-11-08 | La fecha sigue al partido hasta que se cambia a mano; al editar una guardada nunca cambia sola (botón "Usar la fecha del partido") | El usuario decide; las apuestas antiguas no se tocan |
+| 2026-11-08 | Partidos conocidos: solo campos vacíos; con día, solo el mismo día; sin día, día y hora solo de partidos de los últimos 30 días o futuros (liga y deporte también de antiguos) | Nunca pisar lo que muestra la captura; un partido con el mismo nombre de otra temporada no es este |
+| 2026-11-08 | Partidos conocidos sin migración ni índice: lectura de tus selecciones en tandas de 1000 y comparación normalizada en el servidor | La normalización ("vs", tildes) no se puede indexar sin cambiar la BD; el volumen es pequeño |
+| 2026-11-08 | Tanda: lo editado en las apuestas anteriores (aunque no esté guardado) va antes que lo guardado | Es lo más reciente y ya revisado |
+| 2026-11-08 | `localAIso` con dos pasadas | Las horas de la madrugada del cambio de hora de marzo salían una hora antes |
+| 2026-11-08 | Recalcular la fecha de las apuestas antiguas: anotado como pendiente, no construido | Solo útil si se quiere contar las antiguas por el día del partido |
+| 2026-11-08 | Si la captura trae la fecha en que se hizo la apuesta, se propone igualmente el día del partido (editable) | Regla pedida: la fecha por defecto es la del partido, cuando se resuelve |
+| 2026-11-08 | Al volver a una apuesta de la cola (Anterior / Siguiente) se recupera lo editado aunque no se guardara | Antes se perdía; la cola ya guarda lo editado para rellenar la tanda |

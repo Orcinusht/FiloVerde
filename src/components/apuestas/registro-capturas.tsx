@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { descartarCaptura, recuperarDescartada, terminarCola } from '@/app/(app)/apuestas/actions'
@@ -9,6 +9,7 @@ import type { ApuestaPendiente, Revision } from '@/lib/apuestas/propuesta'
 import type { Catalogo } from '@/lib/apuestas/catalogo'
 import { ErrorImagen, reducirImagen } from '@/lib/navegador/reducir-imagen'
 import { FormularioApuesta } from './formulario-apuesta'
+import { conocidosDeTanda } from '@/lib/apuestas/partidos'
 import { MAX_INTENTOS, esperaAntesDeReintentar, pausaLoteTrasLimite } from '@/lib/apuestas/reintentos-ia'
 import { VisorCaptura } from './visor-captura'
 import { EleccionApuestas } from './eleccion-apuestas'
@@ -39,6 +40,7 @@ type Item = {
   estado?: EstadoItemCola
   apuestaId?: string
   guardado?: ValoresFormulario
+  borrador?: ValoresFormulario // lo editado en la revisión (aún sin guardar): para las siguientes de la tanda
   // Captura con varias apuestas: las que se pueden elegir y cuántas se ignoraron (cortadas).
   opciones?: { indice: number; revision: Revision }[]
   ignoradas?: number
@@ -85,6 +87,33 @@ export function RegistroCapturas({
     })),
   )
   const [actual, setActual] = useState(0)
+  // Partidos de las apuestas anteriores de la tanda (guardadas o editadas): rellenan el mismo partido.
+  const clavesAnteriores = items
+    .slice(0, actual)
+    .map((it) => (estadoCola(it) === 'descartada' ? '' : JSON.stringify((it.guardado ?? it.borrador)?.selecciones ?? null)))
+    .join('\u0001')
+  const conocidosTanda = useMemo(
+    () =>
+      conocidosDeTanda(
+        items
+          .slice(0, actual)
+          .filter((it) => estadoCola(it) !== 'descartada')
+          .map((it) => it.guardado ?? it.borrador)
+          .filter((v): v is ValoresFormulario => !!v),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo cambia si cambian esas selecciones
+    [clavesAnteriores],
+  )
+  // Lo que se va editando en la apuesta actual (estable: no provoca bucles en el formulario).
+  const claveActual = useRef<string | null>(null)
+  const alCambiarValores = useCallback((v: ValoresFormulario) => {
+    const c = claveActual.current
+    if (!c) return
+    const it = itemsRef.current.find((x) => x.clave === c)
+    if (!it || it.borrador === v) return
+    itemsRef.current = itemsRef.current.map((x) => (x.clave === c ? { ...x, borrador: v } : x))
+    setItems(itemsRef.current)
+  }, [])
   const [verResumen, setVerResumen] = useState(false)
   const [descartadasAlElegir, setDescartadasAlElegir] = useState(0)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -451,6 +480,7 @@ export function RegistroCapturas({
 
   const item = items[actual]
   if (!item) return null
+  claveActual.current = item.clave
   const estados = items.map(estadoCola)
   const variasEnCaptura = (item.total ?? 1) > 1
   const estadoActual = estadoCola(item)
@@ -523,7 +553,8 @@ export function RegistroCapturas({
       {(item.paso === 'lista' || item.paso === 'manual') && estadoActual !== 'descartada' && (
         <FormularioApuesta
           key={`${item.clave}-${item.apuestaId ?? 'nueva'}`}
-          inicial={item.guardado ?? item.revision?.valores ?? valoresVacios()}
+          // Al volver a una apuesta de la cola se recupera lo editado aunque no se guardara.
+          inicial={item.guardado ?? item.borrador ?? item.revision?.valores ?? valoresVacios()}
           dudosos={item.guardado ? undefined : item.revision?.dudosos}
           casaDetectada={item.guardado ? null : item.revision?.casaDetectada}
           casas={opcionesCasas}
@@ -543,6 +574,8 @@ export function RegistroCapturas({
             avanzar()
           }}
           onDescartar={() => descartar(item)}
+          conocidosTanda={conocidosTanda}
+          onCambioValores={alCambiarValores}
           onOpcionCreada={(tipo, o) => {
             // Lo creado en esta captura sirve también para las siguientes.
             const anadir = (l: Opcion[]) => (l.some((x) => x.id === o.id) ? l : [...l, o])
