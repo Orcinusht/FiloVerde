@@ -10,6 +10,8 @@ import { limpiarImagenSiNoSeUsa } from '@/lib/server/pendientes'
 import * as catalogo from '@/lib/server/acciones-catalogo'
 import type { Opcion } from '@/lib/apuestas/formulario'
 import { archivarOpcion, crearOpcion as crearOpcionGestion } from '@/lib/server/acciones-opciones'
+import { leerPartidosConocidos } from '@/lib/apuestas/partidos-leer'
+import type { DiaConocido } from '@/lib/apuestas/partidos'
 
 // Acciones de servidor: TODO lo que llega del navegador se vuelve a validar aquí.
 
@@ -331,6 +333,26 @@ export async function buscarDuplicadas(entrada: { valores: unknown; casaPendient
   } catch (e) {
     // No bloquea el guardado: el error va al log (sin datos personales).
     registrarError('apuestas:duplicadas', e)
+    return { ok: false }
+  }
+}
+
+// ---------- Partidos conocidos (registro: rellenar día, hora, liga y deporte) ----------
+
+export type ResultadoPartidos = { ok: true; partidos: Record<string, DiaConocido[]> } | { ok: false }
+
+// Solo con la sesión del usuario: nunca ve partidos de otro. Si falla, no bloquea (la revisión
+// sigue sin rellenar) y el error va al log sin datos personales.
+export async function buscarPartidosConocidos(entrada: { eventos: unknown }): Promise<ResultadoPartidos> {
+  try {
+    const eventos = Array.isArray(entrada?.eventos) ? entrada.eventos.filter((e): e is string => typeof e === 'string') : []
+    if (eventos.length === 0) return { ok: true, partidos: {} }
+    const supabase = await createClient()
+    const userId = await usuarioActual(supabase)
+    if (!userId) return { ok: false }
+    return { ok: true, partidos: await leerPartidosConocidos(supabase, userId, eventos) }
+  } catch (e) {
+    registrarError('apuestas:partidos', e)
     return { ok: false }
   }
 }

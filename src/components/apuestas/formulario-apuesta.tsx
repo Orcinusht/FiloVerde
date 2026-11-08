@@ -2,7 +2,18 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { buscarPorNombre } from '@/lib/apuestas/opciones'
-import { buscarDuplicadas, guardarApuesta, type ResultadoDuplicadas } from '@/app/(app)/apuestas/actions'
+import { buscarDuplicadas, buscarPartidosConocidos, guardarApuesta, type ResultadoDuplicadas } from '@/app/(app)/apuestas/actions'
+import {
+  agruparConocidos,
+  claveConocida,
+  diaSegunPartido,
+  proponerPartido,
+  textoDiaHora,
+  ultimoPartido,
+  type CamposPartido,
+  type DiaConocido,
+  type SeleccionConocida,
+} from '@/lib/apuestas/partidos'
 import { formatoImporte } from '@/lib/apuestas/dinero'
 import { cuotaATexto } from '@/lib/apuestas/cuotas'
 import { formatoFecha } from '@/lib/apuestas/fechas'
@@ -39,6 +50,7 @@ import {
   seleccionVacia,
   sincronizarPromo,
   validarFormulario,
+  diaEnMadridTexto,
   type Opcion,
   type ValoresFormulario,
   type ValoresSeleccion,
@@ -85,7 +97,15 @@ type Props = {
   compartido?: [ValoresFormulario, Dispatch<SetStateAction<ValoresFormulario>>]
   // Aviso de duplicada: "Descartar" (en la cola de capturas o en el registro a mano).
   onDescartar?: () => void
+  // Tanda de capturas: selecciones ya confirmadas o editadas en las apuestas anteriores (para
+  // rellenar el mismo partido) y aviso a la cola de lo que se va editando.
+  conocidosTanda?: SeleccionConocida[]
+  onCambioValores?: (v: ValoresFormulario) => void
 }
+
+// Datos de un partido rellenados en una selección: de dónde salen y otros días para elegir.
+type Deducido = { fuente: 'otra_apuesta' | 'tanda'; origen: DiaConocido; otros: DiaConocido[]; campos: CamposPartido[] }
+const CAMPOS_PARTIDO: CamposPartido[] = ['evento_fecha', 'evento_hora', 'liga', 'deporte']
 
 type Duplicada = Extract<ResultadoDuplicadas, { ok: true }>
 
@@ -164,6 +184,113 @@ export function FormularioApuesta(props: Props) {
     return () => clearTimeout(t)
   }, [comprobarDuplicadas, valores, casaPendiente])
 
+  // ---------- fecha de la apuesta = día del último partido ----------
+  // Apuesta NUEVA (captura o a mano): la fecha sigue al último partido mientras no la cambies a
+  // mano. Al editar una guardada nunca cambia sola (hay un botón para pedirlo).
+  const fechaSigue = modo === 'revision' && !apuestaId
+  const [fechaManual, setFechaManual] = useState(false)
+  const partido = useMemo(() => ultimoPartido(valores.selecciones), [valores.selecciones])
+  useEffect(() => {
+    setValores((v) => {
+      const dia = diaSegunPartido({ fecha: v.fecha.slice(0, 10), nueva: fechaSigue, manual: fechaManual, partido })
+      return dia === v.fecha.slice(0, 10) ? v : { ...v, fecha: dia }
+    })
+  }, [fechaSigue, fechaManual, partido, setValores])
+
+  // La cola guarda lo que se va editando (para la apuesta siguiente de la tanda).
+  const onCambioValores = props.onCambioValores
+  useEffect(() => {
+    onCambioValores?.(valores)
+  }, [valores, onCambioValores])
+
+  // ---------- partidos conocidos ----------
+  // Al abrir y ~0,6 s después de cambiar un partido: rellena SOLO los campos vacíos con lo que se
+  // sabe de ese partido (antes, de esta tanda; si no, de tus apuestas guardadas). Una vez por
+  // selección y partido. Si la búsqueda falla, no pasa nada (se queda sin rellenar).
+  const buscarConocidos = modo === 'revision' && !apuestaId
+  const [deducidos, setDeducidos] = useState<Record<number, Deducido>>({})
+  const aplicados = useRef(new Set<string>())
+  const consultaPartidos = useRef(0)
+  const valoresRef = useRef(valores)
+  useEffect(() => {
+    valoresRef.current = valores
+  }, [valores])
+  const conocidosTanda = props.conocidosTanda
+  const clavesEventos = valores.selecciones.map((s) => claveConocida(s.evento)).join('|')
+  useEffect(() => {
+    if (!buscarConocidos) return
+    const id = ++consultaPartidos.current
+    const t = setTimeout(async () => {
+      const v = valoresRef.current
+      const faltan = v.selecciones
+        .map((s, i) => ({ s, i, clave: claveConocida(s.evento) }))
+        .filter((x) => x.clave && !aplicados.current.has(`${x.i}|${x.clave}`) && CAMPOS_PARTIDO.some((c) => !x.s[c].trim()))
+      if (faltan.length === 0) return
+      const hoy = diaEnMadridTexto(new Date())
+      const tanda = agruparConocidos(conocidosTanda ?? [])
+      let guardados: Map<string, DiaConocido[]> | null = null
+      if (faltan.some((x) => !proponerPartido(x.s, tanda, hoy))) {
+        const r = await buscarPartidosConocidos({ eventos: faltan.map((x) => x.s.evento) }).catch(() => ({ ok: false }) as const)
+        if (r.ok) guardados = new Map(Object.entries(r.partidos))
+      }
+      if (id !== consultaPartidos.current) return
+      const nuevos: Record<number, Deducido> = {}
+      for (const x of faltan) {
+        aplicados.current.add(`${x.i}|${x.clave}`)
+        const deTanda = proponerPartido(x.s, tanda, hoy)
+        const prop = deTanda ?? (guardados ? proponerPartido(x.s, guardados, hoy) : null)
+        if (!prop) continue
+        nuevos[x.i] = { fuente: deTanda ? 'tanda' : 'otra_apuesta', origen: prop.origen, otros: prop.otrosDias, campos: Object.keys(prop.cambios) as CamposPartido[] }
+      }
+      if (Object.keys(nuevos).length === 0) return
+      // Se aplica sobre los valores ACTUALES: nunca se pisa lo que ya tenga dato.
+      setValores((actual) => ({
+        ...actual,
+        selecciones: actual.selecciones.map((s, i) => {
+          const d = nuevos[i]
+          if (!d) return s
+          const prop = proponerPartido(s, new Map([[claveConocida(s.evento), [d.origen]]]), '0000-00-00')
+          if (!prop) return s
+          const n = { ...s }
+          for (const [c, val] of Object.entries(prop.cambios)) if (!n[c as CamposPartido].trim()) n[c as CamposPartido] = val as string
+          return n
+        }),
+      }))
+      setDudosos((d) => {
+        const n = { ...d }
+        for (const [i, x] of Object.entries(nuevos)) for (const c of x.campos) n[`selecciones.${i}.${c}`] = x.fuente // el dato ya no "falta": sale de otra apuesta
+        return n
+      })
+      setDeducidos((d) => ({ ...d, ...nuevos }))
+    }, 600)
+    return () => clearTimeout(t)
+  }, [buscarConocidos, clavesEventos, conocidosTanda, setValores])
+
+  // Elegir otro día del mismo partido (opciones con un toque): cambia día y hora y, si los había
+  // rellenado esta función, también liga y deporte.
+  function elegirDia(i: number, d: DiaConocido) {
+    const indices = tipo === 'mismo_partido' ? valores.selecciones.map((_, j) => j) : [i]
+    const ded = deducidos[i]
+    setValores((v) => ({
+      ...v,
+      selecciones: v.selecciones.map((s, j) => {
+        if (!indices.includes(j)) return s
+        const n = { ...s, evento_fecha: d.dia, evento_hora: d.hora || s.evento_hora }
+        if (ded?.campos.includes('liga') && d.liga) n.liga = d.liga
+        if (ded?.campos.includes('deporte') && d.deporte) n.deporte = d.deporte
+        return n
+      }),
+    }))
+    if (ded) {
+      const otros = [ded.origen, ...ded.otros].filter((x) => x.dia !== d.dia).sort((a, b) => (a.dia < b.dia ? 1 : -1))
+      setDeducidos((x) => {
+        const n = { ...x }
+        for (const j of indices) if (n[j]) n[j] = { ...n[j], origen: d, otros }
+        return n
+      })
+    }
+  }
+
   // ---------- cambios ----------
 
   function quitarMarca(...claves: string[]) {
@@ -183,6 +310,7 @@ export function FormularioApuesta(props: Props) {
 
   function cambiar<K extends keyof ValoresFormulario>(clave: K, valor: ValoresFormulario[K]) {
     quitarMarca(clave)
+    if (clave === 'fecha') setFechaManual(true) // cambiada a mano: ya no sigue al partido
     // Editando una apuesta ya resuelta: no se recalcula sin preguntar.
     if (modo === 'edicion' && AFECTAN_RESULTADO.has(clave) && valores.estado !== 'pendiente') {
       const nuevo = sincronizarPromo({ ...valores, [clave]: valor })
@@ -674,8 +802,26 @@ export function FormularioApuesta(props: Props) {
           <Entrada inputMode="decimal" placeholder={sugerirGanancia(valores)} value={valores.ganancia_potencial} onChange={(v) => cambiar('ganancia_potencial', v)} marca={dudosos.ganancia_potencial} conError={!!errores.ganancia_potencial} />
         </Campo>
 
-        <Campo etiqueta="Día de la apuesta" ayuda="Cuándo la hiciste (hoy, si lo dejas vacío)." {...p('fecha')}>
+        <Campo
+          etiqueta="Día de la apuesta"
+          ayuda={fechaSigue ? 'Por defecto, el día del último partido (o hoy, si no hay día de partido).' : 'Cuándo la hiciste (hoy, si lo dejas vacío).'}
+          {...p('fecha')}
+        >
           <Entrada type="date" value={valores.fecha.slice(0, 10)} onChange={(d) => cambiar('fecha', d)} marca={dudosos.fecha} conError={!!errores.fecha} />
+          {fechaSigue && !fechaManual && partido && valores.fecha.slice(0, 10) === partido.dia && (
+            <span className="mt-1 block text-xs text-muted" data-nota="fecha-partido">
+              Fecha tomada del partido ({textoDiaHora(partido)}).
+            </span>
+          )}
+          {!fechaSigue && modo === 'edicion' && partido && valores.fecha.slice(0, 10) !== partido.dia && (
+            <button
+              type="button"
+              onClick={() => cambiar('fecha', partido.dia)}
+              className="mt-2 h-11 rounded-xl border border-border bg-surface px-3 text-sm font-semibold"
+            >
+              Usar la fecha del partido ({textoDiaHora(partido)})
+            </button>
+          )}
         </Campo>
 
         <Campo etiqueta="Estrategia (opcional)" {...p('estrategia_id')}>
@@ -844,6 +990,7 @@ export function FormularioApuesta(props: Props) {
           <Campo etiqueta="Hora" {...pComun('evento_hora')}>
             <SelectorHora valor={valores.selecciones[0]?.evento_hora ?? ''} onCambio={(v) => cambiarComun('evento_hora', v)} marcado={!!pComun('evento_hora').motivo} conError={!!errores['selecciones.0.evento_hora']} />
           </Campo>
+          {deducidos[0] && <PartidoConocido d={deducidos[0]} onElegir={(dia) => elegirDia(0, dia)} />}
         </Grupo>
       )}
 
@@ -864,6 +1011,7 @@ export function FormularioApuesta(props: Props) {
               onCambio={(c, v) => cambiarSeleccion(i, c, v)}
               onQuitar={() => quitarSeleccion(i)}
               deporteLiga={camposDeporteLiga([i], i, p(`selecciones.${i}.deporte`), p(`selecciones.${i}.liga`))}
+              partidoConocido={deducidos[i] && <PartidoConocido d={deducidos[i]} onElegir={(dia) => elegirDia(i, dia)} />}
             />
           ))}
         </ol>
@@ -940,6 +1088,36 @@ const BORDE_ESTADO: Record<string, string> = {
   anulada: 'border-l-4 border-l-amber-500',
 }
 
+// Aviso bajo los datos de un partido rellenados con otro que ya registraste: de dónde salen y,
+// si el partido está en varios días recientes, los demás para elegir con un toque.
+function PartidoConocido({ d, onElegir }: { d: Deducido; onElegir: (dia: DiaConocido) => void }) {
+  return (
+    <div className="space-y-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300" data-partido-conocido={d.fuente}>
+      <p>
+        {d.fuente === 'tanda' ? 'Deducido de una apuesta anterior de esta tanda' : 'Deducido de otra apuesta tuya'}: partido del{' '}
+        {textoDiaHora(d.origen)}
+        {d.origen.liga ? ` · ${d.origen.liga}` : ''}. Compruébalo.
+      </p>
+      {d.otros.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span>Otros días:</span>
+          {d.otros.map((o) => (
+            <button
+              key={o.dia}
+              type="button"
+              data-otro-dia={o.dia}
+              onClick={() => onElegir(o)}
+              className="h-9 rounded-full border border-amber-500/50 bg-surface px-3 text-xs font-semibold text-foreground"
+            >
+              {textoDiaHora(o)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TarjetaSeleccion({
   i,
   s,
@@ -950,8 +1128,10 @@ function TarjetaSeleccion({
   onCambio,
   onQuitar,
   deporteLiga,
+  partidoConocido,
 }: {
   deporteLiga: ReactNode
+  partidoConocido?: ReactNode
   i: number
   s: ValoresSeleccion
   tipo: TipoApuesta
@@ -1007,6 +1187,7 @@ function TarjetaSeleccion({
           <Campo etiqueta="Hora" {...ps('evento_hora')}>
             <SelectorHora valor={s.evento_hora} onCambio={(v) => onCambio('evento_hora', v)} marcado={!!dudosos[k('evento_hora')]} conError={!!errores[k('evento_hora')]} />
           </Campo>
+          {partidoConocido}
         </>
       )}
       <Campo etiqueta={tipo === 'mismo_partido' ? 'Estado de la condición' : 'Estado de la selección'} {...ps('estado')}>
