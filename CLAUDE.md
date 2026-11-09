@@ -72,32 +72,36 @@ archivo o panel ponerlas).
    pantallas (fichas); color de la línea del saldo en Bankroll. **Verificada en el móvil con la cuenta
    de email.** Falta verificarla en producción con la cuenta de Google (35 apuestas). El resto, en
    Pendiente.
-4. **Mejoras del registro** (tanda de 3 tareas). **Tarea 1: fecha del partido y partidos conocidos**
-   (rama `registro-fecha-partido`, desde el 2026-11-08; sin migración): la fecha de una apuesta nueva
-   es la del último partido; día, hora, liga y deporte de un partido que ya registraste (o de la
-   misma tanda) se rellenan solos, marcados. Pendiente de verificar en el móvil y de fusionar. Tareas
-   2 (detección de la casa) y 3 (API-Football): después.
+4. **Mejoras del registro** (tanda de 3 tareas). **Tarea 1: fecha del partido, partidos conocidos y
+   "En juego" sin filtro de fechas, fusionada el 2026-11-09** (rama `registro-fecha-partido`, PR #9;
+   pruebas de GitHub Actions en verde; sin migración): la fecha de una apuesta nueva es la del último
+   partido; día, hora, liga y deporte de un partido que ya registraste (o de la misma tanda) se
+   rellenan solos, marcados; "En juego" de Análisis cuenta todas las pendientes. **Verificada en el
+   móvil con la cuenta de email.** Falta verificarla en producción con la cuenta de Google. Tareas 2 y
+   3, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-08, al empezar el registro)
-0. **Mejoras del registro**: tarea 1 hecha en la rama `registro-fecha-partido` (con "En juego" de
-   todas las pendientes; pendiente de verificar y fusionar); después, tarea 2 (detección de la casa) y
-   tarea 3 (API-Football).
-1. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-09, tras fusionar la tarea 1 del registro)
+1. **Registro, tarea 2: casa de la apuesta**: casa de la tanda, diagnóstico de la detección de la casa
+   y tabla global de casas conocidas con descripciones visuales, aprobadas por el propietario.
+2. **Registro, tarea 3: API-Football** (solo fútbol).
+3. **Recalcular la fecha de las apuestas antiguas** (anotado el 2026-11-08, NO construido): herramienta
+   con vista previa ("N apuestas cambiarían de día", con la lista) que ponga a las apuestas ya
+   guardadas la fecha de su último partido, todo o nada y solo en las que tienen día de partido.
+4. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
    otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
    aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
    son competiciones distintas.
-2. **Importación** (de CSV, para restaurar una copia): los CSV de la copia ya usan los códigos internos
+5. **Importación** (de CSV, para restaurar una copia): los CSV de la copia ya usan los códigos internos
    y los ids para poder hacerla.
-3. **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
+6. **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
    de una a otra en una función de la BD; cuidado con los traspasos entre las dos. Solo si aparece un
    duplicado real (la regla de nombre único evita los de mayúsculas, tildes y espacios).
-4. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
-5. **Recalcular la fecha de las apuestas antiguas** (anotado el 2026-11-08, NO construido): herramienta
-   con vista previa ("N apuestas cambiarían de día", con la lista) que ponga a las apuestas ya
-   guardadas la fecha de su último partido, todo o nada y solo en las que tienen día de partido. Útil
-   solo si se quiere que Análisis y Gráficas cuenten las antiguas por el día del partido.
+7. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
 
 Además:
+- **Verificar en producción con la cuenta de Google** la tarea 1 del registro: fecha del partido (y su
+  nota), partidos conocidos (también en una tanda y con varias fechas), editar sin que cambie la fecha
+  y "En juego" con todas las pendientes.
 - **Verificar en producción con la cuenta de Google** (35 apuestas) la pestaña Gráficas y los periodos
   nuevos: final = beneficio neto, cada serie = su fila de Análisis, detalle con el mismo recuento,
   casa, Hoy / Ayer / 7 días y el color del saldo en Bankroll.
@@ -122,7 +126,6 @@ Además:
 - **SMTP propio** (p. ej. Resend) y **reactivar "Confirm email"** en Supabase antes de abrir la
   app a más gente.
 - **Login con Apple** (descomentar en `login/providers.ts` + configurarlo en Supabase y Apple).
-- **API-Football** u otra fuente de datos deportivos (Fase 2 o 3).
 - **Análisis del coste y del modelo de IA**: revisar en Ajustes el coste medio real por captura
   (por versión de instrucciones: v4 de promociones, v5 con caché y v6 de apuestas cortadas y fechas;
   comprobar en Vercel → Logs, `[ia:uso]`, que la caché se lee) y decidir si se mantiene `claude-sonnet-5-5` o se cambia.
@@ -1081,3 +1084,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-08 | Si la captura trae la fecha en que se hizo la apuesta, se propone igualmente el día del partido (editable) | Regla pedida: la fecha por defecto es la del partido, cuando se resuelve |
 | 2026-11-08 | Al volver a una apuesta de la cola (Anterior / Siguiente) se recupera lo editado aunque no se guardara | Antes se perdía; la cola ya guarda lo editado para rellenar la tanda |
 | 2026-11-09 | "En juego" de Análisis cuenta todas las pendientes, sin filtro de fechas, con la nota "Todas tus pendientes, sin filtro de fechas" | Con la fecha del partido, las pendientes de partidos futuros quedaban fuera de los periodos que acaban hoy |
+| 2026-11-09 | **Registro, tarea 1 (fecha del partido, partidos conocidos y "En juego" sin filtro de fechas) fusionada en `main`** (rama `registro-fecha-partido`, PR #9) | Sin migración; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google |
