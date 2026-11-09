@@ -127,6 +127,13 @@ export function compararFecha(a: ApuestaAnalisis, b: ApuestaAnalisis): number {
 
 // ---------- Resumen superior ----------
 
+// "En juego": número e importe de las apuestas pendientes. Desde el 2026-11-09 Análisis lo calcula
+// con TODAS las pendientes, sin filtro de fechas (las de partidos futuros tienen fecha futura).
+export function enJuego(apuestas: Pick<ApuestaAnalisis, 'estado' | 'importe'>[]): { n: number; importe: number } {
+  const p = apuestas.filter((a) => a.estado === 'pendiente')
+  return { n: p.length, importe: p.reduce((s, a) => s + num(a.importe), 0) }
+}
+
 export type Resumen = Metricas & {
   enJuego: { n: number; importe: number }
   cuotaMedia: number | null
@@ -144,7 +151,7 @@ export function resumen(apuestas: ApuestaAnalisis[]): Resumen {
   const nPropias = resueltas.filter((a) => !esCredito(a)).length
   return {
     ...m,
-    enJuego: { n: pendientes.length, importe: pendientes.reduce((s, a) => s + num(a.importe), 0) },
+    enJuego: enJuego(pendientes),
     cuotaMedia: dividir(conCuota.reduce((s, a) => s + num(a.cuota_total), 0), conCuota.length),
     importeMedio: dividir(m.importe, nPropias),
     rachas: rachas(apuestas),

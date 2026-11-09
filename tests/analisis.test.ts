@@ -545,3 +545,44 @@ test('volver: solo rutas internas de /apuestas y /analisis', () => {
   assert.equal(rutaVueltaSegura(null), '/apuestas')
   assert.equal(rutaVueltaSegura('//evil.com', '/analisis'), '/analisis')
 })
+
+// ---------- "En juego": todas las pendientes, sin filtro de fechas (desde el 2026-11-09) ----------
+
+test('«En juego» cuenta todas las pendientes, también las de partidos futuros fuera del periodo, y solo las del usuario', async () => {
+  const { enJuego } = await import('../src/lib/analisis/calculos.ts')
+  const { leerEnJuego } = await import('../src/lib/analisis/leer.ts')
+  const filas: Record<string, unknown>[] = []
+  // 1200 pendientes de Ana repartidas en fechas pasadas y futuras, más resueltas y anuladas.
+  for (let i = 0; i < 1200; i++) filas.push({ id: `p${String(i).padStart(5, '0')}`, user_id: 'ana', estado: 'pendiente', importe: 100, fecha: i % 2 ? '2026-12-20T20:00:00Z' : '2026-11-01T12:00:00Z' })
+  filas.push({ id: 'r1', user_id: 'ana', estado: 'ganada', importe: 5000, fecha: '2026-11-01T12:00:00Z' })
+  filas.push({ id: 'n1', user_id: 'ana', estado: 'anulada', importe: 7000, fecha: '2026-11-01T12:00:00Z' })
+  filas.push({ id: 'b1', user_id: 'beto', estado: 'pendiente', importe: 99999, fecha: '2026-11-01T12:00:00Z' })
+  const consultas: [string, unknown][][] = []
+  const cliente = (sesion: string) =>
+    ({
+      from() {
+        const f: [string, unknown][] = []
+        consultas.push(f)
+        const b = {
+          select: () => b,
+          order: () => b,
+          eq: (c: string, v: unknown) => (f.push([c, v]), b),
+          async range(desde: number, hasta: number) {
+            let r = filas.filter((x) => x.user_id === sesion)
+            for (const [c, v] of f) r = r.filter((x) => x[c] === v)
+            return { data: r.slice(desde, Math.min(hasta + 1, desde + 1000)), error: null }
+          },
+        }
+        return b
+      },
+    }) as never
+  // El resumen del periodo (p. ej. "Este mes" que acaba hoy) solo ve las de este mes…
+  const delMes = filas.filter((f) => f.user_id === 'ana' && String(f.fecha) < '2026-12-01').map((f) => ({ estado: String(f.estado), importe: Number(f.importe) }))
+  assert.deepEqual(enJuego(delMes), { n: 600, importe: 60000 })
+  // …pero «En juego» cuenta todas, también las de diciembre (más de 1000: en tandas).
+  assert.deepEqual(await leerEnJuego(cliente('ana'), 'ana'), { n: 1200, importe: 120000 })
+  assert.ok(consultas.every((f) => f.some(([c, v]) => c === 'user_id' && v === 'ana')), 'filtra por el usuario de la sesión')
+  // Beto no ve las de Ana (ni con su id)
+  assert.deepEqual(await leerEnJuego(cliente('beto'), 'ana'), { n: 0, importe: 0 })
+  assert.deepEqual(await leerEnJuego(cliente('beto'), 'beto'), { n: 1, importe: 99999 })
+})

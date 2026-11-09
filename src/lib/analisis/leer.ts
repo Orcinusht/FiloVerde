@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { leerTodo } from '../exportar/csv.ts'
-import { ESTADOS_RESUELTOS, type ApuestaAnalisis, type Rango, type SeleccionAnalisis } from './calculos.ts'
+import { ESTADOS_RESUELTOS, enJuego, type ApuestaAnalisis, type Rango, type SeleccionAnalisis } from './calculos.ts'
 
 // Fase 2 · Análisis: lecturas para la pantalla "Análisis". Sin claves: usa el cliente con la
 // sesión del usuario que le pasa el servidor (RLS aplica) y, además, filtra por su id, que sale
@@ -26,6 +26,22 @@ async function nombres(supabase: SupabaseClient, tabla: 'casas_apuestas' | 'estr
 }
 
 // `casa` (opcional, Gráficas): '' = todas, 'sin' = sin casa, o el id de una casa.
+// "En juego": TODAS las pendientes del usuario, sin filtro de fechas (solo id e importe).
+export async function leerEnJuego(supabase: SupabaseClient, userId: string): Promise<{ n: number; importe: number }> {
+  const filas = await leerTodo<{ estado: string; importe: number }>(async (desde, hasta) => {
+    const { data, error } = await supabase
+      .from('apuestas')
+      .select('id, estado, importe')
+      .eq('user_id', userId)
+      .eq('estado', 'pendiente')
+      .order('id')
+      .range(desde, hasta)
+    if (error) throw error
+    return (data ?? []) as never
+  })
+  return enJuego(filas.map((f) => ({ estado: f.estado, importe: Number(f.importe) })))
+}
+
 export async function leerApuestasAnalisis(
   supabase: SupabaseClient,
   userId: string,

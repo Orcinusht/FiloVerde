@@ -1278,14 +1278,15 @@ await pag.getByRole('button', { name: 'Guardar', exact: true }).click()
 await pag.getByText('Pon también el día del evento.').waitFor()
 bien('Hora sin día → «Pon también el día del evento.»')
 await ponerHora(pag, '')
-await pag.getByLabel('Día del evento').fill('2026-11-09')
 const hoyMadrid = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date())
-await esperar(async () => (await pag.getByLabel('Día de la apuesta').inputValue()) === '2026-11-09') // el día del partido
+const mananaMadrid = new Date(Date.parse(`${hoyMadrid}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+await pag.getByLabel('Día del evento').fill(mananaMadrid)
+await esperar(async () => (await pag.getByLabel('Día de la apuesta').inputValue()) === mananaMadrid) // el día del partido
 await pag.getByLabel('Día de la apuesta').fill(hoyMadrid) // a mano: hoy
 await guardarRevision('Guardar')
 await pag.waitForURL(`${APP}/apuestas`)
 const hm = (await sql(`select s.evento_hora::text h, s.evento_fecha::text d, to_char(a.fecha at time zone 'Europe/Madrid', 'YYYY-MM-DD') f, extract(epoch from now() - a.fecha)::int seg from selecciones s join apuestas a on a.id = s.apuesta_id where s.evento = 'Hora - Prueba'`))[0]
-assert.deepEqual([hm.h, hm.d, hm.f], [null, '2026-11-09', hoyMadrid])
+assert.deepEqual([hm.h, hm.d, hm.f], [null, mananaMadrid, hoyMadrid])
 assert.ok(hm.seg >= 0 && hm.seg < 300, `hoy → la hora actual (hace ${hm.seg} s)`)
 bien('Día del evento sin hora, sin hora; la apuesta de hoy guarda la hora actual sin pedirla')
 
@@ -1815,11 +1816,14 @@ async function esperado(userId, extra = '') {
       count(*) filter (where estado in ${RESUELTOS} and promo_tipo is distinct from 'credito' and resultado_economico < 0)::int p,
       count(*) filter (where estado = 'pendiente')::int pend
     from apuestas where user_id = '${userId}' ${extra}`)
+  // «En juego» (desde el 2026-11-09): TODAS las pendientes, sin filtro de fechas.
+  f.pendTodas = (await sql(`select count(*)::int n from apuestas where user_id = '${userId}' and estado = 'pendiente'`))[0].n
   return { ...f, importe: Number(f.importe), beneficio: Number(f.beneficio), propio: Number(f.propio) }
 }
 async function comprobarTarjetas(p, e) {
   assert.equal(await valorTarjeta(p, 'Apuestas resueltas'), String(e.n))
-  assert.equal(await valorTarjeta(p, 'En juego'), String(e.pend))
+  assert.equal(await valorTarjeta(p, 'En juego'), String(e.pendTodas), 'En juego = todas las pendientes')
+  assert.equal(await p.locator('[data-tarjeta="En juego"] [data-aviso="en-juego"]').innerText(), 'Todas tus pendientes, sin filtro de fechas')
   assert.equal(await valorTarjeta(p, 'Importe apostado'), eur(e.importe))
   assert.equal(await valorTarjeta(p, 'Beneficio neto'), eur(e.beneficio, true))
   assert.equal(await valorTarjeta(p, 'Yield'), e.importe ? pct(e.propio / e.importe) : '—')
@@ -2443,8 +2447,13 @@ assert.equal(await cifraBk(pag, '[data-bloque="global"]', 'Saldo'), eur(eGlob.sa
 assert.ok((await grafSaldo(pag).locator('[data-marca="deposito"]').count()) >= 1, 'marca verde de depósito')
 assert.ok((await grafSaldo(pag).locator('[data-marca="retirada"]').count()) >= 1, 'marca roja de retirada')
 await pag.locator('[data-seccion="evolucion-saldo"]:visible').getByText('Depósito', { exact: true }).waitFor()
+// Tocar la gráfica saca una etiqueta; con las flechas se llega al último punto (el saldo de hoy).
 const cajaS = await grafSaldo(pag).locator('[role="img"]').boundingBox()
 await grafSaldo(pag).locator('[role="img"]').tap({ position: { x: cajaS.width - 2, y: cajaS.height / 2 } })
+assert.ok((await grafSaldo(pag).locator('[data-etiqueta-grafica]').innerText()).includes('Saldo: '))
+await grafSaldo(pag).locator('[role="img"]').focus()
+await pag.keyboard.press('Escape')
+await pag.keyboard.press('ArrowLeft')
 assert.ok((await grafSaldo(pag).locator('[data-etiqueta-grafica]').innerText()).includes(`Saldo: ${eur(eGlob.saldo)}`))
 await foto('93-bankroll-evolucion')
 await pag.getByLabel('Saldo de', { exact: true }).selectOption(casaBk.id)
@@ -2629,8 +2638,13 @@ await pag.getByText('«Liga Prueba» archivada.').waitFor()
 await filaCat('Liga Prueba').getByText('Archivada', { exact: true }).waitFor()
 await filaCat('Liga Prueba').getByRole('button', { name: 'Recuperar' }).click()
 await pag.getByText('«Liga Prueba» recuperada.').waitFor()
-await filaCat('Liga Prueba').getByRole('button', { name: 'Borrar liga Liga Prueba' }).click()
-await pag.getByRole('button', { name: 'Sí, borrar' }).click()
+await filaCat('Liga Prueba').getByRole('button', { name: 'Archivar' }).waitFor() // fila ya redibujada
+const confirmarBorrado = pag.getByRole('button', { name: 'Sí, borrar' })
+for (let i = 0; i < 3 && !(await confirmarBorrado.isVisible()); i++) {
+  await filaCat('Liga Prueba').getByRole('button', { name: 'Borrar liga Liga Prueba' }).click()
+  await confirmarBorrado.waitFor({ timeout: 5000 }).catch(() => {})
+}
+await confirmarBorrado.click()
 await pag.getByText('«Liga Prueba» borrada del catálogo.').waitFor()
 assert.equal((await sql(`select count(*)::int n from ligas where user_id = '${ANA.id}' and nombre = 'Liga Prueba'`))[0].n, 0)
 bien('Liga de prueba: creada, archivada, recuperada y borrada')
@@ -2782,7 +2796,22 @@ assert.equal(await fechaGuardada('Leganes - Tenerife'), `${diaMadridMas(5)} 19:0
 assert.equal(await fechaGuardada('Leganés - Tenerife'), `${diaMadridMas(5)} 19:00`)
 bien('Las dos de la tanda guardadas con el día y la hora del partido')
 
+paso('«En juego» en Análisis: todas las pendientes, también las de partidos futuros, en cualquier periodo')
+const pendFuturas = (await sql(`select count(*)::int n from apuestas where user_id = '${ANA.id}' and estado = 'pendiente' and fecha > now()`))[0].n
+assert.ok(pendFuturas > 0, 'hay pendientes con fecha futura (la del partido)')
+const pendTodasAna = (await sql(`select count(*)::int n, coalesce(sum(importe), 0)::bigint i from apuestas where user_id = '${ANA.id}' and estado = 'pendiente'`))[0]
+for (const per of ['hoy', 'ayer', '7d', 'mes', 'todo']) {
+  await pag.goto(`${APP}/analisis${per === 'todo' ? '' : `?periodo=${per}`}`, { waitUntil: 'networkidle' })
+  const tarjeta = pag.locator('[data-tarjeta="En juego"]:visible')
+  await tarjeta.waitFor()
+  const t = await tarjeta.innerText()
+  assert.ok(t.includes(String(pendTodasAna.n)) && t.includes(eur(Number(pendTodasAna.i))), `${per}: ${t}`)
+  assert.ok(t.includes('Todas tus pendientes, sin filtro de fechas'), per)
+}
+bien(`«En juego» = ${pendTodasAna.n} pendientes (${pendFuturas} con fecha futura) en Hoy, Ayer, 7 días, Este mes y Todo, con la nota`)
+
 paso('Editar una apuesta guardada: la fecha no cambia sola; «Usar la fecha del partido» sí')
+await pag.goto(`${APP}/apuestas`, { waitUntil: 'networkidle' })
 await abrir('elche vs levante')
 await editar()
 assert.equal(await diaApuesta(), DIA_MANUAL)
