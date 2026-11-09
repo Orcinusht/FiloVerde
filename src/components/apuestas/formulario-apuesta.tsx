@@ -29,6 +29,7 @@ import {
   NOMBRE_TIPO,
   NOMBRE_TIPO_LARGO,
   TIPOS_APUESTA,
+  esAmbar,
   esEstadoApuesta,
   esTipoApuesta,
   type MotivoRevision,
@@ -69,6 +70,8 @@ import { SelectorCatalogo } from './selector-catalogo'
 import { recuperarCatalogo } from '@/app/(app)/ajustes/deportes/actions'
 import { emojiDeporte } from '@/lib/apuestas/emojis'
 import { SelectorOpcion } from './selector-opcion'
+import { decidirRelleno, esDeFutbol, ladosDelEvento, textoDia, type CampoPartido, type Marcas } from '@/lib/api-futbol/emparejar'
+import type { PartidoCliente, RespuestaConsulta, ResultadoSeleccion } from '@/lib/api-futbol/consulta'
 import { VisorCaptura } from './visor-captura'
 
 type Props = {
@@ -111,6 +114,16 @@ type Deducido = { fuente: 'otra_apuesta' | 'tanda'; origen: DiaConocido; otros: 
 const CAMPOS_PARTIDO: CamposPartido[] = ['evento_fecha', 'evento_hora', 'liga', 'deporte']
 
 type Duplicada = Extract<ResultadoDuplicadas, { ok: true }>
+
+// API-Football en una selección: lo que respondió y el partido aceptado (el que se recordará al
+// guardar). `clave` = partido escrito cuando se consultó (si cambia, ya no vale).
+type ApiSeleccion = {
+  clave: string
+  nivel: ResultadoSeleccion['nivel']
+  partidos: PartidoCliente[]
+  elegido: PartidoCliente | null
+  sugerencias: { dia?: string; hora?: string; liga?: string }
+}
 
 // ¿El resultado guardado no es el que saldría al calcularlo? Entonces se escribió a mano.
 export function resultadoEscritoAMano(v: ValoresFormulario): boolean {
@@ -167,7 +180,7 @@ export function FormularioApuesta(props: Props) {
   const tipo: TipoApuesta = esTipoApuesta(valores.tipo) ? valores.tipo : 'simple'
   const estado = esEstadoApuesta(valores.estado) ? valores.estado : 'pendiente'
   const avisos = useMemo(() => validarFormulario(valores).avisos, [valores])
-  const nDudosos = Object.keys(dudosos).length
+  const nDudosos = Object.values(dudosos).filter(esAmbar).length
 
   // Comprobación al abrir y ~0,6 s después de cada cambio. Las respuestas antiguas se ignoran.
   const casaPendiente =
@@ -292,6 +305,143 @@ export function FormularioApuesta(props: Props) {
         return n
       })
     }
+  }
+
+  // ---------- API-Football (solo fútbol) ----------
+  // Al abrir y ~0,6 s después de cambiar el partido o su día: el servidor busca el partido en
+  // API-Football (con caché y tope). Una coincidencia clara rellena hora, liga, día (si falta) y
+  // "Fútbol", marcados "confirmado por API-Football"; varias → fichas "Partidos posibles"; otro día
+  // → sugerencia. Nunca pisa lo que la captura muestra con claridad. Si falla, no pasa nada.
+  const buscarApi = modo === 'revision' && !apuestaId
+  const [apiSel, setApiSel] = useState<Record<number, ApiSeleccion>>({})
+  const [avisoApi, setAvisoApi] = useState<string | null>(null)
+  const consultadosApi = useRef(new Set<string>())
+  const dudososRef = useRef(dudosos)
+  useEffect(() => {
+    dudososRef.current = dudosos
+  }, [dudosos])
+  const nombreFutbol = buscarDeporte(catalogo, 'Fútbol')?.nombre ?? 'Fútbol'
+  const indicesPartido = (i: number) => (tipo === 'mismo_partido' ? valores.selecciones.map((_, j) => j) : [i])
+  const clavesApi = valores.selecciones
+    .map((s, i) => (tipo === 'mismo_partido' && i > 0 ? '' : `${claveConocida(s.evento)}|${s.evento_fecha}|${esDeFutbol(s.deporte) ? 1 : 0}`))
+    .join('#')
+  useEffect(() => {
+    if (!buscarApi) return
+    const t = setTimeout(async () => {
+      const v = valoresRef.current
+      const pedir = v.selecciones
+        .map((s, i) => ({ s, i, clave: claveConocida(s.evento) }))
+        .filter((x) => (tipo !== 'mismo_partido' || x.i === 0) && x.clave && ladosDelEvento(x.s.evento) && esDeFutbol(x.s.deporte))
+        .filter((x) => !consultadosApi.current.has(`${x.i}|${x.clave}|${x.s.evento_fecha}`))
+      if (!pedir.length) return
+      for (const x of pedir) consultadosApi.current.add(`${x.i}|${x.clave}|${x.s.evento_fecha}`)
+      const d = dudososRef.current
+      const r: RespuestaConsulta | null = await fetch('/api/futbol/partidos', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          selecciones: pedir.map((x) => ({
+            indice: x.i,
+            evento: x.s.evento.slice(0, 200),
+            fecha: /^\d{4}-\d{2}-\d{2}$/.test(x.s.evento_fecha) ? x.s.evento_fecha : '',
+            hora: /^\d{2}:\d{2}$/.test(x.s.evento_hora.slice(0, 5)) && !esAmbar(d[`selecciones.${x.i}.evento_hora`]) ? x.s.evento_hora.slice(0, 5) : '',
+            liga: esAmbar(d[`selecciones.${x.i}.liga`]) ? '' : x.s.liga.slice(0, 80),
+            deporte: x.s.deporte.slice(0, 60),
+          })),
+        }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null)
+      if (!r || !r.activa) return
+      setAvisoApi(r.aviso)
+      for (const res of r.resultados) {
+        const x = pedir.find((y) => y.i === res.indice)
+        if (!x) continue
+        // Si el partido escrito ha cambiado mientras tanto, la respuesta ya no vale.
+        if (claveConocida(valoresRef.current.selecciones[res.indice]?.evento) !== x.clave) continue
+        if (res.nivel === 'clara') aplicarPartido(res.indice, res.partido, x.clave, { nivel: 'clara', partidos: [res.partido] })
+        else
+          setApiSel((a) => ({
+            ...a,
+            [res.indice]: { clave: x.clave, nivel: res.nivel, partidos: res.nivel === 'ninguna' ? [] : res.partidos, elegido: null, sugerencias: {} },
+          }))
+      }
+    }, 600)
+    return () => clearTimeout(t)
+    // aplicarPartido usa refs y setters estables
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buscarApi, clavesApi, tipo])
+
+  // Aplica un partido de la API (coincidencia clara, ficha elegida u "otro día" aceptado).
+  function aplicarPartido(i: number, p: PartidoCliente, clave: string, base: Pick<ApiSeleccion, 'nivel' | 'partidos'>, forzarDia = false) {
+    const indices = tipo === 'mismo_partido' ? valoresRef.current.selecciones.map((_, j) => j) : [i]
+    const actual = valoresRef.current.selecciones[i]
+    if (!actual) return
+    const marcas: Marcas = {}
+    for (const c of ['evento_fecha', 'evento_hora', 'liga', 'deporte'] as CampoPartido[]) marcas[c] = dudososRef.current[`selecciones.${i}.${c}`]
+    const s = { evento_fecha: forzarDia ? p.fecha : actual.evento_fecha, evento_hora: actual.evento_hora, liga: actual.liga, deporte: actual.deporte }
+    if (forzarDia) marcas.evento_fecha = 'api'
+    const r = decidirRelleno(s, marcas, { ...p, liga_id: p.liga.apiId, liga: p.liga.apiNombreOriginal, pais: p.liga.pais, local_id: 0, visitante_id: 0, estado: '' }, p.liga.nombre, nombreFutbol)
+    if (forzarDia) r.cambios.evento_fecha = p.fecha
+    const campos = Object.keys(r.cambios) as CampoPartido[]
+    if (campos.includes('evento_fecha')) for (const j of indices) consultadosApi.current.add(`${j}|${clave}|${r.cambios.evento_fecha}`)
+    if (campos.length) {
+      setValores((v) => ({
+        ...v,
+        selecciones: v.selecciones.map((x, j) => (indices.includes(j) ? { ...x, ...r.cambios } : x)),
+      }))
+      setDudosos((d) => {
+        const n = { ...d }
+        for (const j of indices) for (const c of campos) n[`selecciones.${j}.${c}`] = 'api'
+        return n
+      })
+    }
+    setApiSel((a) => ({ ...a, [i]: { clave, ...base, elegido: p, sugerencias: r.sugerencias } }))
+    // API-Football tiene prioridad sobre "partidos conocidos": su aviso deja de mostrarse.
+    setDeducidos((d) => {
+      if (!d[i]) return d
+      const n = { ...d }
+      delete n[i]
+      return n
+    })
+  }
+
+  // "No es este partido": se quita la confirmación (los datos quedan, editables) y no se recuerda.
+  function descartarPartidoApi(i: number) {
+    const indices = indicesPartido(i)
+    setDudosos((d) => {
+      const n = { ...d }
+      for (const [k, m] of Object.entries(d)) {
+        const r = /^selecciones\.(\d+)\./.exec(k)
+        if (m === 'api' && r && indices.includes(Number(r[1]))) n[k] = 'deducido'
+      }
+      return n
+    })
+    setApiSel((a) => ({ ...a, [i]: { ...a[i], nivel: 'ninguna', partidos: [], elegido: null, sugerencias: {} } }))
+  }
+
+  // Sugerencia aceptada (la captura decía otra hora u otra liga).
+  function usarSugerencia(i: number, campo: 'evento_hora' | 'liga', valor: string) {
+    const indices = indicesPartido(i)
+    setValores((v) => ({ ...v, selecciones: v.selecciones.map((x, j) => (indices.includes(j) ? { ...x, [campo]: valor } : x)) }))
+    setDudosos((d) => {
+      const n = { ...d }
+      for (const j of indices) n[`selecciones.${j}.${campo}`] = 'api'
+      return n
+    })
+    setApiSel((a) => {
+      const sug = { ...a[i].sugerencias }
+      delete sug[campo === 'evento_hora' ? 'hora' : 'liga']
+      return { ...a, [i]: { ...a[i], sugerencias: sug } }
+    })
+  }
+
+  // Al GUARDAR: los partidos aceptados (y que siguen siendo el mismo partido escrito) se recuerdan.
+  function eleccionesApi(v: ValoresFormulario) {
+    return Object.entries(apiSel)
+      .map(([k, a]) => ({ i: Number(k), a }))
+      .filter(({ i, a }) => a.elegido && v.selecciones[i] && claveConocida(v.selecciones[i].evento) === a.clave)
+      .map(({ i, a }) => ({ partidoId: a.elegido!.id, fecha: a.elegido!.fecha, evento: v.selecciones[i].evento.slice(0, 200), liga: v.selecciones[i].liga.slice(0, 80) }))
   }
 
   // ---------- casa de la tanda ----------
@@ -654,11 +804,42 @@ export function FormularioApuesta(props: Props) {
         setErrorGeneral(r.error)
         return
       }
+      const elecciones = buscarApi ? eleccionesApi(aGuardar) : []
+      if (elecciones.length) {
+        // Sin esperar y sin bloquear: si falla, la apuesta ya está guardada.
+        fetch('/api/futbol/recordar', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ elecciones }),
+          keepalive: true,
+        }).catch(() => null)
+      }
       onGuardada(r.id, aGuardar)
     })
   }
 
   // ---------- pintar ----------
+
+  // Tarjeta de API-Football bajo los datos del partido de la selección i.
+  const tarjetaApi = (i: number) => {
+    const a = apiSel[i]
+    const sel = valores.selecciones[i]
+    if (!buscarApi || !a || !sel || claveConocida(sel.evento) !== a.clave) return null
+    if (!a.elegido && a.nivel === 'ninguna') return null
+    const ligasFutbol = ligasDe(catalogo, nombreFutbol).filter((l) => !l.archivada).map((l) => l.nombre)
+    return (
+      <PartidoApiFutbol
+        a={a}
+        sel={sel}
+        ligasFutbol={ligasFutbol}
+        ligaEnCatalogo={!sel.liga.trim() || !!buscarLiga(catalogo, sel.deporte, sel.liga)}
+        onElegir={(p, forzarDia) => aplicarPartido(i, p, a.clave, { nivel: a.nivel, partidos: a.partidos }, forzarDia)}
+        onDescartar={() => descartarPartidoApi(i)}
+        onSugerencia={(c, v) => usarSugerencia(i, c, v)}
+        onLiga={(l) => cambiarLiga(indicesPartido(i), l)}
+      />
+    )
+  }
 
   const p = (clave: string) => ({ motivo: dudosos[clave], error: errores[clave] })
   // En "mismo partido", un campo común está a revisar si lo está en cualquier selección.
@@ -707,6 +888,12 @@ export function FormularioApuesta(props: Props) {
         <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
           Los campos en <strong>ámbar</strong> no se veían, estaban borrosos o la IA los ha deducido: compáralos con la
           captura.
+        </p>
+      )}
+
+      {buscarApi && avisoApi && (
+        <p role="status" data-aviso-api="" className="rounded-xl bg-surface px-3 py-2 text-xs text-muted">
+          {avisoApi}
         </p>
       )}
 
@@ -1031,9 +1218,10 @@ export function FormularioApuesta(props: Props) {
             <Entrada type="date" value={valores.selecciones[0]?.evento_fecha ?? ''} onChange={(v) => cambiarComun('evento_fecha', v)} marca={pComun('evento_fecha').motivo} conError={!!errores['selecciones.0.evento_fecha']} />
           </Campo>
           <Campo etiqueta="Hora" {...pComun('evento_hora')}>
-            <SelectorHora valor={valores.selecciones[0]?.evento_hora ?? ''} onCambio={(v) => cambiarComun('evento_hora', v)} marcado={!!pComun('evento_hora').motivo} conError={!!errores['selecciones.0.evento_hora']} />
+            <SelectorHora valor={valores.selecciones[0]?.evento_hora ?? ''} onCambio={(v) => cambiarComun('evento_hora', v)} marcado={esAmbar(pComun('evento_hora').motivo)} conError={!!errores['selecciones.0.evento_hora']} />
           </Campo>
           {deducidos[0] && <PartidoConocido d={deducidos[0]} onElegir={(dia) => elegirDia(0, dia)} />}
+          {tarjetaApi(0)}
         </Grupo>
       )}
 
@@ -1054,7 +1242,12 @@ export function FormularioApuesta(props: Props) {
               onCambio={(c, v) => cambiarSeleccion(i, c, v)}
               onQuitar={() => quitarSeleccion(i)}
               deporteLiga={camposDeporteLiga([i], i, p(`selecciones.${i}.deporte`), p(`selecciones.${i}.liga`))}
-              partidoConocido={deducidos[i] && <PartidoConocido d={deducidos[i]} onElegir={(dia) => elegirDia(i, dia)} />}
+              partidoConocido={
+                <>
+                  {deducidos[i] && <PartidoConocido d={deducidos[i]} onElegir={(dia) => elegirDia(i, dia)} />}
+                  {tipo !== 'mismo_partido' && tarjetaApi(i)}
+                </>
+              }
             />
           ))}
         </ol>
@@ -1228,7 +1421,7 @@ function TarjetaSeleccion({
             {ent('evento_fecha', { type: 'date' })}
           </Campo>
           <Campo etiqueta="Hora" {...ps('evento_hora')}>
-            <SelectorHora valor={s.evento_hora} onCambio={(v) => onCambio('evento_hora', v)} marcado={!!dudosos[k('evento_hora')]} conError={!!errores[k('evento_hora')]} />
+            <SelectorHora valor={s.evento_hora} onCambio={(v) => onCambio('evento_hora', v)} marcado={esAmbar(dudosos[k('evento_hora')])} conError={!!errores[k('evento_hora')]} />
           </Campo>
           {partidoConocido}
         </>
@@ -1237,6 +1430,114 @@ function TarjetaSeleccion({
         <Desplegable value={s.estado} onChange={(v) => onCambio('estado', v)} marca={dudosos[k('estado')]} opciones={ESTADOS_SELECCION.map((e) => [e, NOMBRE_ESTADO[e]])} />
       </Campo>
     </li>
+  )
+}
+
+// ---------- API-Football ----------
+
+const CLASE_FICHA = 'min-h-11 w-full rounded-xl border border-sky-500/40 bg-surface px-3 py-2 text-left text-sm text-foreground'
+
+function PartidoApiFutbol({
+  a,
+  sel,
+  ligasFutbol,
+  ligaEnCatalogo,
+  onElegir,
+  onDescartar,
+  onSugerencia,
+  onLiga,
+}: {
+  a: ApiSeleccion
+  sel: ValoresSeleccion
+  ligasFutbol: string[]
+  ligaEnCatalogo: boolean
+  onElegir: (p: PartidoCliente, forzarDia: boolean) => void
+  onDescartar: () => void
+  onSugerencia: (campo: 'evento_hora' | 'liga', valor: string) => void
+  onLiga: (liga: string) => void
+}) {
+  const e = a.elegido
+  if (!e) {
+    const otroDia = a.nivel === 'otro_dia'
+    return (
+      <div className="space-y-2 rounded-xl bg-sky-500/10 px-3 py-2 text-sm text-sky-900 dark:text-sky-200" data-api-futbol={a.nivel}>
+        <p className="font-semibold">
+          {otroDia ? `La API indica otro día para este partido${sel.evento_fecha ? ` (la captura dice el ${textoDia(sel.evento_fecha)})` : ''}:` : 'Partidos posibles (API-Football): elige el tuyo'}
+        </p>
+        <ul className="space-y-2">
+          {a.partidos.map((p) => (
+            <li key={p.id}>
+              <button type="button" data-partido-posible={p.id} onClick={() => onElegir(p, otroDia)} className={CLASE_FICHA}>
+                <span className="block font-semibold">
+                  {p.local} - {p.visitante}
+                </span>
+                <span className="block text-xs text-muted">
+                  {textoDia(p.fecha, p.hora || undefined)} · {p.liga.apiNombre}
+                  {otroDia ? ' · Usar este día' : ''}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+  const sug = a.sugerencias
+  return (
+    <div className="space-y-2 rounded-xl bg-sky-500/10 px-3 py-2 text-sm text-sky-900 dark:text-sky-200" data-api-futbol="confirmado">
+      <p>
+        <strong>✓ Confirmado por API-Football:</strong> {e.local} - {e.visitante} · {textoDia(e.fecha, e.hora || undefined)} · {e.liga.apiNombre}
+      </p>
+      {sug.dia && sug.dia !== sel.evento_fecha && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span>La API indica el {textoDia(sug.dia)}.</span>
+          <button type="button" onClick={() => onElegir(e, true)} className="h-11 rounded-xl border border-sky-500/50 bg-surface px-3 text-sm font-semibold text-foreground">
+            Usar el {textoDia(sug.dia)}
+          </button>
+        </div>
+      )}
+      {sug.hora && sug.hora !== sel.evento_hora.slice(0, 5) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span>
+            La captura dice {sel.evento_hora.slice(0, 5)}; la API indica {sug.hora}.
+          </span>
+          <button type="button" onClick={() => onSugerencia('evento_hora', sug.hora!)} className="h-11 rounded-xl border border-sky-500/50 bg-surface px-3 text-sm font-semibold text-foreground">
+            Usar {sug.hora}
+          </button>
+        </div>
+      )}
+      {sug.liga && sug.liga !== sel.liga && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span>
+            La captura dice «{sel.liga}»; la API indica «{sug.liga}».
+          </span>
+          <button type="button" onClick={() => onSugerencia('liga', sug.liga!)} className="h-11 rounded-xl border border-sky-500/50 bg-surface px-3 text-sm font-semibold text-foreground">
+            Usar «{sug.liga}»
+          </button>
+        </div>
+      )}
+      {!ligaEnCatalogo && ligasFutbol.length > 0 && (
+        <label className="block space-y-1">
+          <span className="block text-xs">«{sel.liga}» no está en tu catálogo: créala arriba («Crear y usar») o usa una de tus ligas.</span>
+          <select
+            value=""
+            data-usar-mi-liga=""
+            onChange={(ev) => ev.target.value && onLiga(ev.target.value)}
+            className="h-11 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-base text-foreground"
+          >
+            <option value="">Usar una de mis ligas…</option>
+            {ligasFutbol.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <button type="button" onClick={onDescartar} className="h-11 text-sm font-medium text-sky-800 underline dark:text-sky-300">
+        No es este partido
+      </button>
+    </div>
   )
 }
 
@@ -1592,7 +1893,7 @@ function CamposDeporteLiga({
             vacio="Elige…"
             textoNuevo="+ Nuevo deporte…"
             emoji={emojiDeporte}
-            marcado={!!pDeporte.motivo}
+            marcado={esAmbar(pDeporte.motivo)}
             conError={!!pDeporte.error}
             esNueva={pDeporte.motivo === 'nueva'}
             crear={crearDeporte}
@@ -1607,9 +1908,10 @@ function CamposDeporteLiga({
             recuperar={() => recuperarCatalogo('liga', liga, deporte)}
             vacio="Sin liga"
             textoNuevo="+ Nueva liga…"
-            marcado={!!pLiga.motivo}
+            marcado={esAmbar(pLiga.motivo)}
             conError={!!pLiga.error}
-            esNueva={pLiga.motivo === 'nueva'}
+            esNueva={pLiga.motivo === 'nueva' || pLiga.motivo === 'api'}
+            origenNueva={pLiga.motivo === 'api' ? 'API-Football indica' : undefined}
             deshabilitado={!deporteEnCatalogo}
             ayudaDeshabilitado={deporte ? 'Crea antes el deporte' : 'Elige antes el deporte'}
             crear={crearLiga}
@@ -1757,15 +2059,21 @@ function Campo({
         <label htmlFor={id} className="text-sm font-medium">
           {etiqueta}
         </label>
-        {motivo && (
-          <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
-            revisar · {NOMBRE_MOTIVO[motivo]}
+        {motivo === 'api' ? (
+          <span data-confirmado-api="" className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-800 dark:text-sky-300">
+            ✓ {NOMBRE_MOTIVO.api}
           </span>
+        ) : (
+          motivo && (
+            <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
+              revisar · {NOMBRE_MOTIVO[motivo]}
+            </span>
+          )
         )}
       </div>
       <IdCampo value={{ id, descripcion }}>{children}</IdCampo>
       <span id={descripcion}>
-        {motivo && <span className="sr-only">A revisar: {NOMBRE_MOTIVO[motivo]}. </span>}
+        {motivo && <span className="sr-only">{motivo === 'api' ? `${NOMBRE_MOTIVO.api}. ` : `A revisar: ${NOMBRE_MOTIVO[motivo]}. `}</span>}
         {error ? (
           <span className="mt-1 block text-sm text-red-600 dark:text-red-400">{error}</span>
         ) : (
@@ -1811,7 +2119,7 @@ function Entrada({
       placeholder={placeholder}
       autoComplete="off"
       onChange={(e) => onChange(e.target.value)}
-      className={clasesEntrada(!!marca, conError)}
+      className={clasesEntrada(esAmbar(marca), conError)}
     />
   )
 }
@@ -1831,7 +2139,7 @@ function Desplegable({
 }) {
   const { id, descripcion } = useIdCampo()
   return (
-    <select id={id} aria-describedby={descripcion} value={value} onChange={(e) => onChange(e.target.value)} className={clasesEntrada(!!marca, conError)}>
+    <select id={id} aria-describedby={descripcion} value={value} onChange={(e) => onChange(e.target.value)} className={clasesEntrada(esAmbar(marca), conError)}>
       {opciones.map(([v, t]) => (
         <option key={v} value={v}>
           {t}

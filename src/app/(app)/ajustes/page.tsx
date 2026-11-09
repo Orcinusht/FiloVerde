@@ -6,6 +6,7 @@ import { AccountSection } from './account-section'
 import { CosteIA } from './coste-ia'
 import { CapturasGuardadas } from './capturas-guardadas'
 import { CopiaSeguridad } from './copia-seguridad'
+import { ApiFutbol } from './api-futbol'
 
 export const metadata = { title: 'Ajustes · Filoverde' }
 
@@ -20,6 +21,9 @@ export default function Page() {
         </Suspense>
         <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-surface" />}>
           <CapturasGuardadas />
+        </Suspense>
+        <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-surface" />}>
+          <ApiFutbol />
         </Suspense>
         <CopiaSeguridad />
         <section>

@@ -126,8 +126,8 @@ test('el servidor guarda el día y la hora del último partido (y no se fía del
   assert.ok(r.ok, JSON.stringify(!r.ok && r.errores))
   assert.equal(r.ok && r.datos.fecha, '2026-11-12T23:30:00.000Z', '00:30 del 13 en España')
   // Si el usuario puso otro día a mano, ese día a las 12:00
-  const otro = validarFormulario({ ...v, fecha: '2026-11-10' })
-  assert.equal(otro.ok && otro.datos.fecha, '2026-11-10T11:00:00.000Z')
+  const otro = validarFormulario({ ...v, fecha: '2025-11-10' })
+  assert.equal(otro.ok && otro.datos.fecha, '2025-11-10T11:00:00.000Z')
 })
 
 // ---------- Partidos conocidos ----------

@@ -62,7 +62,8 @@ export type MotivoDuda = (typeof MOTIVOS_DUDA)[number]
 // necesario que no se ve ni se puede calcular · "propuesta" = la IA lo ha leído y hay que confirmarlo
 // (tipo de promoción).
 // "otra_apuesta" / "tanda" = rellenado con un partido que ya registraste (o de esta misma tanda).
-export type MotivoRevision = MotivoDuda | 'nueva' | 'falta' | 'propuesta' | 'falta_dia' | 'no_entendida' | 'dia_semana' | 'otra_apuesta' | 'tanda'
+// "api" = confirmado por API-Football: NO es una duda (se pinta con su propia marca, no en ámbar).
+export type MotivoRevision = MotivoDuda | 'nueva' | 'falta' | 'propuesta' | 'falta_dia' | 'no_entendida' | 'dia_semana' | 'otra_apuesta' | 'tanda' | 'api'
 export const NOMBRE_MOTIVO: Record<MotivoRevision, string> = {
   no_visible: 'no visible',
   borroso: 'borroso',
@@ -75,7 +76,11 @@ export const NOMBRE_MOTIVO: Record<MotivoRevision, string> = {
   dia_semana: 'el día de la semana no coincide',
   otra_apuesta: 'deducido de otra apuesta tuya',
   tanda: 'deducido de una apuesta anterior de esta tanda',
+  api: 'confirmado por API-Football',
 }
+
+// ¿Se pinta en ámbar (a revisar)? Todo menos lo confirmado por API-Football.
+export const esAmbar = (m: MotivoRevision | undefined | null): boolean => !!m && m !== 'api'
 
 // Clases de color para la etiqueta de estado.
 export const COLOR_ESTADO: Record<EstadoApuesta, string> = {
