@@ -985,3 +985,96 @@ test('La migración de deportes y ligas se puede pegar dos veces sin errores', a
   const { rows } = await db.query(`select count(*)::int n from pg_trigger where tgname in ('deportes_sin_uso', 'ligas_sin_uso')`)
   assert.equal(rows[0].n, 2)
 })
+
+// ---------- Registro, tarea 3: API-Football (caché y equivalencias por usuario) ----------
+
+const API_TABLAS = ['api_futbol_dias', 'api_futbol_equipos', 'api_futbol_ligas', 'api_futbol_uso']
+
+// Ana guarda un día de la caché, una equivalencia de equipo, otra de liga y su uso del día.
+async function datosApiDe(tx, sufijo) {
+  await tx.query(
+    `insert into api_futbol_dias (fecha, partidos) values ('2026-11-09', $1::jsonb)`,
+    [JSON.stringify([{ id: 1, fecha: '2026-11-09', hora: '21:00', liga_id: 140, liga: 'La Liga', pais: 'Spain', local_id: 529, local: 'Barcelona', visitante_id: 541, visitante: 'Real Madrid', estado: 'NS' }])],
+  )
+  await tx.query(`insert into api_futbol_equipos (nombre_captura, equipo_id, equipo_nombre) values ($1, 157, 'Bayern München')`, [`bayern munchen ${sufijo}`])
+  const futbol = await idDe(tx, `select id from deportes where nombre = 'Fútbol'`)
+  const liga = await idDe(tx, `insert into ligas (deporte_id, nombre) values ($1, $2) returning id`, [futbol, `LaLiga ${sufijo}`])
+  await tx.query(`insert into api_futbol_ligas (liga_api_id, liga_api_nombre, pais, liga_id) values (140, 'La Liga', 'Spain', $1)`, [liga])
+  await tx.query(`insert into api_futbol_uso (dia, llamadas, restantes, limite_dia) values ('2026-11-09', 3, 7497, 7500)`)
+  return liga
+}
+
+test('API-Football: cada usuario solo ve, cambia y borra su caché y sus equivalencias', async () => {
+  let ligaAna
+  await como(ANA, async (tx) => {
+    ligaAna = await datosApiDe(tx, 'A')
+    for (const t of API_TABLAS) assert.equal(await cuantas(tx, t), 1, t)
+  })
+  await como(BETO, async (tx) => {
+    for (const t of API_TABLAS) {
+      assert.equal(await cuantas(tx, t), 0, `Beto ve ${t} de Ana`)
+      assert.equal((await tx.query(`update ${t} set user_id = user_id`)).affectedRows, 0, `Beto cambia ${t}`)
+      assert.equal((await tx.query(`delete from ${t}`)).affectedRows, 0, `Beto borra ${t}`)
+    }
+  })
+  // Beto no puede escribir a nombre de Ana ni apuntar a una liga de Ana.
+  const intentos = [
+    [`insert into api_futbol_dias (user_id, fecha) values ($1, '2026-11-10')`, [ANA]],
+    [`insert into api_futbol_equipos (user_id, nombre_captura, equipo_id, equipo_nombre) values ($1, 'x', 1, 'X')`, [ANA]],
+    [`insert into api_futbol_uso (user_id, dia) values ($1, '2026-11-10')`, [ANA]],
+    [`insert into api_futbol_ligas (liga_api_id, liga_api_nombre, liga_id) values (1, 'X', $1)`, [null]],
+  ]
+  for (const [sql, p] of intentos) {
+    const params = p[0] === null ? [ligaAna] : p
+    await assert.rejects(como(BETO, (tx) => tx.query(sql, params)), undefined, sql)
+  }
+  await como(ANA, async (tx) => {
+    for (const t of API_TABLAS) assert.equal(await cuantas(tx, t), 1, `${t} de Ana intacta`)
+  })
+})
+
+test('API-Football: un visitante sin sesión no puede leer ni escribir', async () => {
+  for (const t of API_TABLAS) await assert.rejects(como(null, (tx) => tx.query(`select * from ${t}`)), undefined, t)
+  await assert.rejects(como(null, (tx) => tx.query(`insert into api_futbol_uso (user_id, dia) values ($1, '2026-11-11')`, [ANA])))
+})
+
+test('API-Football: la caché es una lista y los datos raros se rechazan', async () => {
+  await assert.rejects(como(ANA, (tx) => tx.query(`insert into api_futbol_dias (fecha, partidos) values ('2026-11-12', '{}'::jsonb)`)))
+  await assert.rejects(como(ANA, (tx) => tx.query(`insert into api_futbol_uso (dia, llamadas) values ('2026-11-12', -1)`)))
+  await assert.rejects(como(ANA, (tx) => tx.query(`insert into api_futbol_equipos (nombre_captura, equipo_id, equipo_nombre) values ('', 1, 'X')`)))
+})
+
+test('API-Football: borrar una liga del catálogo quita su equivalencia; borrar una cuenta entera sigue funcionando', async () => {
+  const EVA = '00000000-0000-0000-0000-00000000000e'
+  await db.query(`insert into auth.users (id, email) values ($1, 'eva@test')`, [EVA])
+  await como(EVA, async (tx) => {
+    const liga = await datosApiDe(tx, 'E')
+    await tx.query(`delete from ligas where id = $1`, [liga]) // sin uso: se puede borrar
+    assert.equal(await cuantas(tx, 'api_futbol_ligas'), 0)
+    await datosApiDe(tx, 'E2').catch(() => null) // día y uso repetidos: da igual, solo hace falta tener datos
+  })
+  await como(EVA, async (tx) => {
+    const futbol = await idDe(tx, `select id from deportes where nombre = 'Fútbol'`)
+    const liga = await idDe(tx, `insert into ligas (deporte_id, nombre) values ($1, 'Liga Eva') returning id`, [futbol])
+    await tx.query(`insert into api_futbol_ligas (liga_api_id, liga_api_nombre, liga_id) values (39, 'Premier League', $1)`, [liga])
+    await apuestaCon(tx, 'simple', [['Fútbol', 'Liga Eva']])
+  })
+  await db.query(`delete from auth.users where id = $1`, [EVA])
+  const { rows } = await db.query(
+    `select (select count(*) from api_futbol_dias where user_id = $1)::int d, (select count(*) from api_futbol_equipos where user_id = $1)::int e,
+            (select count(*) from api_futbol_ligas where user_id = $1)::int l, (select count(*) from api_futbol_uso where user_id = $1)::int u`,
+    [EVA],
+  )
+  assert.deepEqual(rows[0], { d: 0, e: 0, l: 0, u: 0 })
+})
+
+test('La migración de API-Football se puede pegar dos veces sin errores', async () => {
+  const sql = readFileSync(join(ROOT, 'supabase/migrations/20261109000001_registro_api_futbol.sql'), 'utf8')
+  await db.exec(sql)
+  await db.exec(sql)
+  const { rows } = await db.query(
+    `select count(*)::int n from pg_policies where tablename in ('api_futbol_dias', 'api_futbol_equipos', 'api_futbol_ligas', 'api_futbol_uso')`,
+  )
+  assert.equal(rows[0].n, 16)
+  await como(ANA, async (tx) => assert.equal(await cuantas(tx, 'api_futbol_dias'), 1, 'los datos siguen'))
+})

@@ -82,11 +82,24 @@ archivo o panel ponerlas).
    PR #10; pruebas de GitHub Actions en verde; sin migración; instrucciones v7): selector "Casa de esta
    tanda" antes de subir capturas, la casa elegida va a la IA y a cada apuesta (editable), con aviso si
    la captura es claramente de otra. **Verificada en el móvil con la cuenta de email.** Falta
-   verificarla en producción con la cuenta de Google. Tarea 3 y tarea 2b (aparcada), en Pendiente.
+   verificarla en producción con la cuenta de Google. Tarea 2b (aparcada), en Pendiente.
+   **Tarea 3: API-Football (solo fútbol), hecha en la rama `registro-api-futbol` el 2026-11-09** (sin
+   fusionar; migración `20261109000001` **pendiente de pegar** en Supabase; clave `API_FOOTBALL_KEY`
+   pendiente de poner en Vercel): al leer una captura de fútbol (o escribir el partido a mano), el
+   partido se busca en API-Football y, si hay una coincidencia clara, se rellenan hora, liga, día (si
+   falta) y "Fútbol" con la marca "confirmado por API-Football"; si hay varias, fichas "Partidos
+   posibles"; las elecciones se recuerdan al guardar. Ver "Registro: API-Football".
 
 ### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-09, tras fusionar la tarea 2a del registro)
-1. **Registro, tarea 3: API-Football** (solo fútbol). Antes de empezar hace falta conocer el plan
-   contratado y cuántas llamadas diarias permite.
+1. **Registro, tarea 3: API-Football** (solo fútbol): hecha en la rama `registro-api-futbol`; falta
+   pegar la migración `20261109000001`, poner `API_FOOTBALL_KEY` en Vercel, verificarla en el móvil
+   con el despliegue de la rama, fusionar y verificarla en producción con la cuenta de Google. El plan
+   del usuario es de pago (probablemente Pro, 7.500 llamadas al día; sin confirmar: Ajustes →
+   API-Football → "Comprobar conexión" lo dice).
+   **Limitación futura**: la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
+   USUARIO (`api_futbol_uso`); con más usuarios haría falta un contador GLOBAL (p. ej. una tabla común
+   escrita por una función de la BD) para no agotar la cuota de la cuenta entre todos. Las cabeceras
+   de la API (llamadas restantes de la CUENTA) ya frenan a todos cuando quedan menos de 50.
 2. **Registro, tarea 2b: tabla global de casas conocidas con descripciones visuales** (aprobadas por el
    propietario): **APARCADA el 2026-11-09**. Se revisa si el usuario empieza a usar varias casas y las
    cifras de la versión 7 muestran confusiones entre casas. Motivo: el diagnóstico (129 apuestas con
@@ -104,7 +117,7 @@ archivo o panel ponerlas).
 6. **Fusionar casas o estrategias duplicadas** (aparcado el 2026-11-05): mover apuestas y movimientos
    de una a otra en una función de la BD; cuidado con los traspasos entre las dos. Solo si aparece un
    duplicado real (la regla de nombre único evita los de mayúsculas, tildes y espacios).
-7. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
+7. **Informe con IA con Opus** (`claude-opus-5-5`; fase propia, después de las mejoras del registro): sin empezar.
 
 Además:
 - **Verificar en producción con la cuenta de Google** la casa de la tanda: selector con la última casa,
@@ -211,6 +224,8 @@ src/
       apuestas/         lista (filtros) · nueva/ (capturas o ?manual=1) · [id]/ (detalle y edición)
         actions.ts      guardar, borrar, crear casa/estrategia, descartar captura (Server Actions)
       ajustes/          tema, coste de la IA (coste-ia.tsx), capturas guardadas (recuento y borrado),
+                        API-Football (api-futbol.tsx: conectada, llamadas de hoy y restantes;
+                        boton-comprobar-api.tsx = "Comprobar conexión"),
                         copia de seguridad (copia-seguridad.tsx: descarga de los CSV),
                         casas/ y estrategias/ (gestión: crear, renombrar, archivar y borrar sin uso;
                         opciones/ = pantalla común pagina-opciones.tsx + gestion-opciones.tsx),
@@ -232,6 +247,8 @@ src/
     api/capturas/     POST subir · transcribir/ (IA) · ver/ (sirve la imagen privada, solo en la revisión)
                       · reintentar/ (reintenta en silencio los borrados de imágenes que fallaron)
     api/exportar/     GET apuestas/, selecciones/ y bankroll/ (copia de seguridad en CSV; responder.ts = común)
+    api/futbol/       POST partidos/ (busca en API-Football las selecciones de la revisión) · recordar/
+                      (tras guardar: equivalencias de equipos y ligas) · comprobar/ (Ajustes: /status)
     login/            pantalla de entrada (providers.ts = proveedores, actions.ts = login en servidor)
     auth/callback/    vuelta de Google (?code) y del email de confirmación (#tokens) → sesión
     auth/confirm/     alternativa para el email si se usa plantilla con token_hash
@@ -261,6 +278,12 @@ src/
                       partidos-leer.ts (lee tus selecciones guardadas: sesión, tandas de 1000),
                       casa-tanda.ts (casa de esta tanda: opciones sin archivadas, preselección,
                       validación de la casa recibida, aviso "La captura parece de X", última casa usada)
+    api-futbol/       API-Football SIN claves ni React (probado con una API simulada): emparejar.ts
+                      (funciones puras: nombres, puntuación, niveles, ligas, qué rellenar, días,
+                      caché y tope) · respuesta.ts (esquemas zod de sus respuestas) · cliente.ts
+                      (GET con 4 s y un reintento; cabeceras; configuración desde el entorno) ·
+                      servicio.ts (caché → API, páginas, tope, errores al log) · consulta.ts (de las
+                      selecciones a lo que ve el móvil, con "otro día")
     exportar/         csv.ts (formato: celdas, columnas, lectura en tandas) · leer.ts (consultas
                       con la sesión del usuario; sin claves, se prueba con un cliente falso)
     analisis/         calculos.ts (funciones puras: métricas, segmentos y aciertos con los ids de
@@ -278,6 +301,8 @@ src/
                       movimiento y su fecha) · leer.ts (casas, movimientos y apuestas, en tandas de 1000)
     supabase/         clientes de Supabase (navegador, servidor, proxy)
     server/           SOLO servidor: env.ts (claves y modelo), ia/ (Claude y precios),
+                      api-futbol.ts (API-Football con la sesión: almacén Supabase, consulta,
+                      recordar al guardar, estado y "Comprobar"),
                       capturas.ts (bucket), datos.ts (lecturas de la BD), catalogo.ts y
                       acciones-catalogo.ts (deportes y ligas), acciones-opciones.ts (Server Actions de
                       casas y estrategias) y opciones.ts (sus lecturas y su uso), pendientes.ts (sin revisar),
@@ -289,8 +314,8 @@ tests/                prueba de seguridad RLS + lógica de apuestas (logica.test
                       + análisis (analisis.test.ts) + bankroll (bankroll.test.ts) + casas y estrategias (opciones.test.ts)
                       + deportes y ligas (catalogo.test.ts) + evolución en el tiempo (evolucion.test.ts) + gráficas (graficas.test.ts)
                       + registro: fecha del partido y partidos conocidos (partidos.test.ts)
-                      + casa de la tanda (casa-tanda.test.ts)
-scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
+                      + casa de la tanda (casa-tanda.test.ts) + API-Football (api-futbol.test.ts)
+scripts/              iconos · simulador.mjs (Supabase + Claude + API-Football falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
 
@@ -502,6 +527,15 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 - `ganancia_potencial` = retorno total (importe × cuota, incluye lo apostado).
   `resultado_economico` = neto (+/−). Cash out: neto = recuperado − importe.
 
+- **API-Football** (migración `20261109000001`, solo aditiva y repetible; tablas por usuario con RLS
+  "cada usuario lo suyo", sin permisos para `anon`, `on delete cascade` a la cuenta; NO entran en el
+  CSV): `api_futbol_dias` (caché: una fila por día con la lista JSON de partidos —id, fecha, hora,
+  liga, país, equipos con su id, estado—, `completo` y `actualizado`), `api_futbol_equipos` (nombre
+  de la captura normalizado → id y nombre del equipo en la API), `api_futbol_ligas` (id de liga de
+  la API → liga de TU catálogo por id, FK compuesta `(liga_id, user_id)` → `ligas`, que gana la
+  restricción única `ligas_id_user`; borrar la liga borra la equivalencia) y `api_futbol_uso`
+  (llamadas del día UTC, restantes y límite según la API, pausa tras un 429).
+
 **Cambios en la base de datos = nueva migración** en `supabase/migrations/` (nunca editar una
 ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
 
@@ -548,6 +582,79 @@ tandas de 1000 y se comparan en el servidor (cientos o pocos miles de filas: inm
   fechas (`leerEnJuego` + `enJuego`), con la nota "Todas tus pendientes, sin filtro de fechas"; así
   las de partidos futuros no desaparecen en periodos que acaban hoy. El resto del resumen sigue el
   periodo. Gráficas y el detalle no muestran pendientes; Bankroll ya contaba todas.
+
+## Registro: API-Football (mejoras del registro, tarea 3)
+
+Solo fútbol. La API propone y el usuario decide: todo editable. Rama `registro-api-futbol`.
+
+- **Conexión** (solo servidor, `lib/server/api-futbol.ts` + `lib/api-futbol/cliente.ts`): GET a
+  `https://v3.football.api-sports.io` con la clave SOLO en la cabecera `x-apisports-key` (ninguna
+  más). `API_FOOTBALL_PROVIDER=rapidapi` usa `api-football-v1.p.rapidapi.com/v3` con `x-rapidapi-key` y
+  `x-rapidapi-host`. **Sin `API_FOOTBALL_KEY` todo queda apagado** (la app, como antes). 4 s por
+  llamada y UN reintento solo si falla la red, se agota el tiempo o hay 5xx; un 429 o una clave
+  rechazada no se reintentan. Plazo total de una consulta: 6 s. La API responde a veces 200 con
+  `errors` dentro (límite del día, clave): se trata como error. `API_FOOTBALL_BASE_URL` solo vale
+  para `localhost` (prueba local): la clave nunca puede ir a otra web.
+- **Consulta**: `/fixtures?date=AAAA-MM-DD&timezone=Europe/Madrid` (todos los partidos del día en una
+  llamada). Se comprueba `paging`: si hay más páginas se piden (hasta 5); si falta alguna, el día se
+  guarda como `completo = false` y no vale como caché definitiva. Respuestas validadas con zod: un
+  partido raro se ignora (`[api-futbol:forma]`). Días: el de cada selección; sin día, hoy y los dos
+  siguientes; si el día de la captura no tiene coincidencia, también el día antes y el después
+  (normalmente ya en caché) para la sugerencia "La API indica el 4 nov".
+- **Caché por usuario** (`api_futbol_dias`): se lee primero; días pasados, una vez consultados ya
+  pasados, para siempre; hoy y futuros, 6 horas. Si la API falla, una caché antigua vale más que nada.
+  Al escribir se borran los días de más de 90 días (y el uso antiguo).
+- **Tope diario**: `API_FOOTBALL_TOPE_DIARIO` (300 por defecto) llamadas por día UTC (como la API) y
+  usuario; además se para si `x-ratelimit-requests-remaining` < 50, y 5 min (o lo que pida
+  `retry-after`, máx. 1 h) tras un 429. Cada intento cuenta como una llamada.
+- **Emparejado** (`emparejar.ts`): nombres sin mayúsculas ni tildes (ß→ss, ø→o…), sin palabras vacías
+  (fc, cf, sk, sc, ac, cd, ud, rc, fk, sv, club, de, del, la, el, vfb, vfl…) y con ~20 equivalencias
+  (munich→munchen, colonia→koln, napoles→napoli, oporto→porto, man→manchester, utd→united, psg→paris
+  saint germain…). **Palabras distintivas** (femenino/women/w, castilla/b/ii/atlètic/reserves,
+  u21/sub-21, juvenil…) tienen que coincidir: si no, el equipo casi no puntúa ("Real Madrid" ≠ "Real
+  Madrid Castilla", "Barcelona" ≠ "Barcelona W"). Parecido de equipo = palabras comunes (iguales,
+  una empieza por la otra con ≥ 4 letras o una letra de diferencia con ≥ 5) / palabras del nombre
+  más corto, con un extra si coinciden todas. Partido = media de los dos equipos (cada uno ≥ 0,5);
+  al revés, −0,15; hora igual +0,15 (±15 min +0,05; distinta −0,15); liga leída que corresponde +0,15;
+  equipo recordado = 1 (recordado como otro: ×0,6). **Clara**: ≥ 0,75 y 0,1 por encima de la segunda;
+  **varias**: hasta 3 fichas (≥ 0,6), sin ninguna elegida; **ninguna**: nada.
+- **Qué se rellena** (`decidirRelleno`): día solo si está vacío (si es otro, sugerencia: el día nunca
+  se cambia solo); hora y liga si están vacías o dudosas (ámbar, deducidas de otra apuesta o de la
+  tanda, o puestas antes por la API); si la captura las muestra claras y son otras, sugerencia con
+  botón "Usar…"; deporte "Fútbol" (el de tu catálogo) si está vacío o dudoso. Prioridad: API-Football
+  > partidos conocidos > IA (su aviso "Deducido de otra apuesta tuya" deja de mostrarse). Marca propia
+  azul **"✓ confirmado por API-Football"** (motivo `api`, no cuenta como ámbar). "No es este partido"
+  quita la confirmación (los datos pasan a ámbar "deducido") y no se recuerda.
+- **Ligas** (`ligaParaPartido`): 1) la equivalencia recordada (id de la API → liga de tu catálogo);
+  2) tu liga de fútbol con el mismo nombre sin mayúsculas, tildes, espacios ni "UEFA" ("La Liga" =
+  "LaLiga", "UEFA Champions League" = "Champions League") si no está ya enlazada a OTRA liga de la
+  API; 3) si no, el nombre de la API con "Crear y usar" ("API-Football indica «X». Crear y usar") o
+  **"Usar una de mis ligas"** (desplegable con tu catálogo de fútbol). Mismo nombre en otro país (tu
+  "Serie A" enlazada a la de Italia y llega la de Brasil) o nombre reservado: se propone con el país,
+  "Serie A (Brasil)". Archivadas: se reconocen y el desplegable ofrece "Recuperar".
+- **Recordar** (al pulsar Guardar, no al tocar la ficha): `POST /api/futbol/recordar` sin esperar;
+  por cada selección con partido aceptado (y el mismo partido escrito) guarda cada nombre de la
+  captura con su equipo (respetando si estaban al revés) y la liga final de la selección (si está en
+  tu catálogo) con la de la API. Los datos del partido salen de TU caché, no del navegador.
+- **Dónde**: revisión de capturas (al abrir) y registro a mano (~0,6 s después de escribir el partido
+  o cambiar su día); en "mismo partido", una vez para todas las condiciones. **Nunca al editar una
+  apuesta guardada.** La fecha de la apuesta sigue la regla de siempre (último partido), ahora también
+  con el día y la hora de la API.
+- **Errores**: nunca bloquean. Al móvil, un aviso discreto ("No se ha podido consultar API-Football
+  ahora mismo: sigue como siempre." · "Hoy ya no quedan consultas…" · "…no acepta la clave…"); al log
+  de Vercel `[api-futbol:fixtures]`, `[api-futbol:cache]`, `[api-futbol:uso]`, `[api-futbol:status]`…
+  con fecha, página, fallo y estado HTTP; nunca la clave (se tacha si apareciera), ni nombres de
+  equipos ni emails.
+- **Ajustes → API-Football**: "Conectada (clave configurada en el servidor)" o "Sin configurar",
+  llamadas de hoy (tuyas, con el tope) y restantes de la cuenta según la última respuesta; "Comprobar
+  conexión" llama a `/status` (no gasta llamadas según la documentación) y enseña solo el plan y las
+  llamadas (nunca el nombre ni el email de la cuenta). La clave no se puede ver ni cambiar desde la app.
+- **Pruebas**: `tests/api-futbol.test.ts` (emparejado español/inglés, Castilla/Femenino/sub-21, niveles,
+  hora y liga como desempate, día conflictivo, ligas, caché, paginación, 429, red, tiempo agotado,
+  tope, sin clave, la clave fuera de logs y respuestas, equivalencias por usuario) y `rls.test.mjs`
+  (cada usuario solo lo suyo, visitante sin acceso, migración dos veces, borrar la cuenta entera);
+  `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (79 en total); `npm run probar:local` con una
+  API-Football simulada (puerto 54323).
 
 ## Registro: casa de esta tanda (mejoras del registro, tarea 2a)
 
@@ -768,6 +875,9 @@ estrategia. Error → mensaje en español y `[analisis:leer]` al log. Sin migrac
   Plantilla en `.env.example`.
 - `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (publishable o anon):
   **públicas**, pueden ir al navegador; los datos los protege RLS.
+- `API_FOOTBALL_KEY` (API-Football): **secreta**, solo servidor (`lib/server/api-futbol.ts` vía
+  `configDesdeEntorno`); va solo en la cabecera de la petición, nunca en logs ni respuestas. Opcionales:
+  `API_FOOTBALL_PROVIDER` (`rapidapi`) y `API_FOOTBALL_TOPE_DIARIO`.
 - La **service role / secret key** de Supabase **nunca** va en código de navegador ni en el
   repositorio. La app no la usa.
 - Claves secretas solo en `src/lib/server/` (protegido con `import 'server-only'`) y usadas
@@ -904,8 +1014,8 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas + partidos + casa de la tanda (sin Docker ni internet) · también en GitHub
-npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas + partidos + casa de la tanda + API-Football (sin Docker ni internet) · también en GitHub
+npm run probar:local # prueba COMPLETA en local con simulador de Supabase, Claude y API-Football + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
 npm run build        # compilar como en producción
@@ -1131,3 +1241,14 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-09 | Tarea 2b (descripciones visuales de casas) aparcada | 0 confusiones en 129 apuestas; se revisa si se usan varias casas y la v7 muestra confusiones |
 | 2026-11-09 | Casa de otro usuario, archivada o inventada en la petición: se ignora y se lee como "Que la detecte la IA" | Nunca se usa algo que no es tuyo; la lectura no falla por ello |
 | 2026-11-09 | **Registro, tarea 2a (casa de la tanda y diagnóstico) fusionada en `main`** (rama `registro-casa-tanda`, PR #10) | Sin migración; instrucciones v7; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google |
+| 2026-11-09 | **Registro, tarea 3: API-Football** en la rama `registro-api-futbol` (migración `20261109000001`) | Confirmar y rellenar partido, día, hora y liga con datos oficiales; solo fútbol |
+| 2026-11-09 | Caché con UNA fila por día (lista JSON con solo los campos necesarios) en vez de una por partido | Refrescar un día es una sola escritura todo o nada y los partidos aplazados o borrados desaparecen solos; no hace falta buscar partidos sueltos en SQL |
+| 2026-11-09 | Cuarta tabla `api_futbol_uso` para el tope diario, contado por usuario y día UTC | Vercel no guarda nada en memoria entre peticiones; la API reinicia su cuenta a las 00:00 UTC. Limitación anotada: con más usuarios haría falta un contador global |
+| 2026-11-09 | Las elecciones se recuerdan al pulsar Guardar, no al tocar la ficha | Un toque por error no se recuerda; también se recuerdan las coincidencias claras que no se cambiaron |
+| 2026-11-09 | Si el día de la captura no tiene coincidencia, se miran el día antes y el después (sugerencia, nunca impuesta) | Sin esto no se puede decir "la API indica el 4 nov"; cuesta como mucho 2 llamadas (normalmente ya en caché) |
+| 2026-11-09 | Palabras distintivas (femenino, filial, sub-21…) tienen que coincidir; "UEFA" no cuenta en las ligas; "Usar una de mis ligas" además de "Crear y usar" | Petición del usuario: no emparejar "Real Madrid" con "Real Madrid Castilla" ni "Barcelona" con "Barcelona Femenino"; "Segunda División" de la API puede ser tu "LaLiga Hypermotion" |
+| 2026-11-09 | Ligas con el mismo nombre en otro país: "Nombre (País)" solo si tu liga de ese nombre ya está enlazada a OTRA liga de la API (o el nombre es reservado) | Solución simple: el caso normal (una "Serie A") no se ensucia con el país |
+| 2026-11-09 | Consulta y recordar por rutas (`/api/futbol/*`), no Server Actions | Las Server Actions de un mismo cliente van en fila: una consulta de hasta 6 s retrasaría el aviso de duplicadas y los partidos conocidos |
+| 2026-11-09 | Marca "confirmado por API-Football" como motivo `api` dentro de las marcas del formulario, pintada en azul y fuera del recuento ámbar | Reutiliza cómo se quitan las marcas al editar un campo; distinta del ámbar de dudoso |
+| 2026-11-09 | `API_FOOTBALL_BASE_URL` solo acepta `localhost` | Permite la prueba local con la API simulada sin que un error de configuración mande la clave a otra web |
+| 2026-11-09 | Prueba de `partidos.test.ts` con un día fijo de 2025 en vez del 10/11/2026 | Fallaba justo el 10 de noviembre de 2026 (día de hoy en España) porque "hoy" usa la hora actual |

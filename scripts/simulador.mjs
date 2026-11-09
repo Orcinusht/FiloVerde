@@ -217,10 +217,15 @@ async function rest(req, res, url, cuerpo) {
       const datos = JSON.parse(cuerpo)
       const lista = Array.isArray(datos) ? datos : [datos]
       const salida = []
+      // upsert (Prefer: resolution=merge-duplicates + ?on_conflict=a,b), como PostgREST.
+      const enConflicto = prefer.includes('resolution=merge-duplicates') && url.searchParams.get('on_conflict')
       for (const fila of lista) {
         const ks = Object.keys(fila)
+        const conflicto = enConflicto
+          ? ` on conflict (${enConflicto.split(',').map(ident).join(', ')}) do update set ${ks.map((k) => `${ident(k)} = excluded.${ident(k)}`).join(', ')}`
+          : ''
         const { rows } = await tx.query(
-          `insert into public.${tabla} (${ks.map(ident).join(', ')}) values (${ks.map((_, i) => `$${i + 1}`).join(', ')}) returning ${cols}`,
+          `insert into public.${tabla} (${ks.map(ident).join(', ')}) values (${ks.map((_, i) => `$${i + 1}`).join(', ')})${conflicto} returning ${cols}`,
           ks.map((k) => aParametro(fila[k])),
         )
         salida.push(...rows)
@@ -522,7 +527,18 @@ APUESTAS.casa_otra = apuesta({ casa: 'Codere', casa_distinta: true, importe: 11,
 APUESTAS.casa_duda = apuesta({ casa: 'Codere', casa_distinta: false, importe: 12, cuota_total: '2.05', ganancia_potencial: 24.6, selecciones: [sel('Valladolid - Eibar', 'Eibar', '2.05')], dudosos: [{ campo: 'casa', motivo: 'borroso' }] })
 APUESTAS.casa_nueva = apuesta({ casa: 'Kirolbet', casa_distinta: true, importe: 13, cuota_total: '2.15', ganancia_potencial: 27.95, selecciones: [sel('Huesca - Zaragoza', 'Huesca', '2.15')] })
 APUESTAS.sin_casa = apuesta({ casa: null, importe: 14, cuota_total: '2.25', ganancia_potencial: 31.5, selecciones: [sel('Racing - Sporting', 'Racing', '2.25')], dudosos: [{ campo: 'casa', motivo: 'no_visible' }] })
+// API-Football: partidos que la API simulada tiene MAÑANA (diaMas(1)) y pasado mañana.
+APUESTAS.api_clara = apuesta({ importe: 8, cuota_total: '1.60', ganancia_potencial: 12.8, selecciones: [sel('Bayern de Múnich - Arsenal', 'Bayern de Múnich', '1.60', sinPartido)] })
+APUESTAS.api_hora = apuesta({ importe: 8, cuota_total: '2.40', ganancia_potencial: 19.2, selecciones: [sel('Atlético de Madrid - Inter', 'Atlético de Madrid', '2.40', { evento_fecha: diaMas(1), evento_hora: '20:00', liga: null, deporte: 'Fútbol' })] })
+APUESTAS.api_varias = apuesta({ importe: 5, cuota_total: '1.90', ganancia_potencial: 9.5, selecciones: [sel('Universidad - Nacional', 'Universidad', '1.90', { evento_fecha: diaMas(1), evento_hora: null, liga: null, deporte: 'Fútbol' })] })
+APUESTAS.api_recuerda = apuesta({ importe: 6, cuota_total: '1.95', ganancia_potencial: 11.7, selecciones: [sel('Universidad - Nacional', 'Nacional', '1.95', { evento_fecha: diaMas(1), evento_hora: null, liga: null, deporte: 'Fútbol' })] })
+APUESTAS.api_liga_nueva = apuesta({ importe: 3, cuota_total: '2.10', ganancia_potencial: 6.3, selecciones: [sel('Racing de Santander - Sporting de Gijón', 'Racing', '2.10', sinPartido)] })
 const RESPUESTAS = {
+  api_clara: con(APUESTAS.api_clara),
+  api_hora: con(APUESTAS.api_hora),
+  api_varias: con(APUESTAS.api_varias),
+  api_recuerda: con(APUESTAS.api_recuerda),
+  api_liga_nueva: con(APUESTAS.api_liga_nueva),
   casa_otra: con(APUESTAS.casa_otra),
   casa_duda: con(APUESTAS.casa_duda),
   casa_nueva: con(APUESTAS.casa_nueva),
@@ -687,4 +703,83 @@ createServer(async (req, res) => {
   res.writeHead(404).end()
 }).listen(54322)
 
-console.log('Simulador listo: Supabase en http://localhost:54321 · Claude en http://localhost:54322')
+
+// ---------- API-Football (simulada, con la forma real de sus respuestas) ----------
+// Partidos de mañana y pasado mañana (hora de España). Mañana viene en 3 páginas (paginación).
+// "/__api_modo" cambia el comportamiento: 'ok' · 'fallo' (500) · '429' · 'colgar' (no responde) ·
+// 'red' (corta la conexión).
+let modoApi = 'ok'
+export const llamadasApi = []
+const fx = (id, fecha, hora, liga, pais, ligaId, local, localId, visit, visitId) => ({
+  fixture: { id, referee: null, timezone: 'Europe/Madrid', date: `${fecha}T${hora}:00+01:00`, timestamp: 0, periods: {}, venue: { id: 1, name: 'Estadio', city: 'Ciudad' }, status: { long: 'Not Started', short: 'NS', elapsed: null } },
+  league: { id: ligaId, name: liga, country: pais, logo: '', flag: null, season: 2026, round: 'Regular Season - 12' },
+  teams: { home: { id: localId, name: local, logo: '', winner: null }, away: { id: visitId, name: visit, logo: '', winner: null } },
+  goals: { home: null, away: null },
+  score: {},
+})
+function partidosApiDe(fecha) {
+  const lista = []
+  if (fecha === diaMas(1)) {
+    for (let k = 0; k < 40; k++) lista.push(fx(9500 + k, fecha, '15:00', 'Liga Relleno', 'Spain', 999, `Local ${k}`, 20000 + k, `Visitante ${k}`, 30000 + k))
+    lista.push(
+      fx(9001, fecha, '21:00', 'UEFA Champions League', 'World', 2, 'Bayern München', 157, 'Arsenal', 42),
+      fx(9002, fecha, '18:45', 'UEFA Champions League', 'World', 2, 'Atletico Madrid', 530, 'Inter', 505),
+      fx(9003, fecha, '22:00', 'Primera División', 'Chile', 265, 'Universidad de Chile', 2323, 'Nacional', 7001),
+      fx(9004, fecha, '20:00', 'Primera División', 'Uruguay', 268, 'Universidad Catolica', 2320, 'Nacional', 7002),
+      fx(9005, fecha, '12:00', 'Primera División RFEF', 'Spain', 435, 'Real Madrid Castilla', 9100, 'Valencia B', 9101),
+    )
+  }
+  if (fecha === diaMas(2)) lista.push(fx(9010, fecha, '16:15', 'Segunda División', 'Spain', 141, 'Racing Santander', 4500, 'Sporting Gijon', 4501))
+  return lista
+}
+createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost')
+  const cuerpo = (await leerCuerpo(req)).toString()
+  if (url.pathname === '/__api_modo') {
+    modoApi = cuerpo || 'ok'
+    return res.writeHead(204).end()
+  }
+  if (url.pathname === '/__api_llamadas') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify(llamadasApi))
+  }
+  // La API real rechaza cabeceras de más: se apunta cuáles llegan (sin el valor de la clave).
+  llamadasApi.push({
+    ruta: url.pathname,
+    params: Object.fromEntries(url.searchParams),
+    cabeceras: Object.keys(req.headers).filter((h) => h.startsWith('x-')),
+    clave: req.headers['x-apisports-key'] === 'clave-api-futbol-simulada' ? 'presente' : 'falta',
+  })
+  const cab = { 'Content-Type': 'application/json', 'x-ratelimit-requests-limit': '7500', 'x-ratelimit-requests-remaining': String(7500 - llamadasApi.length) }
+  if (modoApi === 'colgar') return // no responde nunca (tiempo agotado)
+  if (modoApi === 'red') return req.socket.destroy()
+  if (modoApi === 'fallo') return res.writeHead(500, cab).end('{}')
+  if (modoApi === '429') return res.writeHead(429, { ...cab, 'retry-after': '60' }).end(JSON.stringify({ message: 'Too many requests' }))
+  if (url.pathname === '/status') {
+    res.writeHead(200, cab)
+    return res.end(
+      JSON.stringify({
+        get: 'status', parameters: [], errors: [], results: 1, paging: { current: 1, total: 1 },
+        response: {
+          account: { firstname: 'Nombre', lastname: 'Privado', email: 'privado@ejemplo.com' },
+          subscription: { plan: 'Pro', end: '2027-01-01T00:00:00+00:00', active: true },
+          requests: { current: llamadasApi.length, limit_day: 7500 },
+        },
+      }),
+    )
+  }
+  if (url.pathname === '/fixtures') {
+    const fecha = url.searchParams.get('date')
+    const todos = partidosApiDe(fecha)
+    // Paginación de 20 en 20 (la API real casi nunca pagina por fecha, pero lo indica en "paging"
+    // y el código no da la respuesta por completa sin comprobarlo).
+    const pagina = Number(url.searchParams.get('page') ?? 1)
+    const total = Math.max(1, Math.ceil(todos.length / 20))
+    const trozo = todos.slice((pagina - 1) * 20, pagina * 20)
+    res.writeHead(200, cab)
+    return res.end(JSON.stringify({ get: 'fixtures', parameters: Object.fromEntries(url.searchParams), errors: [], results: trozo.length, paging: { current: pagina, total }, response: trozo }))
+  }
+  res.writeHead(404, cab).end(JSON.stringify({ errors: { endpoint: 'not found' } }))
+}).listen(54323)
+
+console.log('Simulador listo: Supabase en http://localhost:54321 · Claude en http://localhost:54322 · API-Football en http://localhost:54323')

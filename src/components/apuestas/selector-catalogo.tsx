@@ -26,7 +26,9 @@ export function SelectorCatalogo({
   emoji,
   archivada,
   recuperar,
+  origenNueva,
 }: {
+  origenNueva?: string // quién propone el valor nuevo (por defecto, "La IA ha leído")
   emoji?: (nombre: string) => string // decoración delante de cada opción (p. ej. deporte)
   valor: string
   opciones: string[]
@@ -144,7 +146,7 @@ export function SelectorCatalogo({
         >
           {esNueva ? (
             <>
-              La IA ha leído «{valor}». <strong>Crear y usar</strong>
+              {origenNueva ?? 'La IA ha leído'} «{valor}». <strong>Crear y usar</strong>
             </>
           ) : (
             <>

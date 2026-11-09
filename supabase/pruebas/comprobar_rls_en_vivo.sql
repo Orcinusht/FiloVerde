@@ -332,6 +332,19 @@ insert into resultado
          coalesce(max(s.liga), '—'), max(s.liga) = 'PRUEBA-RLS-L2'
   from selecciones s where s.apuesta_id = (select v from ids where k = 'apuesta_l');
 
+-- API-Football (registro, tarea 3): caché, equivalencias y uso de A (claves que nunca usa la app)
+insert into api_futbol_dias (fecha, partidos) values ('1900-01-01', '[{"id": 1, "local": "PRUEBA-RLS"}]'::jsonb);
+insert into api_futbol_equipos (nombre_captura, equipo_id, equipo_nombre) values ('prueba-rls', 1, 'PRUEBA-RLS');
+insert into api_futbol_ligas (liga_api_id, liga_api_nombre, liga_id)
+  select 2000000000, 'PRUEBA-RLS', v from ids where k = 'liga';
+insert into api_futbol_uso (dia, llamadas) values ('1900-01-01', 5);
+insert into resultado
+  select 72, 'A ve su caché y sus equivalencias de API-Football (control)', '4',
+         ((select count(*) from api_futbol_dias where fecha = '1900-01-01') + (select count(*) from api_futbol_equipos where nombre_captura = 'prueba-rls')
+          + (select count(*) from api_futbol_ligas where liga_api_id = 2000000000) + (select count(*) from api_futbol_uso where dia = '1900-01-01'))::text,
+         ((select count(*) from api_futbol_dias where fecha = '1900-01-01') + (select count(*) from api_futbol_equipos where nombre_captura = 'prueba-rls')
+          + (select count(*) from api_futbol_ligas where liga_api_id = 2000000000) + (select count(*) from api_futbol_uso where dia = '1900-01-01')) = 4;
+
 reset role;
 
 -- ---------- 2. Como B: intentar acceder a lo de A ----------
@@ -506,6 +519,33 @@ end $$;
 with x as (update ligas set archivada = true where id in (select v from ids where k = 'liga_a') returning 1)
   insert into resultado select 71, 'B archiva una liga de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
 
+-- API-Football (registro, tarea 3)
+insert into resultado
+  select 73, 'B ve la caché de partidos, equipos, ligas o uso de API-Football de A', '0 filas',
+         ((select count(*) from api_futbol_dias where user_id = (select a from params)) + (select count(*) from api_futbol_equipos where user_id = (select a from params))
+          + (select count(*) from api_futbol_ligas where user_id = (select a from params)) + (select count(*) from api_futbol_uso where user_id = (select a from params))) || ' filas',
+         ((select count(*) from api_futbol_dias where user_id = (select a from params)) + (select count(*) from api_futbol_equipos where user_id = (select a from params))
+          + (select count(*) from api_futbol_ligas where user_id = (select a from params)) + (select count(*) from api_futbol_uso where user_id = (select a from params))) = 0;
+with x as (update api_futbol_equipos set equipo_id = 666 where user_id = (select a from params) returning 1)
+  insert into resultado select 74, 'B cambia una equivalencia de equipo de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+with x as (delete from api_futbol_dias where user_id = (select a from params) returning 1)
+  insert into resultado select 75, 'B borra la caché de partidos de A', '0 filas', count(*) || ' filas', count(*) = 0 from x;
+do $$
+begin
+  insert into api_futbol_uso (user_id, dia, llamadas) values ((select a from params), '1900-01-02', 9999);
+  insert into resultado values (76, 'B escribe el uso de API-Football a nombre de A', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (76, 'B escribe el uso de API-Football a nombre de A', 'rechazado', 'rechazado', true);
+end $$;
+do $$
+begin
+  insert into api_futbol_ligas (liga_api_id, liga_api_nombre, liga_id)
+    select 2000000001, 'HACK', v from ids where k = 'liga';
+  insert into resultado values (77, 'B enlaza su equivalencia de liga a una liga de A', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (77, 'B enlaza su equivalencia de liga a una liga de A', 'rechazado', 'rechazado', true);
+end $$;
+
 reset role;
 
 -- ---------- 3. Sin sesión (visitante anónimo) ----------
@@ -516,6 +556,13 @@ begin
   insert into resultado values (11, 'Un visitante sin sesión lee apuestas', 'rechazado', 'PERMITIDO', false);
 exception when others then
   insert into resultado values (11, 'Un visitante sin sesión lee apuestas', 'rechazado', 'rechazado', true);
+end $$;
+do $$
+begin
+  perform count(*) from api_futbol_dias;
+  insert into resultado values (78, 'Un visitante sin sesión lee la caché de API-Football', 'rechazado', 'PERMITIDO', false);
+exception when others then
+  insert into resultado values (78, 'Un visitante sin sesión lee la caché de API-Football', 'rechazado', 'rechazado', true);
 end $$;
 reset role;
 
@@ -546,6 +593,17 @@ insert into resultado
          max(nombre) = 'PRUEBA-RLS' and not bool_or(archivada)
   from casas_apuestas where id in (select v from ids where k = 'casa');
 
+insert into resultado
+  select 79, 'Los datos de API-Football de A siguen intactos tras los intentos de B', 'equipo 1 y caché presente',
+         'equipo ' || coalesce((select max(equipo_id)::text from api_futbol_equipos where user_id = (select a from params) and nombre_captura = 'prueba-rls'), 'BORRADO')
+         || case when exists (select 1 from api_futbol_dias where user_id = (select a from params) and fecha = '1900-01-01') then ' y caché presente' else ' y caché BORRADA' end,
+         (select max(equipo_id) from api_futbol_equipos where user_id = (select a from params) and nombre_captura = 'prueba-rls') = 1
+         and exists (select 1 from api_futbol_dias where user_id = (select a from params) and fecha = '1900-01-01');
+
+delete from api_futbol_dias where user_id = (select a from params) and fecha = '1900-01-01';
+delete from api_futbol_equipos where user_id = (select a from params) and nombre_captura = 'prueba-rls';
+delete from api_futbol_ligas where user_id = (select a from params) and liga_api_id = 2000000000;
+delete from api_futbol_uso where user_id = (select a from params) and dia = '1900-01-01';
 delete from apuestas where id in (select v from ids);             -- borra también su selección
 delete from movimientos_bankroll where id in (select v from ids); -- antes que las casas (no se puede borrar una casa con movimientos)
 delete from casas_apuestas where id in (select v from ids);       -- ya sin apuestas ni movimientos
