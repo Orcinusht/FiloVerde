@@ -78,16 +78,16 @@ archivo o panel ponerlas).
    partido; día, hora, liga y deporte de un partido que ya registraste (o de la misma tanda) se
    rellenan solos, marcados; "En juego" de Análisis cuenta todas las pendientes. **Verificada en el
    móvil con la cuenta de email.** Falta verificarla en producción con la cuenta de Google.
-   **Tarea 2a: diagnóstico y casa de la tanda** (rama `registro-casa-tanda`, desde el 2026-11-09; sin
-   migración; instrucciones v7): selector "Casa de esta tanda" antes de subir capturas, la casa elegida
-   va a la IA y a cada apuesta (editable), con aviso si la captura es claramente de otra. Pendiente de
-   verificar en el móvil y de fusionar. Tarea 2b (aparcada) y 3, en Pendiente.
+   **Tarea 2a: casa de la tanda y diagnóstico, fusionada el 2026-11-09** (rama `registro-casa-tanda`,
+   PR #10; pruebas de GitHub Actions en verde; sin migración; instrucciones v7): selector "Casa de esta
+   tanda" antes de subir capturas, la casa elegida va a la IA y a cada apuesta (editable), con aviso si
+   la captura es claramente de otra. **Verificada en el móvil con la cuenta de email.** Falta
+   verificarla en producción con la cuenta de Google. Tarea 3 y tarea 2b (aparcada), en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-09, al empezar la tarea 2a del registro)
-1. **Registro, tarea 2a: casa de la tanda**: hecha en la rama `registro-casa-tanda` (pendiente de
-   verificar y fusionar).
-2. **Registro, tarea 3: API-Football** (solo fútbol).
-2b. **Registro, tarea 2b: tabla global de casas conocidas con descripciones visuales** (aprobadas por el
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-09, tras fusionar la tarea 2a del registro)
+1. **Registro, tarea 3: API-Football** (solo fútbol). Antes de empezar hace falta conocer el plan
+   contratado y cuántas llamadas diarias permite.
+2. **Registro, tarea 2b: tabla global de casas conocidas con descripciones visuales** (aprobadas por el
    propietario): **APARCADA el 2026-11-09**. Se revisa si el usuario empieza a usar varias casas y las
    cifras de la versión 7 muestran confusiones entre casas. Motivo: el diagnóstico (129 apuestas con
    lectura) dio 0 confusiones y 0 nombres mal escritos; el único fallo era la casa VACÍA (85 %),
@@ -107,6 +107,9 @@ archivo o panel ponerlas).
 7. **Informe con IA con Opus** (`claude-opus-5-5`; Fase 4): sin empezar.
 
 Además:
+- **Verificar en producción con la cuenta de Google** la casa de la tanda: selector con la última casa,
+  "Casa: elegida por ti", aviso "La captura parece de X" (si alguna captura la muestra), "Que la detecte
+  la IA" como antes y una tanda de varias capturas.
 - **Verificar en producción con la cuenta de Google** la tarea 1 del registro: fecha del partido (y su
   nota), partidos conocidos (también en una tanda y con varias fechas), editar sin que cambie la fecha
   y "En juego" con todas las pendientes.
@@ -1127,3 +1130,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-09 | Casa elegida guardada dentro de `transcripciones.propuesta` (JSON) | Retomar la revisión con ella sin migración |
 | 2026-11-09 | Tarea 2b (descripciones visuales de casas) aparcada | 0 confusiones en 129 apuestas; se revisa si se usan varias casas y la v7 muestra confusiones |
 | 2026-11-09 | Casa de otro usuario, archivada o inventada en la petición: se ignora y se lee como "Que la detecte la IA" | Nunca se usa algo que no es tuyo; la lectura no falla por ello |
+| 2026-11-09 | **Registro, tarea 2a (casa de la tanda y diagnóstico) fusionada en `main`** (rama `registro-casa-tanda`, PR #10) | Sin migración; instrucciones v7; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google |
