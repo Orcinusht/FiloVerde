@@ -153,7 +153,7 @@ test('ajustarPorTipo: la simple guarda la cuota total en su selección', () => {
 
 const apuestaIA = (extra = {}) => ({
   casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
-  estado: null, importe_cobrado: null, dudosos: [], incompleta: false,
+  estado: null, importe_cobrado: null, dudosos: [], incompleta: false, casa_distinta: false,
   promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null,
   selecciones: [{ evento: 'A - B', liga: 'LaLiga', deporte: 'Fútbol', mercado: '1X2', pronostico: 'A', cuota: '1.85', estado: null, evento_fecha_texto: '2026-11-08 21:00', sustituto: null }],
   ...extra,

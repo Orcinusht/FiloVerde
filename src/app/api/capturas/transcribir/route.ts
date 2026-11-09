@@ -7,6 +7,7 @@ import { catalogoParaIA, catalogoVacio } from '@/lib/apuestas/catalogo'
 import { MAX_APUESTAS_POR_CAPTURA, revisionesDeCaptura } from '@/lib/apuestas/propuesta'
 import { MAX_INTENTOS, esTemporal } from '@/lib/apuestas/reintentos-ia'
 import { apuestasPendientes } from '@/lib/server/pendientes'
+import { casaParaIA, resolverCasaIndicada } from '@/lib/apuestas/casa-tanda'
 
 // Una petición = UN intento (máximo 60 s de IA); los reintentos los pide el móvil. Margen: 2 min.
 export const maxDuration = 120
@@ -73,16 +74,30 @@ export async function POST(request: NextRequest) {
     registrarError('catalogo:leer', e)
     return catalogoVacio()
   })
-  const r = await transcribirCaptura(bytes, tipo, catalogoParaIA(catalogo))
+  // Casa de la tanda: solo si es una casa activa de ESTE usuario (leída con su sesión). Si no, se
+  // lee como "Que la detecte la IA" y queda en el log (sin datos personales).
+  let indicada = null
+  if (typeof cuerpo?.casaId === 'string' && cuerpo.casaId) {
+    const { data: casas, error: eCasas } = await supabase.from('casas_apuestas').select('id, nombre, archivada').eq('user_id', userId)
+    if (eCasas) registrarError('capturas:casa-tanda', eCasas)
+    indicada = resolverCasaIndicada(cuerpo.casaId, casas ?? [])
+    if (!indicada && !eCasas) console.warn('[capturas:casa-tanda]', { motivo: 'casa no válida: se lee sin casa indicada' })
+  }
+  const r = await transcribirCaptura(bytes, tipo, catalogoParaIA(catalogo), indicada ? casaParaIA(indicada.nombre) : null)
 
   // Una captura = una transcripción = un coste, aunque traiga varias apuestas. Solo cuentan las
   // apuestas VÁLIDAS (selección legible con pronóstico); las cortadas se ignoran y se cuentan.
-  const { validas, ignoradas } = r.ok ? revisionesDeCaptura(r.propuesta, catalogo, new Date()) : { validas: [], ignoradas: 0 }
+  const { validas, ignoradas } = r.ok ? revisionesDeCaptura(r.propuesta, catalogo, new Date(), indicada) : { validas: [], ignoradas: 0 }
   const noEsApuesta = r.ok && validas.length === 0
   let transcripcionId: string | null = null
   if (r.uso) {
     const propuesta = r.ok
-      ? { ...r.propuesta, apuestas: r.propuesta.apuestas.slice(0, MAX_APUESTAS_POR_CAPTURA) }
+      ? {
+          ...r.propuesta,
+          apuestas: r.propuesta.apuestas.slice(0, MAX_APUESTAS_POR_CAPTURA),
+          // La casa elegida para esta tanda (para retomar la revisión con ella).
+          ...(indicada ? { casa_indicada: indicada } : {}),
+        }
       : null
     const { data, error: eLog } = await supabase
       .from('transcripciones')

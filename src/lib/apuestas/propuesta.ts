@@ -24,6 +24,7 @@ import {
 } from './formulario.ts'
 import { resultadoPropuesto } from './calculos.ts'
 import { TIPOS_PROMO, esPromoAumento } from './promociones.ts'
+import { avisoDeCasa, type CasaIndicada } from './casa-tanda.ts'
 import { resolverFechaEvento } from './fecha-evento.ts'
 
 const textoONulo = z.string().nullable()
@@ -48,7 +49,10 @@ export const esquemaDudaIA = z.object({
 })
 
 export const esquemaApuestaIA = z.object({
-  casa: textoONulo.describe('Casa de apuestas (por el logo o el texto), p. ej. "Bet365", "Codere"'),
+  casa: textoONulo.describe('Casa de apuestas que SE VE en la captura (por el logo o el texto), p. ej. "Bet365", "Codere"; null si no se ve'),
+  casa_distinta: z
+    .boolean()
+    .describe('true SOLO si hay casa indicada por el usuario y la captura muestra con claridad OTRA casa distinta; si no, false'),
   tipo: z.enum(TIPOS_APUESTA).nullable(),
   fecha: textoONulo.describe('Cuándo se HIZO la apuesta, si aparece: "YYYY-MM-DD" o "YYYY-MM-DDTHH:MM"'),
   importe: z.number().nullable().describe('Importe apostado, en unidades de moneda (10.5 = 10,50 €)'),
@@ -91,6 +95,7 @@ export function completarPropuestaAntigua(p: unknown): unknown {
             promo_aumento: null,
             promo_credito: null,
             incompleta: false,
+            casa_distinta: false, // antes de la v7 no existía
             ...a,
             // Lecturas anteriores a la v5: sin campo "sustituto" en las selecciones.
             selecciones: Array.isArray((a as { selecciones?: unknown }).selecciones)
@@ -116,6 +121,10 @@ export type Revision = {
   valores: ValoresFormulario
   dudosos: Record<string, MotivoRevision> // clave de campo del formulario → motivo
   casaDetectada: string | null // nombre que leyó la IA (para elegir o crear la casa)
+  // Casa de la tanda (v7): la elegida por el usuario antes de subir, y el aviso si la captura parece
+  // CLARAMENTE de otra ("La captura parece de X"). Sin casa elegida, null (como antes de la v7).
+  casaIndicada?: CasaIndicada | null
+  avisoCasa?: string | null
 }
 
 export const MAX_APUESTAS_POR_CAPTURA = 10
@@ -161,7 +170,7 @@ export function esApuestaValida(a: ApuestaIA): boolean {
 }
 
 // `referencia` = cuándo se subió la captura (para "Hoy", "Mañana" y las fechas sin año).
-export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo, referencia: Date = new Date()): Revision {
+export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo, referencia: Date = new Date(), indicada: CasaIndicada | null = null): Revision {
   const valores = valoresVacios()
   const dudosos: Record<string, MotivoRevision> = {}
   const marcar = (campo: string, motivo: MotivoRevision) => {
@@ -285,6 +294,12 @@ export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo, referencia: 
 
   // La simple guarda la cuota total en su selección; "mismo partido" sin cuotas propias.
   // (Si la IA dio "simple" con varias selecciones, se deja así: el formulario pedirá decidir.)
+  // Casa de la tanda: manda la elegida por el usuario (sin ámbar); la IA solo avisa si ve otra.
+  if (indicada) {
+    valores.casa_id = indicada.id
+    delete dudosos.casa_id
+    return { valores: ajustarPorTipo(valores), dudosos, casaDetectada: recortar(p.casa) || null, casaIndicada: indicada, avisoCasa: avisoDeCasa(p, indicada) }
+  }
   return { valores: ajustarPorTipo(valores), dudosos, casaDetectada: recortar(p.casa) || null }
 }
 
@@ -293,10 +308,15 @@ export type RevisionesCaptura = {
   ignoradas: number // apuestas cortadas o sin selección con pronóstico
 }
 
-export function revisionesDeCaptura(p: PropuestaIA, catalogo?: Catalogo, referencia: Date = new Date()): RevisionesCaptura {
+export function revisionesDeCaptura(
+  p: PropuestaIA,
+  catalogo?: Catalogo,
+  referencia: Date = new Date(),
+  indicada: CasaIndicada | null = null,
+): RevisionesCaptura {
   if (!p.hay_apuestas) return { validas: [], ignoradas: 0 }
   const apuestas = p.apuestas.slice(0, MAX_APUESTAS_POR_CAPTURA)
-  const validas = apuestas.flatMap((a, indice) => (esApuestaValida(a) ? [{ indice, revision: apuestaARevision(a, catalogo, referencia) }] : []))
+  const validas = apuestas.flatMap((a, indice) => (esApuestaValida(a) ? [{ indice, revision: apuestaARevision(a, catalogo, referencia, indicada) }] : []))
   return { validas, ignoradas: apuestas.length - validas.length }
 }
 
