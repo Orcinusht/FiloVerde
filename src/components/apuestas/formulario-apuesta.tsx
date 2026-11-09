@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { buscarPorNombre } from '@/lib/apuestas/opciones'
-import { buscarDuplicadas, buscarPartidosConocidos, guardarApuesta, type ResultadoDuplicadas } from '@/app/(app)/apuestas/actions'
+import { buscarDuplicadas, buscarPartidosConocidos, crearCasa, guardarApuesta, type ResultadoDuplicadas } from '@/app/(app)/apuestas/actions'
 import {
   agruparConocidos,
   claveConocida,
@@ -75,6 +75,9 @@ type Props = {
   inicial: ValoresFormulario
   dudosos?: Record<string, MotivoRevision>
   casaDetectada?: string | null
+  // Casa de la tanda (v7): 'tuya' = la eligió el usuario antes de subir; 'ia' = la detecta la IA.
+  origenCasa?: 'tuya' | 'ia'
+  avisoCasa?: string | null // "La captura parece de X" (la IA ve con claridad otra casa)
   casas: Opcion[]
   estrategias: Opcion[]
   imagen?: string | null
@@ -289,6 +292,26 @@ export function FormularioApuesta(props: Props) {
         return n
       })
     }
+  }
+
+  // ---------- casa de la tanda ----------
+  const origenCasa = props.origenCasa
+  const avisoCasa = props.avisoCasa ?? null
+  const [casaInicialId] = useState(() => valores.casa_id)
+  const [creandoCasa, setCreandoCasa] = useState(false)
+  const [errorCasa, setErrorCasa] = useState<string | null>(null)
+  // "Usar X" (ya está en tu catálogo) o "Crear y usar X".
+  async function usarCasaDeLaCaptura(nombre: string) {
+    const existente = buscarPorNombre(casas, nombre)
+    if (existente) return cambiar('casa_id', existente.id)
+    setCreandoCasa(true)
+    setErrorCasa(null)
+    const r = await crearCasa(nombre).catch(() => ({ ok: false as const, error: 'No se ha podido crear la casa. Inténtalo de nuevo.' }))
+    setCreandoCasa(false)
+    if (!r.ok) return setErrorCasa(r.error)
+    setCasas((c) => (c.some((x) => x.id === r.opcion.id) ? c : [...c, r.opcion].sort(porNombre)))
+    props.onOpcionCreada?.('casa', r.opcion)
+    cambiar('casa_id', r.opcion.id)
   }
 
   // ---------- cambios ----------
@@ -643,8 +666,9 @@ export function FormularioApuesta(props: Props) {
     const i = valores.selecciones.findIndex((_, j) => dudosos[`selecciones.${j}.${c}`])
     return { motivo: i >= 0 ? dudosos[`selecciones.${i}.${c}`] : undefined, error: errores[`selecciones.0.${c}`] }
   }
+  // Con la casa elegida por el usuario, la IA no propone crear otra (eso va por el aviso).
   const casaSinCrear =
-    props.casaDetectada && !buscarPorNombre(casas, props.casaDetectada)
+    props.origenCasa !== 'tuya' && props.casaDetectada && !buscarPorNombre(casas, props.casaDetectada)
       ? props.casaDetectada
       : null
   const varias = valores.selecciones.length > 1
@@ -701,6 +725,25 @@ export function FormularioApuesta(props: Props) {
               cambiar('casa_id', o.id)
             }}
           />
+          {origenCasa && valores.casa_id && valores.casa_id === casaInicialId && (
+            <span className="mt-1 block text-xs text-muted" data-origen-casa={origenCasa}>
+              Casa: {origenCasa === 'tuya' ? 'elegida por ti' : 'detectada por la IA'}
+            </span>
+          )}
+          {avisoCasa && valores.casa_id !== buscarPorNombre(casas, avisoCasa)?.id && (
+            <div role="status" data-aviso-casa="" className="mt-2 space-y-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+              <p>La captura parece de {avisoCasa}.</p>
+              <button
+                type="button"
+                disabled={creandoCasa}
+                onClick={() => void usarCasaDeLaCaptura(avisoCasa)}
+                className="h-11 rounded-xl border border-amber-500/50 bg-surface px-3 text-sm font-semibold text-foreground disabled:opacity-60"
+              >
+                {buscarPorNombre(casas, avisoCasa) ? `Usar ${avisoCasa}` : `Crear y usar ${avisoCasa}`}
+              </button>
+              {errorCasa && <p className="text-red-600 dark:text-red-400">{errorCasa}</p>}
+            </div>
+          )}
         </Campo>
 
         <Campo etiqueta="Tipo" {...p('tipo')}>

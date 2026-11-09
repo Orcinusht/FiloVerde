@@ -381,7 +381,7 @@ const sel = (evento, pronostico, cuota, extra = {}) => ({
 })
 const apuesta = (extra) => ({
   casa: 'Bet365', tipo: 'simple', fecha: null, importe: 10, cuota_total: '1.85', ganancia_potencial: 18.5,
-  estado: null, importe_cobrado: null, selecciones: [], dudosos: [], incompleta: false,
+  estado: null, importe_cobrado: null, selecciones: [], dudosos: [], incompleta: false, casa_distinta: false,
   promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null, ...extra,
 })
 const con = (...apuestas) => ({ hay_apuestas: true, motivo: null, apuestas })
@@ -517,7 +517,16 @@ APUESTAS.partido_conocido = apuesta({ importe: 9, cuota_total: '3.10', ganancia_
 // 3) Tanda: la 1.ª trae el partido completo; la 2.ª, el mismo sin datos.
 APUESTAS.tanda_1 = apuesta({ importe: 4, cuota_total: '2.20', ganancia_potencial: 8.8, selecciones: [sel('Leganés - Tenerife', 'Leganés', '2.20', { evento_fecha: diaMas(5), evento_hora: '18:15' })] })
 APUESTAS.tanda_2 = apuesta({ importe: 6, cuota_total: '3.30', ganancia_potencial: 19.8, selecciones: [sel('Leganes - Tenerife', 'Empate', '3.30', sinPartido)] })
+// Casa de la tanda (v7): la IA ve con claridad OTRA casa (Codere) · la ve pero duda · no ve ninguna.
+APUESTAS.casa_otra = apuesta({ casa: 'Codere', casa_distinta: true, importe: 11, cuota_total: '1.95', ganancia_potencial: 21.45, selecciones: [sel('Mallorca - Alavés', 'Mallorca', '1.95')] })
+APUESTAS.casa_duda = apuesta({ casa: 'Codere', casa_distinta: false, importe: 12, cuota_total: '2.05', ganancia_potencial: 24.6, selecciones: [sel('Valladolid - Eibar', 'Eibar', '2.05')], dudosos: [{ campo: 'casa', motivo: 'borroso' }] })
+APUESTAS.casa_nueva = apuesta({ casa: 'Kirolbet', casa_distinta: true, importe: 13, cuota_total: '2.15', ganancia_potencial: 27.95, selecciones: [sel('Huesca - Zaragoza', 'Huesca', '2.15')] })
+APUESTAS.sin_casa = apuesta({ casa: null, importe: 14, cuota_total: '2.25', ganancia_potencial: 31.5, selecciones: [sel('Racing - Sporting', 'Racing', '2.25')], dudosos: [{ campo: 'casa', motivo: 'no_visible' }] })
 const RESPUESTAS = {
+  casa_otra: con(APUESTAS.casa_otra),
+  casa_duda: con(APUESTAS.casa_duda),
+  casa_nueva: con(APUESTAS.casa_nueva),
+  sin_casa: con(APUESTAS.sin_casa),
   partido_base: con(APUESTAS.partido_base),
   partido_conocido: con(APUESTAS.partido_conocido),
   tanda_1: con(APUESTAS.tanda_1),
@@ -559,6 +568,7 @@ const RESPUESTAS = {
 for (const r of Object.values(RESPUESTAS)) {
   for (const a of r.apuestas ?? []) {
     a.incompleta ??= false
+    a.casa_distinta ??= false
     a.selecciones = a.selecciones.map(({ evento_fecha, evento_hora, ...s }) =>
       'evento_fecha_texto' in s ? s : { ...s, evento_fecha_texto: [evento_fecha, evento_fecha ? evento_hora : null].filter(Boolean).join(' ') || null },
     )

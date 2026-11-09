@@ -10,6 +10,7 @@ import type { Catalogo } from '@/lib/apuestas/catalogo'
 import { ErrorImagen, reducirImagen } from '@/lib/navegador/reducir-imagen'
 import { FormularioApuesta } from './formulario-apuesta'
 import { conocidosDeTanda } from '@/lib/apuestas/partidos'
+import { CASA_IA, TEXTO_CASA_IA, opcionesCasaTanda } from '@/lib/apuestas/casa-tanda'
 import { MAX_INTENTOS, esperaAntesDeReintentar, pausaLoteTrasLimite } from '@/lib/apuestas/reintentos-ia'
 import { VisorCaptura } from './visor-captura'
 import { EleccionApuestas } from './eleccion-apuestas'
@@ -36,6 +37,7 @@ type Item = {
   intento?: number // intento de lectura en curso (1-3)
   motivoReintento?: string // por qué se está reintentando
   temporal?: boolean // el último fallo fue temporal (saturación, límite…): queda pendiente de reintentar
+  casaId?: string // casa elegida para la tanda al subir esta captura ('' = que la detecte la IA)
   // Revisión: pendiente, guardada (con su id y lo guardado) o descartada.
   estado?: EstadoItemCola
   apuestaId?: string
@@ -66,12 +68,16 @@ export function RegistroCapturas({
   estrategias,
   pendientes = [],
   catalogo: catalogoInicial,
+  casaInicial = CASA_IA,
 }: {
   casas: Opcion[]
   estrategias: Opcion[]
   catalogo: Catalogo
   pendientes?: ApuestaPendiente[] // para retomar una revisión a medias
+  casaInicial?: string // "Casa de esta tanda" preseleccionada ('' = que la detecte la IA)
 }) {
+  // Casa de esta tanda: se elige antes de subir y viaja con cada captura a la lectura de la IA.
+  const [casaTanda, setCasaTanda] = useState(casaInicial)
   const router = useRouter()
   const [items, setItems] = useState<Item[]>(() =>
     pendientes.map((p) => ({
@@ -238,7 +244,7 @@ export function RegistroCapturas({
           const r = await fetch('/api/capturas/transcribir', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ruta, intento }),
+            body: JSON.stringify({ ruta, intento, casaId: item.casaId ?? '' }),
           })
           j = await r.json().catch(() => ({ codigo: r.status >= 500 ? 'timeout' : 'desconocido' }))
           if (r.ok && Array.isArray(j.revisiones) && j.revisiones.length) break
@@ -333,6 +339,7 @@ export function RegistroCapturas({
       clave: `${Date.now()}-${i}`,
       archivo,
       paso: 'esperando',
+      casaId: casaTanda,
     }))
     terminada.current = false
     poner(nuevos)
@@ -436,6 +443,7 @@ export function RegistroCapturas({
         <p className="text-sm text-muted">
           Elige hasta {MAX_LOTE} capturas de tus apuestas. La IA las lee y tú revisas cada una antes de guardarla.
         </p>
+        <CasaDeLaTanda casas={casas} valor={casaTanda} onCambio={setCasaTanda} />
         <BotonArchivo etiqueta="📷  Hacer una foto" captura onElegir={elegir} principal />
         <BotonArchivo etiqueta="🖼️  Elegir de la galería" multiple onElegir={elegir} />
         <Link
@@ -557,6 +565,8 @@ export function RegistroCapturas({
           inicial={item.guardado ?? item.borrador ?? item.revision?.valores ?? valoresVacios()}
           dudosos={item.guardado ? undefined : item.revision?.dudosos}
           casaDetectada={item.guardado ? null : item.revision?.casaDetectada}
+          origenCasa={item.guardado ? undefined : item.revision?.casaIndicada ? 'tuya' : 'ia'}
+          avisoCasa={item.guardado ? null : item.revision?.avisoCasa}
           casas={opcionesCasas}
           estrategias={opcionesEstrategias}
           catalogo={catalogo}
@@ -748,6 +758,32 @@ function BotonArchivo({
           e.target.value = ''
         }}
       />
+    </label>
+  )
+}
+
+// "Casa de esta tanda": un desplegable grande, arriba, antes de elegir las capturas. La casa
+// elegida se pasa a la IA y se pone en cada apuesta (editable); "Que la detecte la IA" = como antes.
+function CasaDeLaTanda({ casas, valor, onCambio }: { casas: Opcion[]; valor: string; onCambio: (v: string) => void }) {
+  const opciones = opcionesCasaTanda(casas)
+  return (
+    <label className="block space-y-1 rounded-2xl border border-border bg-surface p-3">
+      <span className="block text-sm font-semibold">Casa de esta tanda</span>
+      <select
+        value={valor}
+        onChange={(e) => onCambio(e.target.value)}
+        className="h-12 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-base"
+      >
+        {opciones.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.nombre}
+          </option>
+        ))}
+        <option value={CASA_IA}>{TEXTO_CASA_IA}</option>
+      </select>
+      <span className="block text-xs text-muted">
+        Se pone en todas las apuestas de la tanda (puedes cambiarla en cada una). Si la captura parece de otra casa, te avisa.
+      </span>
     </label>
   )
 }

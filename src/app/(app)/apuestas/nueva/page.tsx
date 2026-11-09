@@ -1,7 +1,8 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { PageHeader } from '@/components/page-header'
-import { listarCasas, listarEstrategias, listarPendientes, obtenerCatalogo } from '@/lib/server/datos'
+import { listarCasas, listarEstrategias, listarPendientes, obtenerCatalogo, ultimaCasaUsada } from '@/lib/server/datos'
+import { casaPreseleccionada } from '@/lib/apuestas/casa-tanda'
 import { RegistroCapturas } from '@/components/apuestas/registro-capturas'
 import { NuevaManual } from '@/components/apuestas/editar-apuesta'
 
@@ -31,12 +32,21 @@ async function Contenido({ searchParams }: { searchParams: PageProps<'/apuestas/
   const sp = await searchParams
   const manual = sp.manual === '1'
   const retomar = sp.pendientes === '1'
-  const [casas, estrategias, catalogo, pendientes] = await Promise.all([
+  const [casas, estrategias, catalogo, pendientes, ultimaCasa] = await Promise.all([
     listarCasas(),
     listarEstrategias(),
     obtenerCatalogo(),
     retomar ? listarPendientes() : Promise.resolve([]),
+    manual ? Promise.resolve(null) : ultimaCasaUsada(),
   ])
   if (manual) return <NuevaManual casas={casas} estrategias={estrategias} catalogo={catalogo} />
-  return <RegistroCapturas casas={casas} estrategias={estrategias} catalogo={catalogo} pendientes={pendientes} />
+  return (
+    <RegistroCapturas
+      casas={casas}
+      estrategias={estrategias}
+      catalogo={catalogo}
+      pendientes={pendientes}
+      casaInicial={casaPreseleccionada(casas, ultimaCasa)}
+    />
+  )
 }

@@ -106,7 +106,7 @@ test('…pero una liga o un deporte ARCHIVADO leído en una captura se reconoce 
     apuestas: [
       {
         casa: null, tipo: 'combinada', fecha: null, importe: 10, cuota_total: '3', ganancia_potencial: 30,
-        estado: null, importe_cobrado: null, dudosos: [], incompleta: false,
+        estado: null, importe_cobrado: null, dudosos: [], incompleta: false, casa_distinta: false,
         promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null,
         selecciones: [
           { evento: 'Galatasaray SK - VfB Stuttgart', liga: 'champions league', deporte: 'futbol', mercado: '1X2', pronostico: '1', cuota: '1.5', estado: null, evento_fecha_texto: null, sustituto: null },

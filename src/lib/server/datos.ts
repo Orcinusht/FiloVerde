@@ -9,6 +9,8 @@ import type { EstadoApuesta, EstadoSeleccion, TipoApuesta } from '@/lib/apuestas
 // Lecturas de la base de datos (siempre con la sesión del usuario: RLS aplica).
 
 import type { Opcion } from '@/lib/apuestas/formulario'
+import { leerUltimaCasa } from '@/lib/apuestas/casa-tanda'
+import { registrarError, usuarioActual } from './capturas'
 export type { Opcion }
 
 export type FilaApuesta = {
@@ -238,4 +240,19 @@ export async function listarPendientes(): Promise<ApuestaPendiente[]> {
 // Catálogo de deportes y ligas del usuario.
 export async function obtenerCatalogo(): Promise<Catalogo> {
   return leerCatalogo(await createClient())
+}
+
+// Casa de la última apuesta guardada (para preseleccionar la "Casa de esta tanda"). Si falla, null:
+// el selector queda en "Que la detecte la IA" y el error va al log.
+export async function ultimaCasaUsada(): Promise<string | null> {
+  // Fuera del try: la sesión (y el aviso de Next al prerenderizar) siguen su curso normal.
+  const supabase = await createClient()
+  const userId = await usuarioActual(supabase)
+  if (!userId) return null
+  try {
+    return await leerUltimaCasa(supabase, userId)
+  } catch (e) {
+    registrarError('apuestas:ultima-casa', e)
+    return null
+  }
 }

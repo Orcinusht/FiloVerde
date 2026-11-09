@@ -1,5 +1,6 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { casaIndicadaGuardada } from '@/lib/apuestas/casa-tanda'
 import { completarPropuestaAntigua, esquemaPropuestaIA, revisionesDeCaptura, type ApuestaPendiente } from '@/lib/apuestas/propuesta'
 import { BUCKET, registrarError } from './capturas'
 import { leerCatalogo } from './catalogo'
@@ -52,7 +53,8 @@ export async function apuestasPendientes(
     const propuesta = esquemaPropuestaIA.safeParse(completarPropuestaAntigua(f.propuesta))
     if (!propuesta.success) continue
     // Solo las apuestas válidas (con selección legible); "Hoy"/"Mañana" respecto al día de la lectura.
-    const { validas } = revisionesDeCaptura(propuesta.data, catalogo, new Date(f.created_at))
+    // Con la casa elegida para su tanda, si la tenía (v7).
+    const { validas } = revisionesDeCaptura(propuesta.data, catalogo, new Date(f.created_at), casaIndicadaGuardada(f.propuesta))
     const descartadas = new Set(f.descartadas ?? [])
     validas.forEach(({ indice, revision }, k) => {
       if (!descartadas.has(indice) && !hechas.has(`${f.id}:${indice}`)) {

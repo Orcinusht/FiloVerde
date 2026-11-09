@@ -77,13 +77,21 @@ archivo o panel ponerlas).
    pruebas de GitHub Actions en verde; sin migración): la fecha de una apuesta nueva es la del último
    partido; día, hora, liga y deporte de un partido que ya registraste (o de la misma tanda) se
    rellenan solos, marcados; "En juego" de Análisis cuenta todas las pendientes. **Verificada en el
-   móvil con la cuenta de email.** Falta verificarla en producción con la cuenta de Google. Tareas 2 y
-   3, en Pendiente.
+   móvil con la cuenta de email.** Falta verificarla en producción con la cuenta de Google.
+   **Tarea 2a: diagnóstico y casa de la tanda** (rama `registro-casa-tanda`, desde el 2026-11-09; sin
+   migración; instrucciones v7): selector "Casa de esta tanda" antes de subir capturas, la casa elegida
+   va a la IA y a cada apuesta (editable), con aviso si la captura es claramente de otra. Pendiente de
+   verificar en el móvil y de fusionar. Tarea 2b (aparcada) y 3, en Pendiente.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-09, tras fusionar la tarea 1 del registro)
-1. **Registro, tarea 2: casa de la apuesta**: casa de la tanda, diagnóstico de la detección de la casa
-   y tabla global de casas conocidas con descripciones visuales, aprobadas por el propietario.
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-09, al empezar la tarea 2a del registro)
+1. **Registro, tarea 2a: casa de la tanda**: hecha en la rama `registro-casa-tanda` (pendiente de
+   verificar y fusionar).
 2. **Registro, tarea 3: API-Football** (solo fútbol).
+2b. **Registro, tarea 2b: tabla global de casas conocidas con descripciones visuales** (aprobadas por el
+   propietario): **APARCADA el 2026-11-09**. Se revisa si el usuario empieza a usar varias casas y las
+   cifras de la versión 7 muestran confusiones entre casas. Motivo: el diagnóstico (129 apuestas con
+   lectura) dio 0 confusiones y 0 nombres mal escritos; el único fallo era la casa VACÍA (85 %),
+   porque las capturas de bet365 no muestran logo ni nombre. La casa de la tanda lo resuelve.
 3. **Recalcular la fecha de las apuestas antiguas** (anotado el 2026-11-08, NO construido): herramienta
    con vista previa ("N apuestas cambiarían de día", con la lista) que ponga a las apuestas ya
    guardadas la fecha de su último partido, todo o nada y solo en las que tienen día de partido.
@@ -247,7 +255,9 @@ src/
                       IA: clasificación, cuáles se reintentan, esperas y mensajes), fecha-evento.ts
                       (traduce el texto de la fecha del evento), cola.ts (estados de la cola),
                       partidos.ts (fecha de la apuesta = último partido y partidos conocidos) y
-                      partidos-leer.ts (lee tus selecciones guardadas: sesión, tandas de 1000)
+                      partidos-leer.ts (lee tus selecciones guardadas: sesión, tandas de 1000),
+                      casa-tanda.ts (casa de esta tanda: opciones sin archivadas, preselección,
+                      validación de la casa recibida, aviso "La captura parece de X", última casa usada)
     exportar/         csv.ts (formato: celdas, columnas, lectura en tandas) · leer.ts (consultas
                       con la sesión del usuario; sin claves, se prueba con un cliente falso)
     analisis/         calculos.ts (funciones puras: métricas, segmentos y aciertos con los ids de
@@ -276,6 +286,7 @@ tests/                prueba de seguridad RLS + lógica de apuestas (logica.test
                       + análisis (analisis.test.ts) + bankroll (bankroll.test.ts) + casas y estrategias (opciones.test.ts)
                       + deportes y ligas (catalogo.test.ts) + evolución en el tiempo (evolucion.test.ts) + gráficas (graficas.test.ts)
                       + registro: fecha del partido y partidos conocidos (partidos.test.ts)
+                      + casa de la tanda (casa-tanda.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -534,6 +545,32 @@ tandas de 1000 y se comparan en el servidor (cientos o pocos miles de filas: inm
   fechas (`leerEnJuego` + `enJuego`), con la nota "Todas tus pendientes, sin filtro de fechas"; así
   las de partidos futuros no desaparecen en periodos que acaban hoy. El resto del resumen sigue el
   periodo. Gráficas y el detalle no muestran pendientes; Bankroll ya contaba todas.
+
+## Registro: casa de esta tanda (mejoras del registro, tarea 2a)
+
+**Diagnóstico** (2026-11-09, consultas de solo lectura con recuentos y nombres de casa): 129 apuestas
+guardadas desde una captura con la lectura de la IA. Casa acertada 19 (15 %), distinta 0, vacía 110
+(85 %), "nueva" 0. Por versión: v3 6 (4 bien, 2 vacías), v4 27 (1/26), v5 5 (0/5), v6 91 (14/77).
+Todas de bet365 (2 se guardaron sin casa). Único tipo de error: vacía; ninguna confusión entre casas ni
+nombre mal escrito ("Bet365"/"bet365" se emparejan). La IA marcaba la casa como dudosa casi siempre.
+Causa: las capturas de bet365 no muestran logo ni nombre.
+
+- **Selector "Casa de esta tanda"** en "Nueva apuesta", antes de las capturas (desplegable de 48 px):
+  casas ACTIVAS (sin archivadas) + "Que la detecte la IA". Preseleccionada la casa de la última apuesta
+  guardada con casa (si sigue activa); si no, "Que la detecte la IA" (`casaPreseleccionada`,
+  `ultimaCasaUsada`). La casa viaja con cada captura de la tanda.
+- **Servidor** (`/api/capturas/transcribir`, `casaId`): solo vale una casa activa del usuario (leída con
+  su sesión; `resolverCasaIndicada`); si no, se lee como "Que la detecte la IA" y queda en el log
+  (`[capturas:casa-tanda]`). La casa elegida se guarda dentro de la lectura (`transcripciones.propuesta
+  .casa_indicada`, JSON: sin migración) para retomar la revisión con ella.
+- **IA (instrucciones v7)**: recibe `<casa_indicada>…</casa_indicada>` como DATO (fuera de la caché, ~15
+  tokens: coste extra despreciable); sigue devolviendo en "casa" la que VE y "casa_distinta" = true SOLO
+  si la captura muestra con claridad otra casa. Lecturas antiguas: `casa_distinta` = false.
+- **Revisión**: la casa = la elegida, sin ámbar, con "Casa: elegida por ti" (en modo IA, "Casa:
+  detectada por la IA" si la encontró). **Aviso ámbar "La captura parece de X"** (`avisoDeCasa`) solo si
+  la IA dice "distinta", escribió la casa, no la marcó como dudosa y no coincide (sin mayúsculas, tildes
+  ni espacios) con la elegida; botón "Usar X" (si está en tu catálogo) o "Crear y usar X". Si la IA
+  duda, no hay aviso. Editable en cada apuesta. "Que la detecte la IA" = como antes de la v7.
 
 ## Bankroll (Fase 3, primera ronda)
 
@@ -864,7 +901,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas + partidos (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas + partidos + casa de la tanda (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase y Claude + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -1085,3 +1122,8 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-08 | Al volver a una apuesta de la cola (Anterior / Siguiente) se recupera lo editado aunque no se guardara | Antes se perdía; la cola ya guarda lo editado para rellenar la tanda |
 | 2026-11-09 | "En juego" de Análisis cuenta todas las pendientes, sin filtro de fechas, con la nota "Todas tus pendientes, sin filtro de fechas" | Con la fecha del partido, las pendientes de partidos futuros quedaban fuera de los periodos que acaban hoy |
 | 2026-11-09 | **Registro, tarea 1 (fecha del partido, partidos conocidos y "En juego" sin filtro de fechas) fusionada en `main`** (rama `registro-fecha-partido`, PR #9) | Sin migración; verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde; producción desplegada en Vercel. Falta verificarla en producción con la cuenta de Google |
+| 2026-11-09 | **Registro, tarea 2a: diagnóstico y casa de la tanda** en la rama `registro-casa-tanda` (sin migración; instrucciones v7) | El diagnóstico: la IA dejaba la casa vacía en el 85 % de las apuestas (las capturas de bet365 no muestran logo ni nombre) |
+| 2026-11-09 | Casa de la tanda elegida antes de subir, preseleccionada la última usada; la IA solo avisa si ve CLARAMENTE otra casa | Acierta siempre en el uso real (una casa) sin quitar al usuario la decisión |
+| 2026-11-09 | Casa elegida guardada dentro de `transcripciones.propuesta` (JSON) | Retomar la revisión con ella sin migración |
+| 2026-11-09 | Tarea 2b (descripciones visuales de casas) aparcada | 0 confusiones en 129 apuestas; se revisa si se usan varias casas y la v7 muestra confusiones |
+| 2026-11-09 | Casa de otro usuario, archivada o inventada en la petición: se ignora y se lee como "Que la detecte la IA" | Nunca se usa algo que no es tuyo; la lectura no falla por ello |
