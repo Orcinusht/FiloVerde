@@ -79,9 +79,9 @@ archivo o panel ponerlas).
    2 (detección de la casa) y 3 (API-Football): después.
 
 ### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-08, al empezar el registro)
-0. **Mejoras del registro**: tarea 1 hecha en la rama `registro-fecha-partido` (pendiente de verificar
-   y fusionar); después, tarea 2 (detección de la casa) y tarea 3 (API-Football). **"En juego" con
-   fechas futuras**: propuesta pendiente de visto bueno (ver "Registro: fecha del partido").
+0. **Mejoras del registro**: tarea 1 hecha en la rama `registro-fecha-partido` (con "En juego" de
+   todas las pendientes; pendiente de verificar y fusionar); después, tarea 2 (detección de la casa) y
+   tarea 3 (API-Football).
 1. **Unir ligas** (paso pequeño posterior; solo ligas, no deportes): pasar las selecciones de una liga a
    otra existente del MISMO deporte (p. ej. "Champions League" → "UEFA Champions League") con el mismo
    aviso N/M y todo o nada, y quitar la sobrante del catálogo. Cuidado: "LaLiga" y "LaLiga Hypermotion"
@@ -527,9 +527,10 @@ tandas de 1000 y se comparan en el servidor (cientos o pocos miles de filas: inm
   Las medianoches de los periodos no cambian.
 - **Efecto**: una apuesta pendiente de un partido futuro queda con fecha futura (Bankroll ya la suma
   hoy; Análisis y Gráficas la cuentan en el día del partido) y en la lista sale arriba.
-- **"En juego" y fechas futuras** (propuesta, pendiente de visto bueno): hoy solo afecta a la tarjeta
-  "En juego" de Análisis (respeta el periodo), que dejaría fuera las pendientes de partidos futuros en
-  periodos que acaban hoy. Gráficas y el detalle no muestran pendientes; Bankroll ya cuenta todas.
+- **"En juego" en Análisis** (desde el 2026-11-09): cuenta **todas** las pendientes, sin filtro de
+  fechas (`leerEnJuego` + `enJuego`), con la nota "Todas tus pendientes, sin filtro de fechas"; así
+  las de partidos futuros no desaparecen en periodos que acaban hoy. El resto del resumen sigue el
+  periodo. Gráficas y el detalle no muestran pendientes; Bankroll ya contaba todas.
 
 ## Bankroll (Fase 3, primera ronda)
 
@@ -662,10 +663,11 @@ estrategia. Error → mensaje en español y `[analisis:leer]` al log. Sin migrac
 - **Filtro de fechas** (en la dirección: `?periodo=hoy|ayer|7d|mes|30d|ano|personalizado&desde=&hasta=`): Hoy,
   Ayer, Últimos 7 días, Este mes, Últimos 30 días (contando hoy), Este año, Todo y Personalizado (los dos días incluidos; al
   revés se dan la vuelta). Por `apuestas.fecha`, con los días de **España**. Se filtra en la
-  consulta. **Todo** respeta el filtro: resumen, "En juego", rachas, segmentos y aciertos.
+  consulta. **Todo** respeta el filtro (resumen, rachas, segmentos y aciertos) salvo "En juego", que
+  desde el 2026-11-09 cuenta todas las pendientes.
 - **Resueltas** = `ganada`, `perdida`, `cash_out`, `media_ganada`, `media_perdida` con resultado
   económico. Anuladas y pendientes fuera de todas las métricas; las pendientes salen aparte en
-  **"En juego"** (número e importe). Una resuelta sin resultado no cuenta y sale un aviso (hoy no hay).
+  **"En juego"** (número e importe; desde el 2026-11-09, TODAS, sin filtro de fechas). Una resuelta sin resultado no cuenta y sale un aviso (hoy no hay).
 - `resultado_economico` es el **beneficio neto** (ver "Base de datos"); beneficio = su suma.
 - **Importe apostado** = importe completo (también en medias y cash out). **Yield** = beneficio /
   importe apostado. **% de acierto** = resultado > 0 / (> 0 + < 0); un resultado exactamente 0
@@ -1078,3 +1080,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-08 | Recalcular la fecha de las apuestas antiguas: anotado como pendiente, no construido | Solo útil si se quiere contar las antiguas por el día del partido |
 | 2026-11-08 | Si la captura trae la fecha en que se hizo la apuesta, se propone igualmente el día del partido (editable) | Regla pedida: la fecha por defecto es la del partido, cuando se resuelve |
 | 2026-11-08 | Al volver a una apuesta de la cola (Anterior / Siguiente) se recupera lo editado aunque no se guardara | Antes se perdía; la cola ya guarda lo editado para rellenar la tanda |
+| 2026-11-09 | "En juego" de Análisis cuenta todas las pendientes, sin filtro de fechas, con la nota "Todas tus pendientes, sin filtro de fechas" | Con la fecha del partido, las pendientes de partidos futuros quedaban fuera de los periodos que acaban hoy |

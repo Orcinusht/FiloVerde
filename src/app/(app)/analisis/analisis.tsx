@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { connection } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { registrarError, usuarioActual } from '@/lib/server/capturas'
-import { leerApuestasAnalisis } from '@/lib/analisis/leer'
+import { leerApuestasAnalisis, leerEnJuego } from '@/lib/analisis/leer'
 import {
   MUESTRA_MINIMA,
   PERIODOS,
@@ -45,12 +45,13 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
   const ac: AgrupacionAcierto = esAgrupacionAcierto(uno(sp.ac)) ? (uno(sp.ac) as AgrupacionAcierto) : 'mercado'
 
   let apuestas: ApuestaAnalisis[] = []
+  let pendientes = { n: 0, importe: 0 } // "En juego": todas, sin filtro de fechas
   let fallo: 'sesion' | 'error' | null = null
   try {
     const supabase = await createClient()
     const userId = await usuarioActual(supabase)
     if (!userId) fallo = 'sesion'
-    else apuestas = await leerApuestasAnalisis(supabase, userId, rango)
+    else [apuestas, pendientes] = await Promise.all([leerApuestasAnalisis(supabase, userId, rango), leerEnJuego(supabase, userId)])
   } catch (e) {
     registrarError('analisis:leer', e)
     fallo = 'error'
@@ -66,7 +67,7 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
       <FiltroFechas periodo={rango.periodo} desde={rango.desdeDia} hasta={rango.hastaDia} periodos={PERIODOS} />
 
       <ul className="space-y-1 rounded-2xl border border-border bg-surface p-3 text-xs text-muted">
-        <li>Solo cuentan las apuestas resueltas del periodo; anuladas y pendientes quedan fuera (las pendientes salen en «En juego»).</li>
+        <li>Solo cuentan las apuestas resueltas del periodo; anuladas y pendientes quedan fuera (las pendientes salen en «En juego», todas, sin filtro de fechas).</li>
         <li>Lo no marcado como directo cuenta como pre-partido, y lo no marcado como precipitada cuenta como normal (las casillas las marcas tú).</li>
         <li>Con pocas apuestas las cifras engañan: no se saca ninguna conclusión con muestra pequeña (menos de {MUESTRA_MINIMA}).</li>
       </ul>
@@ -78,7 +79,7 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
               ? 'Todavía no hay apuestas resueltas. Cuando marques alguna como ganada, perdida, media o cash out, aparecerá aquí.'
               : 'No hay apuestas resueltas en este periodo. Prueba con otro periodo o con «Todo».'}
           </p>
-          {r.enJuego.n > 0 && <Tarjeta titulo="En juego" valor={`${r.enJuego.n} · ${dinero(r.enJuego.importe)}`} />}
+          {pendientes.n > 0 && <Tarjeta titulo="En juego" valor={`${pendientes.n} · ${dinero(pendientes.importe)}`} aviso={AVISO_EN_JUEGO} />}
         </div>
       ) : (
         <>
@@ -88,7 +89,7 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
             </h2>
             <div className="grid grid-cols-2 gap-2">
               <Tarjeta titulo="Apuestas resueltas" valor={String(r.n)} />
-              <Tarjeta titulo="En juego" valor={String(r.enJuego.n)} nota={r.enJuego.n ? dinero(r.enJuego.importe) : undefined} />
+              <Tarjeta titulo="En juego" valor={String(pendientes.n)} nota={pendientes.n ? dinero(pendientes.importe) : undefined} aviso={AVISO_EN_JUEGO} />
               <Tarjeta titulo="Importe apostado" valor={dinero(r.importe)} />
               <Tarjeta titulo="Beneficio neto" valor={dinero(r.beneficio, true)} tono={r.beneficio} />
               <Tarjeta titulo="Yield" valor={porcentaje(r.yield)} tono={r.yield ?? 0} />
@@ -199,12 +200,19 @@ function Aviso({ children }: { children: React.ReactNode }) {
 const colorTono = (tono?: number) =>
   tono == null || tono === 0 ? '' : tono > 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'
 
-function Tarjeta({ titulo, valor, nota, tono }: { titulo: string; valor: string; nota?: string; tono?: number }) {
+const AVISO_EN_JUEGO = 'Todas tus pendientes, sin filtro de fechas'
+
+function Tarjeta({ titulo, valor, nota, tono, aviso }: { titulo: string; valor: string; nota?: string; tono?: number; aviso?: string }) {
   return (
     <div data-tarjeta={titulo} className="min-w-0 rounded-2xl border border-border bg-surface p-3">
       <p className="text-xs text-muted">{titulo}</p>
       <p className={`mt-1 truncate text-lg font-semibold tabular-nums ${colorTono(tono)}`}>{valor}</p>
       {nota && <p className="mt-0.5 truncate text-xs text-muted">{nota}</p>}
+      {aviso && (
+        <p className="mt-1 text-[11px] leading-tight text-muted" data-aviso="en-juego">
+          {aviso}
+        </p>
+      )}
     </div>
   )
 }
