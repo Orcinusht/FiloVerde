@@ -223,9 +223,18 @@ export function cuotaDeLaApuesta(v: Pick<ValoresFormulario, 'cuota_total' | 'tip
 
 // En el formulario: rellena el dato DERIVADO (aumento o cuota original) a partir del que se leyó
 // o escribió, para que se vea al momento. El servidor lo vuelve a calcular al guardar.
+// Sin dato base (promo_base vacío: p. ej. se acaba de borrar uno de los dos) NO se recalcula nada:
+// el campo borrado se queda vacío y el otro, como estaba (solo se recalcula al escribir un valor).
 export function sincronizarPromo(v: ValoresFormulario): ValoresFormulario {
   if (!v.promo || !esPromoAumento(v.promo_tipo)) return v
+  if (!esBasePromo(v.promo_base)) return v
+  // Mientras se escribe o se borra ("3," o "-"), el dato base puede no ser aún un número: entonces no
+  // se recalcula nada (antes se calculaba desde el otro dato y reescribía este campo: "no se podía
+  // borrar el último cero").
+  if (v.promo_base === 'cuota_original' && cuotaADecimal(v.promo_cuota_original) == null) return v
+  if (v.promo_base === 'aumento' && textoACentimos(v.promo_aumento, { permitirNegativo: true }) == null) return v
   const c = calcularAumento({
+    tipo: v.promo_tipo,
     importe: textoACentimos(v.importe) ?? null,
     cuotaTotal: cuotaDeLaApuesta(v),
     gananciaPotencial: textoACentimos(v.ganancia_potencial) ?? null,
@@ -234,7 +243,7 @@ export function sincronizarPromo(v: ValoresFormulario): ValoresFormulario {
     base: v.promo_base,
   })
   if (c.base === 'cuota_original') {
-    const t = centimosATexto(c.aumento)
+    const t = c.aumento == null ? '' : centimosATexto(c.aumento)
     return t === v.promo_aumento && v.promo_base === 'cuota_original' ? v : { ...v, promo_aumento: t, promo_base: 'cuota_original' }
   }
   if (c.base === 'aumento') {
@@ -375,6 +384,7 @@ export function validarFormulario(entrada: unknown): ResultadoValidacion {
     const baseTxt = texto(bruto.promo_base)
     // El dato derivado NO se fía del navegador: se recalcula aquí, en cada guardado.
     const calc = calcularAumento({
+      tipo: promoTipo,
       importe: importe ?? null,
       cuotaTotal: cuotaFinal ?? (tipo === 'simple' ? (selecciones[0]?.cuota ?? null) : null),
       gananciaPotencial: ganancia ?? null,

@@ -417,6 +417,7 @@ test('duplicadas: mismo partido con cuotas nulas', () => {
 
 // ---------- Promociones ----------
 import { calcularAumento, porCuota } from '../src/lib/apuestas/promociones.ts'
+import { NO_PROMOCION, REGLAS_PROMOCION, SI_PROMOCION } from '../src/lib/apuestas/promociones-ia.ts'
 import { sincronizarPromo, cuotaDeLaApuesta } from '../src/lib/apuestas/formulario.ts'
 import { completarPropuestaAntigua } from '../src/lib/apuestas/propuesta.ts'
 
@@ -462,7 +463,7 @@ test('Superaumento: avisos sin bloquear (cuota original mayor que la pagada, aum
   assert.equal(c.aumento, -200)
   assert.match(c.avisos.join(' '), /mayor que la cuota pagada/)
   assert.match(c.avisos.join(' '), /negativo/)
-  const v = validarFormulario({ ...valoresVacios(), importe: '10', cuota_total: '2', selecciones: [sel()], promo: true, promo_tipo: 'aumento', promo_cuota_original: '2,2', promo_base: 'cuota_original' })
+  const v = validarFormulario({ ...valoresVacios(), importe: '10', cuota_total: '2', selecciones: [sel()], promo: true, promo_tipo: 'superaumento', promo_cuota_original: '2,2', promo_base: 'cuota_original' })
   assert.equal(v.ok, true, 'no bloquea')
   assert.ok(v.ok, JSON.stringify(v))
   if (v.ok) assert.equal(v.datos.promo_aumento, -200)
@@ -490,7 +491,7 @@ test('Promoción: el servidor recalcula el dato derivado en cada guardado (no se
 })
 
 test('Promoción: en el formulario el dato derivado se rellena al momento', () => {
-  const v = sincronizarPromo({ ...valoresVacios(), importe: '10', cuota_total: '2,5', selecciones: [sel()], promo: true, promo_tipo: 'aumento', promo_cuota_original: '2', promo_base: 'cuota_original' })
+  const v = sincronizarPromo({ ...valoresVacios(), importe: '10', cuota_total: '2,5', selecciones: [sel()], promo: true, promo_tipo: 'superaumento', promo_cuota_original: '2', promo_base: 'cuota_original' })
   assert.equal(v.promo_aumento, '5,00')
   const w = sincronizarPromo({ ...v, promo_aumento: '2,5', promo_base: 'aumento' })
   assert.equal(w.promo_cuota_original, '2,25')
@@ -573,7 +574,9 @@ test('IA: lee la promoción sin calcular; el tipo a confirmar; la cuota original
   assert.deepEqual([sup.valores.promo, sup.valores.promo_tipo, sup.valores.promo_cuota_original, sup.valores.promo_aumento, sup.valores.promo_base], [true, 'superaumento', '2,00', '', 'cuota_original'])
   assert.equal(sup.dudosos.promo_tipo, 'propuesta')
   assert.equal(sincronizarPromo(sup.valores).promo_aumento, '5,00', 'el aumento lo calcula el código, no la IA')
-  assert.deepEqual([aum.valores.promo_cuota_original, aum.valores.promo_aumento, aum.valores.promo_base], ['', '', ''])
+  // Aumento de ganancias: la cuota original es la única cuota de la captura (dato leído, sin marca).
+  assert.deepEqual([aum.valores.promo_cuota_original, aum.valores.promo_aumento, aum.valores.promo_base], ['2,50', '', 'cuota_original'])
+  assert.equal(aum.dudosos.promo_cuota_original, undefined, 'sin marca')
   assert.equal(ase.valores.promo_credito, '10,00', 'asegurada: por defecto, el importe')
   assert.equal(cre.valores.resultado_economico, '8,50', 'con crédito, el resultado es todo lo cobrado')
   assert.equal(nada.valores.promo, false)
@@ -674,7 +677,7 @@ test('IA v5: el sustituto va a las notas (el pronóstico es el jugador elegido)'
 // ---------- v6: fecha del evento, apuestas válidas y cola ----------
 import { resolverFechaEvento } from '../src/lib/apuestas/fecha-evento.ts'
 import { esApuestaValida, revisionesDeCaptura } from '../src/lib/apuestas/propuesta.ts'
-import { estadoCola, marcadasPorDefecto, resumenCola, siguientePendiente } from '../src/lib/apuestas/cola.ts'
+import { estadoCola, marcadasPorDefecto, resumenCola, siguientePendiente, paraDescartarTodas } from '../src/lib/apuestas/cola.ts'
 
 const SUBIDA = new Date('2026-11-04T15:00:00Z') // miércoles 4 nov 2026, 16:00 en Madrid
 
@@ -771,4 +774,109 @@ test('Cola: estados, siguiente pendiente, resumen y marcadas por defecto', () =>
   assert.equal(siguientePendiente(['guardada', 'descartada'], 1), null, 'todo hecho → resumen')
   assert.deepEqual(resumenCola([...e]), { guardadas: 1, descartadas: 1, pendientes: 2 })
   assert.deepEqual(marcadasPorDefecto([{ indice: 1, yaRegistrada: false }, { indice: 4, yaRegistrada: true }, { indice: 5, yaRegistrada: false }]), [1, 5])
+})
+
+// ---------- Retoques del registro 2: promociones ----------
+
+test('Aumento de ganancias (tus capturas): aumento = ganancias (retorno total) − importe × cuota original', () => {
+  // 10 € a 3,20 con «Ganancias» 38,60 → sin promoción 32,00 → aumento 6,60.
+  const c = calcularAumento({ tipo: 'aumento', importe: 1000, cuotaTotal: 3.2, gananciaPotencial: 3860, cuotaOriginal: 3.2, aumento: null, base: 'cuota_original' })
+  assert.equal(c.aumento, 660)
+  assert.equal(calcularAumento({ tipo: 'aumento', importe: 1500, cuotaTotal: 2.5, gananciaPotencial: 4313, cuotaOriginal: 2.5, aumento: null, base: 'cuota_original' }).aumento, 563)
+  // Superaumento: 10 €, original 2,30 (tachada), ganancias 28,75 → aumento 5,75.
+  assert.equal(calcularAumento({ tipo: 'superaumento', importe: 1000, cuotaTotal: 2.875, gananciaPotencial: 2875, cuotaOriginal: 2.3, aumento: null, base: 'cuota_original' }).aumento, 575)
+})
+
+test('Aumento de ganancias SIN ganancias en la captura: el aumento queda vacío y «falta» (nunca 0)', () => {
+  const c = calcularAumento({ tipo: 'aumento', importe: 1000, cuotaTotal: 3.2, gananciaPotencial: null, cuotaOriginal: 3.2, aumento: null, base: 'cuota_original' })
+  assert.equal(c.aumento, null)
+  assert.equal(c.faltaAumento, true)
+  const v = sincronizarPromo({ ...valoresVacios(), importe: '10', cuota_total: '3,2', selecciones: [sel()], promo: true, promo_tipo: 'aumento', promo_cuota_original: '3,20', promo_base: 'cuota_original' })
+  assert.equal(v.promo_aumento, '')
+  // En un superaumento la cuota mostrada ya lleva la mejora: sin ganancias se calcula con ella.
+  assert.equal(calcularAumento({ tipo: 'superaumento', importe: 1000, cuotaTotal: 2.875, gananciaPotencial: null, cuotaOriginal: 2.3, aumento: null }).aumento, 575)
+})
+
+test('IA: superaumento sin cuota tachada → cuota original vacía (en ámbar «falta»), nunca un valor por defecto', () => {
+  const p = esquemaPropuestaIA.parse({ hay_apuestas: true, motivo: null, apuestas: [apuestaIA({ cuota_total: '2.87', ganancia_potencial: 28.7, promo_tipo: 'superaumento', promo_cuota_original: null, promo_aumento: null, promo_credito: null })] })
+  const [r] = propuestaARevisiones(p)
+  assert.equal(r.valores.promo_cuota_original, '')
+  assert.ok(!/1[.,]80/.test(JSON.stringify(r.valores)), 'ningún 1,80')
+  const c = calcularAumento({ tipo: 'superaumento', importe: 1000, cuotaTotal: 2.87, gananciaPotencial: 2870, cuotaOriginal: null, aumento: null })
+  assert.equal(c.falta, true)
+})
+
+test('Borrar «Cuota original» o «Aumento» deja vacío SOLO ese campo: el otro no se recalcula', () => {
+  const lleno = sincronizarPromo({ ...valoresVacios(), importe: '10', cuota_total: '2,875', ganancia_potencial: '28,75', selecciones: [sel()], promo: true, promo_tipo: 'superaumento', promo_cuota_original: '2,30', promo_base: 'cuota_original' })
+  assert.equal(lleno.promo_aumento, '5,75')
+  // Con la tecla de borrar en el móvil: "3,20" → "3,2" → "3," (aún no es un número) → "3" → "".
+  let m = sincronizarPromo({ ...valoresVacios(), importe: '10,00', cuota_total: '3,20', ganancia_potencial: '38,60', selecciones: [sel()], promo: true, promo_tipo: 'aumento', promo_cuota_original: '3,20', promo_base: 'cuota_original' })
+  for (const t of ['3,2', '3,', '3', '']) {
+    m = sincronizarPromo({ ...m, promo_cuota_original: t, promo_base: t ? 'cuota_original' : '' })
+    assert.equal(m.promo_cuota_original, t, `tras borrar queda «${t}» (nunca vuelve el valor anterior)`)
+  }
+  // Borrar la cuota original letra a letra hasta vaciarla (como en el móvil).
+  let v = lleno
+  for (const t of ['2,3', '2,', '2', '']) v = sincronizarPromo({ ...v, promo_cuota_original: t, promo_base: t ? 'cuota_original' : '' })
+  assert.equal(v.promo_cuota_original, '', 'se queda vacío (antes volvía a aparecer el valor)')
+  const aumentoAntes = v.promo_aumento
+  assert.equal(sincronizarPromo(v).promo_aumento, aumentoAntes, 'vacío: el aumento ya no se recalcula')
+  // Borrarla de golpe: el aumento se queda exactamente como estaba.
+  const g = sincronizarPromo({ ...lleno, promo_cuota_original: '', promo_base: '' })
+  assert.deepEqual([g.promo_cuota_original, g.promo_aumento], ['', '5,75'])
+  // Borrar el aumento: la cuota original se queda como estaba.
+  const w = sincronizarPromo({ ...lleno, promo_aumento: '', promo_base: '' })
+  assert.deepEqual([w.promo_cuota_original, w.promo_aumento], ['2,30', ''])
+  // Al volver a escribir un valor, sí se recalcula el otro.
+  assert.equal(sincronizarPromo({ ...w, promo_aumento: '6', promo_base: 'aumento' }).promo_cuota_original, '2,275')
+})
+
+// ---------- IA v8: qué es y qué no es promoción ----------
+
+test('IA v8: las promociones reales siguen en las instrucciones (no se pierden)', () => {
+  for (const t of ['Aumento de ganancias', 'Superaumento', 'Cuota mejorada', 'Apuesta gratuita', 'Free bet', 'Apuesta con crédito', 'Reembolso', 'Apuesta sin riesgo', 'Apuesta asegurada'])
+    assert.ok(REGLAS_PROMOCION.includes(t), t)
+  for (const t of SI_PROMOCION) assert.ok(!NO_PROMOCION.some((n) => n.toLowerCase() === t.toLowerCase()), t)
+  assert.match(REGLAS_PROMOCION, /"superaumento"/)
+  assert.match(REGLAS_PROMOCION, /"aumento"/)
+  assert.match(REGLAS_PROMOCION, /"asegurada": [^\n]*Apuesta sin riesgo/)
+  assert.match(REGLAS_PROMOCION, /"credito": [^\n]*Apuesta gratuita/)
+})
+
+test('IA v8: «goles de ventaja», «pago anticipado» y «sustituto» NO son promoción; «otra» solo con promoción, bono u oferta', () => {
+  for (const t of ['2 goles de ventaja', 'Pago anticipado', 'Sustituto']) assert.ok(REGLAS_PROMOCION.includes(`"${t}"`), t)
+  assert.match(REGLAS_PROMOCION, /NO son promociones/)
+  assert.match(REGLAS_PROMOCION, /"Pago anticipado - 2 goles de ventaja" en verde → promo_tipo null/)
+  assert.match(REGLAS_PROMOCION, /"otra": SOLO si la captura usa expresamente la palabra "promoción", "bono" u "oferta"/)
+  assert.match(REGLAS_PROMOCION, /no la deduzcas ni pongas ningún valor por defecto/)
+})
+
+test('IA v8: una lectura sin promoción (goles de ventaja) no marca la apuesta como promoción', () => {
+  const p = esquemaPropuestaIA.parse({
+    hay_apuestas: true, motivo: null,
+    apuestas: [apuestaIA({ promo_tipo: null, promo_cuota_original: null, promo_aumento: null, promo_credito: null })],
+  })
+  const [r] = propuestaARevisiones(p)
+  assert.equal(r.valores.promo, false)
+  assert.deepEqual([r.valores.promo_tipo, r.valores.promo_cuota_original, r.valores.promo_aumento], ['', '', ''])
+})
+
+// ---------- Descartar todas (cola de revisión) ----------
+
+test('«Descartar todas»: solo las sin guardar (pendientes, fallidas y por elegir); guardadas y descartadas no se tocan', () => {
+  const items = [
+    { clave: 'a', paso: 'lista', estado: 'guardada', indice: 0 },
+    { clave: 'b', paso: 'lista', estado: 'pendiente', indice: 1 },
+    { clave: 'c', paso: 'manual', indice: 0 },
+    { clave: 'd', paso: 'error' },
+    { clave: 'e', paso: 'eligiendo', opciones: [{ indice: 0 }, { indice: 2 }] },
+    { clave: 'f', paso: 'lista', estado: 'descartada', indice: 3 },
+  ]
+  const r = paraDescartarTodas(items)
+  assert.deepEqual(r.lista.map((x) => x.clave), ['b', 'c', 'd', 'e'])
+  assert.deepEqual(r.lista.find((x) => x.clave === 'e')?.indices, [0, 2])
+  assert.equal(r.apuestas, 5)
+  assert.equal(r.leyendo, false)
+  assert.equal(paraDescartarTodas([...items, { clave: 'g', paso: 'leyendo' }]).leyendo, true, 'con una captura leyéndose, se avisa')
+  assert.equal(paraDescartarTodas([{ clave: 'a', paso: 'lista', estado: 'guardada' }]).apuestas, 0)
 })

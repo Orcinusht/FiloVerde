@@ -64,6 +64,8 @@ const NOMBRE_VERSION: Record<number, string> = {
   4: 'lee promociones',
   5: 'sustitutos y caché',
   6: 'apuestas cortadas y fechas',
+  7: 'casa de la tanda',
+  8: 'qué no es promoción',
 }
 
 // Coste medio antes y después de cambiar las instrucciones de la IA (p. ej. con el catálogo).

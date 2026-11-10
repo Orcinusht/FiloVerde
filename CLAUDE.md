@@ -91,8 +91,15 @@ archivo o panel ponerlas).
    posibles"; las elecciones se recuerdan al guardar. Sin fecha en la captura, ventana de hoy − 7 a
    hoy + 2. **Verificada en el móvil con la cuenta de email (commit 017ce24).** Falta verificarla en
    producción con la cuenta de Google. Ver "Registro: API-Football".
+   **Retoques del registro 2, hechos en la rama `registro-retoques-2` el 2026-11-10** (sin fusionar;
+   sin migración; instrucciones v8): "Descartar todas" en la cola de revisión, chip "Por resolver",
+   aumento de ganancias bien calculado y campos de promoción que se pueden vaciar, qué NO es promoción
+   (v8) y deporte y liga confirmados por API-Football. Ver "Registro: retoques 2".
 
 ### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-10, tras fusionar la tarea 3 del registro)
+0. **Retoques del registro 2** (rama `registro-retoques-2`): verificar en el móvil con el despliegue de
+   la rama, fusionar y verificar en producción con la cuenta de Google. **El tenis se trata aparte**
+   (punto 3 del encargo, fuera de esta tarea).
 1. **API-Football, limitación futura** (tarea 3 fusionada el 2026-11-10; plan **Pro: 7.500 llamadas al
    día**): la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
    USUARIO (`api_futbol_uso`); con más usuarios haría falta un contador GLOBAL (p. ej. una tabla común
@@ -222,7 +229,7 @@ Además:
 src/
   app/
     (app)/            pantallas con sesión + barra inferior
-      apuestas/         lista (filtros) · nueva/ (capturas o ?manual=1) · [id]/ (detalle y edición)
+      apuestas/         lista (filtros; chip "Por resolver") · nueva/ (capturas o ?manual=1) · [id]/ (detalle y edición)
         actions.ts      guardar, borrar, crear casa/estrategia, descartar captura (Server Actions)
       ajustes/          tema, coste de la IA (coste-ia.tsx), capturas guardadas (recuento y borrado),
                         API-Football (api-futbol.tsx: conectada, llamadas de hoy y restantes;
@@ -271,7 +278,8 @@ src/
                       afectadas por un renombrado y detector de posibles errores),
                       opciones.ts (casas y estrategias: nombres válidos, reservados, uso, borrado,
                       archivadas y reconocer el nombre leído por la IA),
-                      duplicadas.ts (¿es una copia calcada de otra?), promociones.ts (aumentos,
+                      duplicadas.ts (¿es una copia calcada de otra?), promociones-ia.ts (reglas de la IA
+                      sobre qué es y qué no es promoción, v8), promociones.ts (aumentos,
                       asegurada y crédito: cálculos en céntimos), reintentos-ia.ts (errores de la
                       IA: clasificación, cuáles se reintentan, esperas y mensajes), fecha-evento.ts
                       (traduce el texto de la fecha del evento), cola.ts (estados de la cola),
@@ -421,7 +429,7 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
   al editar; lo que mande el navegador se ignora.
 - `transcripciones.version_instrucciones`: versión de las instrucciones de la IA (vacía = 1, sin
   catálogo; 2 = con catálogo; 3 = ignora señales de directo; 4 = lee promociones; 5 = sustitutos y
-  caché; 6 = apuestas cortadas y fecha del evento como texto). Ajustes compara el coste medio por versión. **Lecturas** = filas `ok` y `no_es_apuesta`;
+  caché; 6 = apuestas cortadas y fecha del evento como texto; 7 = casa de la tanda; 8 = qué no es promoción). Ajustes compara el coste medio por versión. **Lecturas** = filas `ok` y `no_es_apuesta`;
   las `error` (fallos que Anthropic sí cobra: rechazo, respuesta cortada, datos rotos) no cuentan
   como lectura ni entran en el coste medio: se muestran aparte ("Intentos fallidos cobrados"). Los
   intentos saturados o con límite no se cobran y no crean fila.
@@ -665,6 +673,54 @@ Solo fútbol. La API propone y el usuario decide: todo editable. Rama `registro-
   (cada usuario solo lo suyo, visitante sin acceso, migración dos veces, borrar la cuenta entera);
   `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (79 en total); `npm run probar:local` con una
   API-Football simulada (puerto 54323).
+
+## Registro: retoques 2 (2026-11-10, rama `registro-retoques-2`)
+
+Sin migración. Instrucciones de la IA **v8**.
+
+- **"Descartar todas (N)"** en la cola de revisión (`registro-capturas.tsx`, `paraDescartarTodas` en
+  `cola.ts`): sale con 2 o más apuestas SIN GUARDAR (pendientes, lecturas fallidas, rellenadas a mano o
+  capturas con varias apuestas por elegir) y pide confirmación ("¿Descartar las N apuestas sin guardar?
+  No se puede deshacer."). Cada una se descarta como con "Descartar" (queda en `descartadas`, no vuelve
+  a "sin revisar") y se termina la cola (se borran las capturas). Las guardadas no se tocan. Si alguna
+  captura aún se está leyendo, el botón espera ("Espera a que terminen de leerse las capturas").
+- **Chip "Por resolver N"** (`chip-por-resolver.tsx`, `contarPorResolver` en `datos.ts`): ámbar, junto a
+  "+ Nueva" en Apuestas, con el número de apuestas guardadas en estado **pendiente** (falta el
+  resultado); lleva a `/apuestas?estado=pendiente`. Con 0 no sale. Distinto de "Tienes N sin revisar"
+  (capturas leídas por la IA aún sin guardar). Sin burbuja en la barra inferior (decisión del usuario).
+- **Promociones · "Ganancias" de las capturas = RETORNO TOTAL** (lo apostado + beneficio, con la mejora;
+  comprobado con 13 apuestas guardadas: p. ej. 10 € a 3,20 con ganancias 38,60 → aumento 6,60). Se guarda
+  en `ganancia_potencial`. **Aumento = ganancias − importe × cuota original.**
+  - **Aumento de ganancias** (bet365: una sola cuota, la original): la cuota original = la cuota de la
+    apuesta, SIN marca (dato leído); también al elegir el tipo a mano. Sin ganancias en la captura
+    (perdidas) el aumento queda **vacío y "falta"**, nunca 0 (`calcularAumento` con `tipo: 'aumento'`
+    no usa importe × cuota).
+  - **Superaumento**: la original es la TACHADA; si no se lee, vacía y "falta"; nunca un valor por
+    defecto. El "1,80" que se veía era el texto de ejemplo (gris) del campo vacío: quitado (y el "0,00"
+    del aumento).
+  - **Vaciar un campo**: borrar "Cuota original" o "Aumento" deja vacío SOLO ese campo; el otro no se
+    toca ni se recalcula (`promo_base` vacío → `sincronizarPromo` no deriva nada). Al escribir un valor,
+    sí se recalcula el otro (también con valores intermedios al borrar letra a letra). Antes, al vaciarlo,
+    se volvía a calcular desde el otro y "no se podía borrar el último cero". Importe, cuotas, ganancia,
+    resultado y el importe de Bankroll ya eran texto (comprobado en la prueba local).
+  - Las 5 apuestas guardadas con aumento 0 (sin ganancias) se dejan como están (decisión del usuario).
+- **IA v8 · qué es y qué no es promoción** (`lib/apuestas/promociones-ia.ts`, `REGLAS_PROMOCION`, dentro
+  de las instrucciones): SÍ = aumento, superaumento, apuesta gratis o crédito, reembolso, apuesta sin
+  riesgo y mejoras de cuota o ganancias; **"otra" solo con las palabras "promoción", "bono" u "oferta"**;
+  NO = "Pago anticipado", "2 goles de ventaja", "Sustituto/Sustituto+", "Cash out", "Crear apuesta"…, con
+  ejemplos. La cuota original solo si aparece tachada. Diagnóstico previo (solo lectura): 5 lecturas con
+  "otra", 2 de ellas con "ventaja" en el mercado; en el código no había ninguna lista de palabras.
+- **API-Football · deporte y liga** (`decidirRelleno` → `confirmados`; `formulario-apuesta.tsx`): lo que
+  ya coincide con la API (día, hora, liga, deporte) también lleva la **marca azul**; liga vacía o dudosa →
+  la de tu catálogo (o equivalencia); liga clara distinta → sugerencia "Usar…" (nunca se pisa). **Otro
+  deporte** (la IA puso p. ej. "Baloncesto" en ámbar) → se consulta igualmente y, si la API tiene el
+  partido de fútbol, NO se cambia nada: tarjeta "La captura dice «Baloncesto», pero API-Football tiene
+  este partido de fútbol…" con **"Usar Fútbol"** (rellena deporte, liga, día y hora con la marca azul).
+  Un deporte distinto leído con CLARIDAD (p. ej. tenis) no se consulta. Lo no aplicado no se recuerda.
+  Nunca al editar una apuesta guardada.
+- Pruebas: `logica.test.ts` (aumento con tus ejemplos, sin ganancias, sin tachada, vaciar campos, v8,
+  descartar todas), `api-futbol.test.ts` (confirmados, liga, otro deporte), prueba local con escenarios
+  nuevos (aumento, perdida, "goles de ventaja", "Usar Fútbol", "Descartar todas", chip, Bankroll).
 
 ## Registro: casa de esta tanda (mejoras del registro, tarea 2a)
 
@@ -1266,3 +1322,11 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-10 | Buscar por equipo en la API (`/teams?search` + `/fixtures?team`): propuesto, NO aplicado | Encontraría partidos más antiguos, pero la búsqueda de la API es por nombre en inglés ("Múnich" no encuentra "München"), cuesta 2 llamadas por equipo nuevo y necesita otra caché; queda como idea si la ventana se queda corta |
 | 2026-11-10 | `/api/diagnostico` dice si el servidor ve `API_FOOTBALL_KEY` (nunca su valor) y qué despliegue es (rama y commit) | En la prueba de la rama, Ajustes decía "Sin configurar" porque se miraba un despliegue anterior a la clave |
 | 2026-11-10 | **Registro, tarea 3 (API-Football) fusionada en `main`** (rama `registro-api-futbol`, PR #11, commit `cca495a`) | Migración `20261109000001` aplicada (4 tablas con RLS y 16 políticas, comprobado en solo lectura); verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde. Falta verificarla en producción con la cuenta de Google |
+| 2026-11-10 | **Retoques del registro 2** en la rama `registro-retoques-2` (sin migración; instrucciones v8) | Encargo de 6 puntos (el tenis, aparte) |
+| 2026-11-10 | "Ganancias" de las capturas = retorno total; aumento = ganancias − importe × cuota original; en "aumento de ganancias" la cuota original es la de la captura (sin marca) | Comprobado con 13 apuestas guardadas del usuario; la IA no deduce ni pone valores por defecto |
+| 2026-11-10 | Sin ganancias en un aumento de ganancias: aumento vacío "falta" (antes salía 0) | Con la cuota original no se puede saber la mejora; 0 era falso. Las 5 guardadas así se dejan como están |
+| 2026-11-10 | Borrar un campo de promoción lo deja vacío y no recalcula el otro | Antes se recalculaba al vaciarlo y "no se podía borrar el último cero"; regla del usuario |
+| 2026-11-10 | "Otra" promoción solo con "promoción", "bono" u "oferta"; "goles de ventaja", "pago anticipado" y "sustituto" no son promoción | 5 lecturas "otra", 2 con "ventaja" en el mercado; positivos explícitos para no perder promociones reales |
+| 2026-11-10 | API-Football marca deporte y liga aunque ya coincidieran; otro deporte → sugerencia "Usar Fútbol" (se consulta si la IA dudó del deporte; un deporte claro distinto, no) | La API también confirma; nunca cambia solo un dato claro; el tenis se queda fuera |
+| 2026-11-10 | Chip "Por resolver" (apuestas pendientes de resultado) junto a "+ Nueva", sin burbuja en la barra | Acceso rápido; distinto de "sin revisar"; una consulta solo en Apuestas |
+| 2026-11-10 | "Descartar todas" solo con lo no guardado y con confirmación; espera si hay capturas leyéndose | No dejar lecturas a medias ni tocar lo guardado |

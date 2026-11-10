@@ -113,9 +113,9 @@ test('al retomar: la casa elegida se recupera de la lectura guardada (solo si es
   assert.equal(casaIndicadaGuardada(null), null)
 })
 
-test('instrucciones de la IA: versión 7 con la casa indicada como dato', () => {
+test('instrucciones de la IA: versión 8 (desde la 7, con la casa indicada como dato)', () => {
   const fuente = readFileSync(new URL('../src/lib/server/ia/transcribir.ts', import.meta.url), 'utf8')
-  assert.match(fuente, /export const VERSION_INSTRUCCIONES = 7\b/)
+  assert.match(fuente, /export const VERSION_INSTRUCCIONES = 8\b/)
   assert.match(fuente, /<casa_indicada>/)
   assert.match(fuente, /"casa_distinta": true SOLO si la captura muestra con claridad/)
 })

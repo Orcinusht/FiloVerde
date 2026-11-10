@@ -534,7 +534,26 @@ APUESTAS.api_varias = apuesta({ importe: 5, cuota_total: '1.90', ganancia_potenc
 APUESTAS.api_recuerda = apuesta({ importe: 6, cuota_total: '1.95', ganancia_potencial: 11.7, selecciones: [sel('Universidad - Nacional', 'Nacional', '1.95', { evento_fecha: diaMas(1), evento_hora: null, liga: null, deporte: 'Fútbol' })] })
 APUESTAS.api_ayer = apuesta({ importe: 10, cuota_total: '1.75', ganancia_potencial: 17.5, estado: 'ganada', importe_cobrado: 17.5, selecciones: [sel('UD Las Palmas - CD Eldense', 'UD Las Palmas', '1.75', { ...sinPartido, estado: 'ganada' })] })
 APUESTAS.api_liga_nueva = apuesta({ importe: 3, cuota_total: '2.10', ganancia_potencial: 6.3, selecciones: [sel('Racing de Santander - Sporting de Gijón', 'Racing', '2.10', sinPartido)] })
+// Retoques del registro 2: aumento de ganancias como en tus capturas (una sola cuota y «Ganancias» =
+// retorno total), sin ganancias (perdida), «goles de ventaja» (NO es promoción), otro deporte para la
+// API y dos para «Descartar todas».
+APUESTAS.aumento_real = apuesta({ casa: null, importe: 10, cuota_total: '3.20', ganancia_potencial: 38.6, promo_tipo: 'aumento', selecciones: [sel('Real Betis - Rayo Vallecano', 'Real Betis', '3.20')] })
+APUESTAS.aumento_perdida = apuesta({ casa: null, importe: 15, cuota_total: '2.80', ganancia_potencial: null, estado: 'perdida', promo_tipo: 'aumento', selecciones: [sel('Cádiz - Málaga', 'Cádiz', '2.80', { estado: 'perdida' })] })
+APUESTAS.ventaja = apuesta({ casa: null, importe: 5, cuota_total: '1.90', ganancia_potencial: 9.5, selecciones: [sel('Valencia - Getafe', 'Valencia', '1.90', { mercado: 'Pago anticipado - 2 goles de ventaja' })] })
+APUESTAS.api_otro_deporte = apuesta({
+  casa: null, importe: 4, cuota_total: '1.70', ganancia_potencial: 6.8,
+  selecciones: [sel('Bayern de Múnich - Arsenal', 'Bayern de Múnich', '1.70', { evento_fecha: diaMas(1), evento_hora: null, liga: null, deporte: 'Baloncesto' })],
+  dudosos: [{ campo: 'selecciones.0.deporte', motivo: 'deducido' }],
+})
+APUESTAS.descartar_1 = apuesta({ casa: null, importe: 3, cuota_total: '2.00', ganancia_potencial: 6, selecciones: [sel('Descarte Uno - Prueba', 'Descarte Uno', '2.00')] })
+APUESTAS.descartar_2 = apuesta({ casa: null, importe: 4, cuota_total: '2.10', ganancia_potencial: 8.4, selecciones: [sel('Descarte Dos - Prueba', 'Descarte Dos', '2.10')] })
 const RESPUESTAS = {
+  aumento_real: con(APUESTAS.aumento_real),
+  aumento_perdida: con(APUESTAS.aumento_perdida),
+  ventaja: con(APUESTAS.ventaja),
+  api_otro_deporte: con(APUESTAS.api_otro_deporte),
+  descartar_1: con(APUESTAS.descartar_1),
+  descartar_2: con(APUESTAS.descartar_2),
   api_clara: con(APUESTAS.api_clara),
   api_hora: con(APUESTAS.api_hora),
   api_varias: con(APUESTAS.api_varias),
@@ -661,6 +680,7 @@ createServer(async (req, res) => {
     llamadasIA.push({
       t: Date.now(),
       instruccionSustituto: sistema.includes('NUNCA pongas al sustituto en "pronostico"'),
+      reglasPromo: sistema.includes('NO son promociones') && sistema.includes('goles de ventaja'),
       cacheSistema: conCache,
       // Huella de la parte cacheada (instrucciones + catálogo): si cambia entre lecturas, la caché se rompe.
       prefijo: createHash('sha1').update(sistema + JSON.stringify(contenido.find((c) => c.type === 'text' && c.text.startsWith('<catalogo>'))?.text ?? '')).digest('hex').slice(0, 12),

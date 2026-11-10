@@ -256,3 +256,15 @@ export async function ultimaCasaUsada(): Promise<string | null> {
     return null
   }
 }
+
+// Cuántas apuestas están PENDIENTES DE RESULTADO ("Por resolver"; no confundir con las capturas
+// "sin revisar"). Solo las del usuario de la sesión (RLS). Si falla, 0 (el chip no sale).
+export async function contarPorResolver(): Promise<number> {
+  const supabase = await createClient()
+  const { count, error } = await supabase.from('apuestas').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente')
+  if (error) {
+    registrarError('apuestas:por-resolver', error)
+    return 0
+  }
+  return count ?? 0
+}

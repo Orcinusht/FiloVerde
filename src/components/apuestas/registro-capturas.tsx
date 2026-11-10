@@ -14,7 +14,7 @@ import { CASA_IA, TEXTO_CASA_IA, opcionesCasaTanda } from '@/lib/apuestas/casa-t
 import { MAX_INTENTOS, esperaAntesDeReintentar, pausaLoteTrasLimite } from '@/lib/apuestas/reintentos-ia'
 import { VisorCaptura } from './visor-captura'
 import { EleccionApuestas } from './eleccion-apuestas'
-import { estadoCola, resumenCola, siguientePendiente, type EstadoItemCola } from '@/lib/apuestas/cola'
+import { estadoCola, resumenCola, siguientePendiente, type EstadoItemCola, paraDescartarTodas } from '@/lib/apuestas/cola'
 
 export const MAX_LOTE = 5
 
@@ -395,6 +395,27 @@ export function RegistroCapturas({
     avanzar()
   }
 
+  // "Descartar todas": las sin guardar (como «Descartar» una a una) y se termina la cola.
+  const [confirmarTodas, setConfirmarTodas] = useState(false)
+  const [descartandoTodas, setDescartandoTodas] = useState(false)
+  async function descartarTodas() {
+    setDescartandoTodas(true)
+    const { lista } = paraDescartarTodas(itemsRef.current)
+    for (const x of lista) {
+      const it = itemsRef.current.find((i) => i.clave === x.clave)
+      if (!it) continue
+      for (const indice of x.indices) {
+        if (it.ruta || it.transcripcionId) {
+          await descartarCaptura({ ruta: it.ruta ?? null, transcripcionId: it.transcripcionId ?? null, indice, conservarImagen: true }).catch(() => null)
+        }
+      }
+      actualizar(it.clave, { estado: 'descartada', paso: it.paso === 'error' || it.paso === 'eligiendo' ? 'lista' : it.paso })
+    }
+    setDescartandoTodas(false)
+    setConfirmarTodas(false)
+    terminar()
+  }
+
   async function recuperar(item: Item) {
     if (item.transcripcionId && item.indice != null) await recuperarDescartada({ transcripcionId: item.transcripcionId, indice: item.indice })
     actualizar(item.clave, { estado: 'pendiente' })
@@ -507,6 +528,41 @@ export function RegistroCapturas({
             }}
           />
         )}
+        {(() => {
+          const t = paraDescartarTodas(items)
+          if (t.apuestas < 2) return null
+          return confirmarTodas ? (
+            <div role="alertdialog" aria-label="Descartar todas" className="space-y-2 rounded-xl border border-red-500/40 bg-red-500/5 p-3 text-sm">
+              <p className="font-semibold">¿Descartar las {t.apuestas} apuestas sin guardar? No se puede deshacer.</p>
+              <p className="text-xs text-muted">Las que ya has guardado no se tocan.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setConfirmarTodas(false)} className="h-11 rounded-xl border border-border font-semibold">
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={descartandoTodas}
+                  onClick={() => void descartarTodas()}
+                  className="h-11 rounded-xl bg-red-600 font-semibold text-white disabled:opacity-60"
+                >
+                  {descartandoTodas ? 'Descartando…' : 'Descartar todas'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-end gap-2">
+              {t.leyendo && <span className="text-xs text-muted">Espera a que terminen de leerse las capturas.</span>}
+              <button
+                type="button"
+                disabled={t.leyendo}
+                onClick={() => setConfirmarTodas(true)}
+                className="h-11 rounded-xl border border-red-500/40 px-3 text-sm font-semibold text-red-700 disabled:opacity-50 dark:text-red-400"
+              >
+                Descartar todas ({t.apuestas})
+              </button>
+            </div>
+          )
+        })()}
         {aviso && actual === 0 && (
           <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">{aviso}</p>
         )}

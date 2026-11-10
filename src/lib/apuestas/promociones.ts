@@ -43,11 +43,15 @@ export type CalculoAumento = {
   aumento: number | null // céntimos (puede salir negativo: se avisa, no se bloquea)
   base: BasePromo | null
   falta: boolean // no hay cuota original ni forma de calcularla
+  faltaAumento: boolean // no se puede calcular el aumento (p. ej. faltan las ganancias de la captura)
   avisos: string[]
 }
 
-// Superaumento / aumento de ganancias.
-//  · ganancia con promoción = ganancia potencial (si falta, importe × cuota total)
+// Superaumento / aumento de ganancias. "Ganancias" de la captura = RETORNO TOTAL (lo apostado + el
+// beneficio, con el aumento incluido); se guarda como ganancia potencial.
+//  · ganancia con promoción = ganancia potencial. Si falta: en un SUPERAUMENTO (la cuota mostrada ya
+//    lleva la mejora) vale importe × cuota total; en un AUMENTO DE GANANCIAS (la cuota mostrada es la
+//    original y la mejora va aparte) NO se puede saber → el aumento queda vacío ("falta").
 //  · con la cuota original: aumento = ganancia con promoción − importe × cuota original
 //  · con el aumento: cuota original = (ganancia con promoción − aumento) / importe
 //  · con los dos: se conservan tal cual y se avisa si no cuadran (más de 2 céntimos)
@@ -58,11 +62,13 @@ export function calcularAumento(a: {
   cuotaOriginal: number | null
   aumento: number | null
   base?: string | null
+  tipo?: string | null // 'aumento' = aumento de ganancias (sin ganancias no hay aumento)
 }): CalculoAumento {
   const { importe, cuotaTotal } = a
   const avisos: string[] = []
   const gananciaCon =
-    a.gananciaPotencial ?? (importe != null && cuotaTotal != null ? porCuota(importe, cuotaTotal) : null)
+    a.gananciaPotencial ??
+    (a.tipo !== 'aumento' && importe != null && cuotaTotal != null ? porCuota(importe, cuotaTotal) : null)
 
   // Qué dato manda: el indicado, si existe; si no, el que haya.
   let base: BasePromo | null = null
@@ -113,7 +119,7 @@ export function calcularAumento(a: {
         ? porCuota(importe, cuotaOriginal)
         : null
 
-  return { gananciaCon, gananciaSin, cuotaOriginal, aumento, base, falta: cuotaOriginal == null, avisos }
+  return { gananciaCon, gananciaSin, cuotaOriginal, aumento, base, falta: cuotaOriginal == null, faltaAumento: aumento == null, avisos }
 }
 
 export const TEXTO_CREDITO = 'Con crédito: si pierdes no baja tu dinero; si ganas sube solo la ganancia.'

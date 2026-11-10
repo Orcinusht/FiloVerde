@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import Link from 'next/link'
 import { PageHeader } from '@/components/page-header'
 import { ListaApuestas } from '@/components/apuestas/lista-apuestas'
+import { ChipPorResolver } from '@/components/apuestas/chip-por-resolver'
 
 export const metadata = { title: 'Apuestas · Filoverde' }
 
@@ -11,12 +12,18 @@ export default function Page({ searchParams }: PageProps<'/apuestas'>) {
       <PageHeader
         title="Apuestas"
         accion={
-          <Link
-            href="/apuestas/nueva"
-            className="flex h-11 items-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground"
-          >
-            + Nueva
-          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Apuestas pendientes de resultado (no las capturas "sin revisar"). */}
+            <Suspense fallback={null}>
+              <ChipPorResolver />
+            </Suspense>
+            <Link
+              href="/apuestas/nueva"
+              className="flex h-11 items-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground"
+            >
+              + Nueva
+            </Link>
+          </div>
         }
       />
       <Suspense fallback={<Cargando />}>

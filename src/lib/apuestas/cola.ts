@@ -34,3 +34,21 @@ export function resumenCola(estados: EstadoItemCola[]) {
 export function marcadasPorDefecto(opciones: { indice: number; yaRegistrada: boolean }[]): number[] {
   return opciones.filter((o) => !o.yaRegistrada).map((o) => o.indice)
 }
+
+// "Descartar todas": las apuestas de la cola SIN GUARDAR (pendientes, fallidas y capturas con
+// varias apuestas por elegir). Las guardadas y las ya descartadas no se tocan. Si alguna captura
+// aún se está leyendo, no se puede (se avisa) para no dejar una lectura a medias.
+export type ParaDescartar = { clave: string; indices: (number | null)[] }
+export function paraDescartarTodas(
+  items: { clave: string; paso: string; estado?: string; indice?: number; opciones?: { indice: number }[] }[],
+): { lista: ParaDescartar[]; apuestas: number; leyendo: boolean } {
+  const lista: ParaDescartar[] = []
+  let leyendo = false
+  for (const it of items) {
+    const e = estadoCola(it)
+    if (e === 'leyendo') leyendo = true
+    else if (e === 'pendiente' || e === 'error') lista.push({ clave: it.clave, indices: [it.indice ?? null] })
+    else if (e === 'eligiendo') lista.push({ clave: it.clave, indices: (it.opciones ?? []).map((o) => o.indice) })
+  }
+  return { lista, apuestas: lista.reduce((n, x) => n + Math.max(1, x.indices.length), 0), leyendo }
+}
