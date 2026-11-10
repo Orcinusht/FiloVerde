@@ -22,6 +22,14 @@ export async function GET() {
       variables_ahora_en_vercel: describir(actual.url, actual.clave),
       coinciden: compilada.url === actual.url && compilada.clave === actual.clave,
       conexion_con_supabase: await probarConexion(compilada.url, compilada.clave),
+      // API-Football: solo si la clave EXISTE (nunca su valor).
+      api_football: {
+        API_FOOTBALL_KEY_existe: Boolean(env.API_FOOTBALL_KEY?.trim()),
+        tiene_espacios: env.API_FOOTBALL_KEY ? env.API_FOOTBALL_KEY !== env.API_FOOTBALL_KEY.trim() : false,
+        proveedor: env.API_FOOTBALL_PROVIDER?.trim().toLowerCase() === 'rapidapi' ? 'rapidapi' : 'direct',
+      },
+      // Qué despliegue estás viendo (rama y commit; datos públicos de GitHub).
+      despliegue: { rama: env.VERCEL_GIT_COMMIT_REF ?? null, commit: env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null },
     },
     { headers: { 'Cache-Control': 'no-store' } },
   )
