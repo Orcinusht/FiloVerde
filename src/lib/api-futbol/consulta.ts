@@ -1,5 +1,6 @@
 // API-Football: de las selecciones de la revisión a lo que se enseña en el formulario.
-//   1. Días a consultar: el de cada selección; sin día, hoy y los dos siguientes.
+//   1. Días a consultar: el de cada selección; sin día, de hoy − 7 a hoy + 2 (por los nombres de los
+//      equipos; si el mismo cruce sale en varios días, fichas con el día).
 //   2. Emparejar cada selección con los partidos de su día (o de los tres días).
 //   3. Si una selección CON día no aparece ese día, se mira el día antes y el después: si el
 //      partido está ahí, sale como sugerencia ("la API indica el 4 nov"), nunca se impone.

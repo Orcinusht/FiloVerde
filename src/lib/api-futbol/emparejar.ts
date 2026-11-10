@@ -357,12 +357,18 @@ export function sumarDias(dia: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
 }
 
-// Días que hay que consultar: el de cada selección; sin día, hoy y los dos siguientes.
+// Sin día en la captura (las de apuestas ya resueltas casi nunca lo traen) se busca por los
+// nombres de los equipos en una ventana de 7 días hacia atrás y 2 hacia delante (10 días). Los días
+// pasados ya consultados están en la caché para siempre: no gastan llamadas.
+export const DIAS_ATRAS = 7
+export const DIAS_ADELANTE = 2
+
+// Días que hay que consultar: el de cada selección; sin día, la ventana de hoy − 7 a hoy + 2.
 export function diasAConsultar(dias: (string | null | undefined)[], hoy: string): string[] {
   const out = new Set<string>()
   for (const d of dias) {
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) out.add(d)
-    else for (let k = 0; k < 3; k++) out.add(sumarDias(hoy, k))
+    else for (let k = -DIAS_ATRAS; k <= DIAS_ADELANTE; k++) out.add(sumarDias(hoy, k))
   }
   return [...out].sort()
 }

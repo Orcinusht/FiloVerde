@@ -84,18 +84,19 @@ archivo o panel ponerlas).
    la captura es claramente de otra. **Verificada en el móvil con la cuenta de email.** Falta
    verificarla en producción con la cuenta de Google. Tarea 2b (aparcada), en Pendiente.
    **Tarea 3: API-Football (solo fútbol), hecha en la rama `registro-api-futbol` el 2026-11-09** (sin
-   fusionar; migración `20261109000001` **pendiente de pegar** en Supabase; clave `API_FOOTBALL_KEY`
-   pendiente de poner en Vercel): al leer una captura de fútbol (o escribir el partido a mano), el
+   fusionar; migración `20261109000001` **aplicada** en Supabase el 2026-11-10; clave `API_FOOTBALL_KEY`
+   puesta en Vercel): al leer una captura de fútbol (o escribir el partido a mano), el
    partido se busca en API-Football y, si hay una coincidencia clara, se rellenan hora, liga, día (si
    falta) y "Fútbol" con la marca "confirmado por API-Football"; si hay varias, fichas "Partidos
    posibles"; las elecciones se recuerdan al guardar. Ver "Registro: API-Football".
 
 ### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-09, tras fusionar la tarea 2a del registro)
 1. **Registro, tarea 3: API-Football** (solo fútbol): hecha en la rama `registro-api-futbol`; falta
-   pegar la migración `20261109000001`, poner `API_FOOTBALL_KEY` en Vercel, verificarla en el móvil
-   con el despliegue de la rama, fusionar y verificarla en producción con la cuenta de Google. El plan
-   del usuario es de pago (probablemente Pro, 7.500 llamadas al día; sin confirmar: Ajustes →
-   API-Football → "Comprobar conexión" lo dice).
+   verificarla en el móvil con el despliegue de la rama (migración `20261109000001` **aplicada** el
+   2026-11-10, comprobado en solo lectura: 4 tablas con RLS y 4 políticas cada una; `API_FOOTBALL_KEY`
+   puesta en Vercel en Production y Preview), fusionar y verificarla en producción con la cuenta de
+   Google. Plan **Pro: 7.500 llamadas al día** (lo dice la cabecera de la API). El 2026-11-10 se
+   corrigió la búsqueda sin fecha (ventana de 10 días; ver "Registro: API-Football").
    **Limitación futura**: la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
    USUARIO (`api_futbol_uso`); con más usuarios haría falta un contador GLOBAL (p. ej. una tabla común
    escrita por una función de la BD) para no agotar la cuota de la cuenta entre todos. Las cabeceras
@@ -598,9 +599,16 @@ Solo fútbol. La API propone y el usuario decide: todo editable. Rama `registro-
 - **Consulta**: `/fixtures?date=AAAA-MM-DD&timezone=Europe/Madrid` (todos los partidos del día en una
   llamada). Se comprueba `paging`: si hay más páginas se piden (hasta 5); si falta alguna, el día se
   guarda como `completo = false` y no vale como caché definitiva. Respuestas validadas con zod: un
-  partido raro se ignora (`[api-futbol:forma]`). Días: el de cada selección; sin día, hoy y los dos
-  siguientes; si el día de la captura no tiene coincidencia, también el día antes y el después
-  (normalmente ya en caché) para la sugerencia "La API indica el 4 nov".
+  partido raro se ignora (`[api-futbol:forma]`). Días: el de cada selección; **sin día (lo normal en
+  las capturas de apuestas ya resueltas), se busca por los nombres de los equipos en la ventana de
+  hoy − 7 a hoy + 2** (`DIAS_ATRAS`/`DIAS_ADELANTE`, 10 días); si el mismo cruce sale en dos días,
+  fichas "Partidos posibles" con el día, sin elegir; un partido más antiguo no se encuentra y el
+  registro sigue como siempre. Con día en la captura, solo ese día y, si no hay coincidencia, el día
+  antes y el después (normalmente ya en caché) para la sugerencia "La API indica el 4 nov". El
+  marcador no se usa para nada. **Coste**: la primera consulta sin fecha y sin caché son 10 llamadas
+  (una por día; más si un día tuviera varias páginas, máx. 5 por día); después, los días pasados ya
+  no gastan y hoy y los 2 siguientes se refrescan cada 6 h (≤ 3 llamadas). Máximo por consulta: 10
+  días (sin fecha) + 3 por cada selección con fecha fuera de la ventana, × páginas, con un reintento.
 - **Caché por usuario** (`api_futbol_dias`): se lee primero; días pasados, una vez consultados ya
   pasados, para siempre; hoy y futuros, 6 horas. Si la API falla, una caché antigua vale más que nada.
   Al escribir se borran los días de más de 90 días (y el uso antiguo).
@@ -649,7 +657,8 @@ Solo fútbol. La API propone y el usuario decide: todo editable. Rama `registro-
   llamadas de hoy (tuyas, con el tope) y restantes de la cuenta según la última respuesta; "Comprobar
   conexión" llama a `/status` (no gasta llamadas según la documentación) y enseña solo el plan y las
   llamadas (nunca el nombre ni el email de la cuenta). La clave no se puede ver ni cambiar desde la app.
-- **Pruebas**: `tests/api-futbol.test.ts` (emparejado español/inglés, Castilla/Femenino/sub-21, niveles,
+- **Pruebas**: `tests/api-futbol.test.ts` (partido de ayer y de hace 3 días sin fecha, mismo cruce en
+  dos días, fuera de la ventana; emparejado español/inglés, Castilla/Femenino/sub-21, niveles,
   hora y liga como desempate, día conflictivo, ligas, caché, paginación, 429, red, tiempo agotado,
   tope, sin clave, la clave fuera de logs y respuestas, equivalencias por usuario) y `rls.test.mjs`
   (cada usuario solo lo suyo, visitante sin acceso, migración dos veces, borrar la cuenta entera);
@@ -1252,3 +1261,6 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-09 | Marca "confirmado por API-Football" como motivo `api` dentro de las marcas del formulario, pintada en azul y fuera del recuento ámbar | Reutiliza cómo se quitan las marcas al editar un campo; distinta del ámbar de dudoso |
 | 2026-11-09 | `API_FOOTBALL_BASE_URL` solo acepta `localhost` | Permite la prueba local con la API simulada sin que un error de configuración mande la clave a otra web |
 | 2026-11-09 | Prueba de `partidos.test.ts` con un día fijo de 2025 en vez del 10/11/2026 | Fallaba justo el 10 de noviembre de 2026 (día de hoy en España) porque "hoy" usa la hora actual |
+| 2026-11-10 | **Sin fecha en la captura: ventana de hoy − 7 a hoy + 2** (antes hoy a hoy + 2) | Fallo en el móvil: Las Palmas - Eldense (jugado el día antes, captura resuelta sin fecha) no se encontraba porque ese día nunca se consultaba. Las capturas resueltas casi nunca traen fecha; los nombres sí. Los días pasados se guardan para siempre: tras la primera vez no gastan llamadas |
+| 2026-11-10 | Buscar por equipo en la API (`/teams?search` + `/fixtures?team`): propuesto, NO aplicado | Encontraría partidos más antiguos, pero la búsqueda de la API es por nombre en inglés ("Múnich" no encuentra "München"), cuesta 2 llamadas por equipo nuevo y necesita otra caché; queda como idea si la ventana se queda corta |
+| 2026-11-10 | `/api/diagnostico` dice si el servidor ve `API_FOOTBALL_KEY` (nunca su valor) y qué despliegue es (rama y commit) | En la prueba de la rama, Ajustes decía "Sin configurar" porque se miraba un despliegue anterior a la clave |
