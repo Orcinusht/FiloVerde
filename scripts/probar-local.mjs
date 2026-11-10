@@ -2953,6 +2953,8 @@ bien('Ajustes → API-Football: conectada, «Comprobar» responde con el plan; s
 paso('API-Football: coincidencia clara (Bayern de Múnich - Arsenal, sin fecha en la captura)')
 const MANANA = diaMadridMas(1)
 const confirmadas = () => pag.locator('[data-confirmado-api]').count()
+const antesClara = (await apiLlamadas()).length // las capturas de fútbol anteriores ya consultaron sus días
+await sql(`delete from api_futbol_dias`)
 await cola(['api_clara'])
 await pag.goto(`${APP}/apuestas/nueva`, { waitUntil: 'networkidle' })
 await subirArchivos([capSimple])
@@ -2967,7 +2969,7 @@ assert.equal(await deporteSel().inputValue(), 'Fútbol')
 assert.ok((await confirmadas()) >= 4, `marcas «confirmado por API-Football»: ${await confirmadas()}`)
 assert.equal(await pag.getByText('revisar · deducido de otra apuesta tuya').count(), 0)
 await esperar(async () => (await diaApuesta()) === MANANA)
-const llamadasClara = await apiLlamadas()
+const llamadasClara = (await apiLlamadas()).slice(antesClara)
 const paginasManana = llamadasClara.filter((l) => l.ruta === '/fixtures' && l.params.date === MANANA).map((l) => l.params.page ?? '1')
 assert.deepEqual(paginasManana, ['1', '2', '3'], 'paginación: pide las 3 páginas del día')
 assert.deepEqual([...new Set(llamadasClara.filter((l) => l.ruta === '/fixtures').map((l) => l.params.date))].sort(), [diaMadridMas(0), MANANA, diaMadridMas(2)], 'sin fecha: hoy y los dos días siguientes')
@@ -3054,7 +3056,8 @@ bien('«Segunda División» creada en el catálogo con «Crear y usar» y record
 
 paso('API-Football: sin respuesta (tiempo agotado, fallo, 429) el registro sigue como siempre')
 for (const modo of ['colgar', 'fallo', '429']) {
-  await sql(`delete from api_futbol_dias; delete from api_futbol_uso`)
+  await sql(`delete from api_futbol_dias`)
+  await sql(`delete from api_futbol_uso`)
   await apiModo(modo)
   await cola(['api_clara'])
   await pag.goto(`${APP}/apuestas/nueva`, { waitUntil: 'networkidle' })
@@ -3064,12 +3067,14 @@ for (const modo of ['colgar', 'fallo', '429']) {
   await pag.locator('[data-aviso-api]').waitFor({ timeout: 15000 })
   assert.ok(Date.now() - t0 < 12000, `${modo}: no hace esperar de más`)
   assert.equal(await pag.locator('[data-api-futbol]').count(), 0)
-  assert.equal(await leerHora(pag), '')
+  // Sigue como siempre: rellenan los «partidos conocidos» (la apuesta del Bayern guardada antes), en ámbar.
+  await pag.locator('[data-partido-conocido="otra_apuesta"]').waitFor({ timeout: 5000 })
+  assert.equal(await confirmadas(), 0, 'nada «confirmado por API-Football»')
   if (modo === 'colgar') await foto('105-api-sin-respuesta')
   await descartarCaptura()
 }
 await apiModo('ok')
-bien('Tiempo agotado, error 500 y 429: aviso discreto «No se ha podido consultar API-Football…», nada rellenado y la revisión sigue')
+bien('Tiempo agotado, error 500 y 429: aviso discreto «No se ha podido consultar API-Football…», nada confirmado; siguen los partidos conocidos y la revisión')
 
 paso('API-Football: nunca al editar una apuesta guardada')
 const antesEditar = (await apiLlamadas()).length
