@@ -532,6 +532,7 @@ APUESTAS.api_clara = apuesta({ importe: 8, cuota_total: '1.60', ganancia_potenci
 APUESTAS.api_hora = apuesta({ importe: 8, cuota_total: '2.40', ganancia_potencial: 19.2, selecciones: [sel('Atlético de Madrid - Inter', 'Atlético de Madrid', '2.40', { evento_fecha: diaMas(1), evento_hora: '20:00', liga: null, deporte: 'Fútbol' })] })
 APUESTAS.api_varias = apuesta({ importe: 5, cuota_total: '1.90', ganancia_potencial: 9.5, selecciones: [sel('Universidad - Nacional', 'Universidad', '1.90', { evento_fecha: diaMas(1), evento_hora: null, liga: null, deporte: 'Fútbol' })] })
 APUESTAS.api_recuerda = apuesta({ importe: 6, cuota_total: '1.95', ganancia_potencial: 11.7, selecciones: [sel('Universidad - Nacional', 'Nacional', '1.95', { evento_fecha: diaMas(1), evento_hora: null, liga: null, deporte: 'Fútbol' })] })
+APUESTAS.api_ayer = apuesta({ importe: 10, cuota_total: '1.75', ganancia_potencial: 17.5, estado: 'ganada', importe_cobrado: 17.5, selecciones: [sel('UD Las Palmas - CD Eldense', 'UD Las Palmas', '1.75', { ...sinPartido, estado: 'ganada' })] })
 APUESTAS.api_liga_nueva = apuesta({ importe: 3, cuota_total: '2.10', ganancia_potencial: 6.3, selecciones: [sel('Racing de Santander - Sporting de Gijón', 'Racing', '2.10', sinPartido)] })
 const RESPUESTAS = {
   api_clara: con(APUESTAS.api_clara),
@@ -539,6 +540,7 @@ const RESPUESTAS = {
   api_varias: con(APUESTAS.api_varias),
   api_recuerda: con(APUESTAS.api_recuerda),
   api_liga_nueva: con(APUESTAS.api_liga_nueva),
+  api_ayer: con(APUESTAS.api_ayer),
   casa_otra: con(APUESTAS.casa_otra),
   casa_duda: con(APUESTAS.casa_duda),
   casa_nueva: con(APUESTAS.casa_nueva),
@@ -730,6 +732,8 @@ function partidosApiDe(fecha) {
     )
   }
   if (fecha === diaMas(2)) lista.push(fx(9010, fecha, '16:15', 'Segunda División', 'Spain', 141, 'Racing Santander', 4500, 'Sporting Gijon', 4501))
+  // Ayer, ya jugado: una captura de apuesta resuelta no trae la fecha (se busca por los equipos).
+  if (fecha === diaMas(-1)) lista.push(fx(9020, fecha, '18:30', 'Copa del Rey', 'Spain', 143, 'Las Palmas', 4600, 'Eldense', 4601))
   return lista
 }
 createServer(async (req, res) => {

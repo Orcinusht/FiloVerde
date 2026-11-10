@@ -244,9 +244,11 @@ test('ligas: "UEFA" no cuenta; equivalencia recordada; nombre nuevo propuesto; m
 
 // ---------- caché, días y tope ----------
 
-test('días a consultar: el de cada selección; sin día, hoy y los dos siguientes', () => {
+test('días a consultar: el de cada selección; sin día, de hoy − 7 a hoy + 2 (10 días)', () => {
   assert.deepEqual(diasAConsultar(['2026-11-12', '2026-11-12'], DIA), ['2026-11-12'])
-  assert.deepEqual(diasAConsultar([null], DIA), ['2026-11-10', '2026-11-11', '2026-11-12'])
+  const ventana = diasAConsultar([null], DIA)
+  assert.equal(ventana.length, 10)
+  assert.deepEqual([ventana[0], ventana.at(-1)], ['2026-11-03', '2026-11-12'])
 })
 
 test('caché: hoy y futuros valen 6 horas; un día pasado, consultado ya pasado, para siempre; incompleta, nunca', () => {
@@ -560,4 +562,73 @@ test('sin clave configurada: la función queda apagada; proveedor y dirección l
   // La dirección alternativa (prueba local) solo puede ser localhost: la clave nunca va a otra web.
   assert.equal(baseLocal('http://localhost:54323'), 'http://localhost:54323')
   for (const malo of ['https://evil.example', 'http://localhost.evil.com:80', 'http://127.0.0.1.nip.io:80', 'http://localhost:54323/x']) assert.equal(baseLocal(malo), undefined, malo)
+})
+
+// ---------- sin fecha en la captura: búsqueda por nombres en la ventana de 10 días ----------
+
+const ctxVacio = (): Contexto => ({ hoy: DIA, catalogoFutbol: [{ id: 'l9', nombre: 'LaLiga Hypermotion' }], equivalencias: [{ liga_api_id: 141, liga_id: 'l9' }], recordados: new Map() })
+const sinFecha = (evento: string, indice = 0) => ({ indice, evento, fecha: '', hora: '', liga: '', deporte: 'Fútbol' })
+function apiPorDias(porFecha: Record<string, PartidoApi[]>) {
+  return apiSimulada((u) => {
+    const d = u.searchParams.get('date')!
+    return { body: cuerpo(porFecha[d] ?? [], d) }
+  })
+}
+
+test('partido de AYER sin fecha en la captura (Las Palmas - Eldense): confirmado con su día', async () => {
+  const ayer = partido('Las Palmas', 'Eldense', { fecha: '2026-11-09', hora: '18:30', liga_id: 141, liga: 'Segunda División', pais: 'Spain', estado: 'FT' })
+  const api = apiPorDias({ '2026-11-09': [ayer, partido('Real Zaragoza', 'Racing Santander', { fecha: '2026-11-09', estado: 'FT' })] })
+  const { a } = almacenFalso()
+  const r = await consultarSelecciones([sinFecha('UD Las Palmas - CD Eldense')], ctxVacio(), (f) => partidosDeDias(f, opciones(a, api.f, [])))
+  const [x] = r.resultados
+  assert.equal(x.nivel, 'clara', JSON.stringify(x))
+  assert.equal(x.nivel === 'clara' && x.partido.fecha, '2026-11-09')
+  assert.equal(x.nivel === 'clara' && x.partido.hora, '18:30')
+  assert.equal(x.nivel === 'clara' && x.partido.liga.nombre, 'LaLiga Hypermotion', 'liga recordada')
+  // Al formulario: rellena el día que faltaba (y hora, liga y Fútbol). El marcador no se usa para nada.
+  assert.deepEqual(decidirRelleno(sel(), {}, ayer, 'LaLiga Hypermotion', 'Fútbol').cambios, { evento_fecha: '2026-11-09', evento_hora: '18:30', liga: 'LaLiga Hypermotion', deporte: 'Fútbol' })
+  // Primera consulta sin caché: 10 llamadas (una por día de la ventana); la segunda, ninguna para los días pasados.
+  assert.equal(api.peticiones.length, 10)
+  const antes = api.peticiones.length
+  await consultarSelecciones([sinFecha('Las Palmas - Eldense')], ctxVacio(), (f) => partidosDeDias(f, opciones(a, api.f, [], { ahora: new Date('2026-11-10T12:00:00Z') })))
+  const nuevas = api.peticiones.slice(antes).map((p) => new URL(p.url).searchParams.get('date'))
+  assert.ok(nuevas.every((d) => d! >= DIA), `solo se repiten hoy y futuros (caché de 6 h), nunca días pasados: ${nuevas}`)
+})
+
+test('partido de hace 3 días sin fecha: confirmado', async () => {
+  const p = partido('Getafe', 'Girona', { fecha: '2026-11-07', hora: '14:00', liga_id: 140, liga: 'La Liga', pais: 'Spain', estado: 'FT' })
+  const api = apiPorDias({ '2026-11-07': [p] })
+  const { a } = almacenFalso()
+  const r = await consultarSelecciones([sinFecha('Getafe CF - Girona FC')], ctxVacio(), (f) => partidosDeDias(f, opciones(a, api.f, [])))
+  assert.equal(r.resultados[0].nivel === 'clara' && r.resultados[0].partido.fecha, '2026-11-07')
+})
+
+test('el mismo cruce en dos días de la ventana: fichas «Partidos posibles» con su día, sin elegir', async () => {
+  const liga = partido('Sevilla', 'Betis', { fecha: '2026-11-05', hora: '21:00', liga_id: 140, liga: 'La Liga', pais: 'Spain', estado: 'FT' })
+  const copa = partido('Sevilla', 'Betis', { fecha: '2026-11-11', hora: '19:00', liga_id: 143, liga: 'Copa del Rey', pais: 'Spain' })
+  const api = apiPorDias({ '2026-11-05': [liga], '2026-11-11': [copa] })
+  const { a } = almacenFalso()
+  const r = await consultarSelecciones([sinFecha('Sevilla FC - Real Betis')], ctxVacio(), (f) => partidosDeDias(f, opciones(a, api.f, [])))
+  const [x] = r.resultados
+  assert.equal(x.nivel, 'varias')
+  assert.deepEqual(x.nivel === 'varias' && x.partidos.map((p) => p.fecha).sort(), ['2026-11-05', '2026-11-11'])
+})
+
+test('partido más antiguo que la ventana: no rellena nada, no da error y no consulta ese día', async () => {
+  const viejo = partido('Las Palmas', 'Eldense', { fecha: '2026-10-31', estado: 'FT' })
+  const api = apiPorDias({ '2026-10-31': [viejo] })
+  const { a } = almacenFalso()
+  const logs: unknown[] = []
+  const r = await consultarSelecciones([sinFecha('Las Palmas - Eldense')], ctxVacio(), (f) => partidosDeDias(f, opciones(a, api.f, logs)))
+  assert.equal(r.resultados[0].nivel, 'ninguna')
+  assert.equal(r.avisos.size, 0, 'sin aviso de error')
+  assert.equal(logs.length, 0, 'nada al log')
+  assert.ok(!api.peticiones.some((p) => p.url.includes('2026-10-31')))
+})
+
+test('con fecha en la captura, todo como antes: solo ese día (y ±1 si no aparece)', async () => {
+  const api = apiPorDias({ [DIA]: jornada() })
+  const { a } = almacenFalso()
+  await consultarSelecciones([{ indice: 0, evento: 'Bayern de Múnich - Arsenal', fecha: DIA, hora: '', liga: '', deporte: 'Fútbol' }], ctxVacio(), (f) => partidosDeDias(f, opciones(a, api.f, [])))
+  assert.deepEqual(api.peticiones.map((p) => new URL(p.url).searchParams.get('date')), [DIA])
 })
