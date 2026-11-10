@@ -83,21 +83,18 @@ archivo o panel ponerlas).
    tanda" antes de subir capturas, la casa elegida va a la IA y a cada apuesta (editable), con aviso si
    la captura es claramente de otra. **Verificada en el móvil con la cuenta de email.** Falta
    verificarla en producción con la cuenta de Google. Tarea 2b (aparcada), en Pendiente.
-   **Tarea 3: API-Football (solo fútbol), hecha en la rama `registro-api-futbol` el 2026-11-09** (sin
-   fusionar; migración `20261109000001` **aplicada** en Supabase el 2026-11-10; clave `API_FOOTBALL_KEY`
-   puesta en Vercel): al leer una captura de fútbol (o escribir el partido a mano), el
+   **Tarea 3: API-Football (solo fútbol), fusionada el 2026-11-10** (rama `registro-api-futbol`, PR #11,
+   commit de main `cca495a`; pruebas de GitHub Actions en verde; migración `20261109000001` **aplicada**
+   en Supabase; clave `API_FOOTBALL_KEY` en Vercel para Production y Preview): al leer una captura de fútbol (o escribir el partido a mano), el
    partido se busca en API-Football y, si hay una coincidencia clara, se rellenan hora, liga, día (si
    falta) y "Fútbol" con la marca "confirmado por API-Football"; si hay varias, fichas "Partidos
-   posibles"; las elecciones se recuerdan al guardar. Ver "Registro: API-Football".
+   posibles"; las elecciones se recuerdan al guardar. Sin fecha en la captura, ventana de hoy − 7 a
+   hoy + 2. **Verificada en el móvil con la cuenta de email (commit 017ce24).** Falta verificarla en
+   producción con la cuenta de Google. Ver "Registro: API-Football".
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-09, tras fusionar la tarea 2a del registro)
-1. **Registro, tarea 3: API-Football** (solo fútbol): hecha en la rama `registro-api-futbol`; falta
-   verificarla en el móvil con el despliegue de la rama (migración `20261109000001` **aplicada** el
-   2026-11-10, comprobado en solo lectura: 4 tablas con RLS y 4 políticas cada una; `API_FOOTBALL_KEY`
-   puesta en Vercel en Production y Preview), fusionar y verificarla en producción con la cuenta de
-   Google. Plan **Pro: 7.500 llamadas al día** (lo dice la cabecera de la API). El 2026-11-10 se
-   corrigió la búsqueda sin fecha (ventana de 10 días; ver "Registro: API-Football").
-   **Limitación futura**: la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-10, tras fusionar la tarea 3 del registro)
+1. **API-Football, limitación futura** (tarea 3 fusionada el 2026-11-10; plan **Pro: 7.500 llamadas al
+   día**): la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
    USUARIO (`api_futbol_uso`); con más usuarios haría falta un contador GLOBAL (p. ej. una tabla común
    escrita por una función de la BD) para no agotar la cuota de la cuenta entre todos. Las cabeceras
    de la API (llamadas restantes de la CUENTA) ya frenan a todos cuando quedan menos de 50.
@@ -121,6 +118,9 @@ archivo o panel ponerlas).
 7. **Informe con IA con Opus** (`claude-opus-5-5`; fase propia, después de las mejoras del registro): sin empezar.
 
 Además:
+- **Verificar en producción con la cuenta de Google** API-Football: Ajustes → "Conectada" y "Comprobar
+  conexión", una captura de un partido ya jugado sin fecha (caja azul con día, hora y liga), y que las
+  apuestas, el Análisis y las Gráficas siguen igual.
 - **Verificar en producción con la cuenta de Google** la casa de la tanda: selector con la última casa,
   "Casa: elegida por ti", aviso "La captura parece de X" (si alguna captura la muestra), "Que la detecte
   la IA" como antes y una tanda de varias capturas.
@@ -586,7 +586,8 @@ tandas de 1000 y se comparan en el servidor (cientos o pocos miles de filas: inm
 
 ## Registro: API-Football (mejoras del registro, tarea 3)
 
-Solo fútbol. La API propone y el usuario decide: todo editable. Rama `registro-api-futbol`.
+Solo fútbol. La API propone y el usuario decide: todo editable. Rama `registro-api-futbol`, fusionada el
+2026-11-10 (PR #11).
 
 - **Conexión** (solo servidor, `lib/server/api-futbol.ts` + `lib/api-futbol/cliente.ts`): GET a
   `https://v3.football.api-sports.io` con la clave SOLO en la cabecera `x-apisports-key` (ninguna
@@ -1264,3 +1265,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-10 | **Sin fecha en la captura: ventana de hoy − 7 a hoy + 2** (antes hoy a hoy + 2) | Fallo en el móvil: Las Palmas - Eldense (jugado el día antes, captura resuelta sin fecha) no se encontraba porque ese día nunca se consultaba. Las capturas resueltas casi nunca traen fecha; los nombres sí. Los días pasados se guardan para siempre: tras la primera vez no gastan llamadas |
 | 2026-11-10 | Buscar por equipo en la API (`/teams?search` + `/fixtures?team`): propuesto, NO aplicado | Encontraría partidos más antiguos, pero la búsqueda de la API es por nombre en inglés ("Múnich" no encuentra "München"), cuesta 2 llamadas por equipo nuevo y necesita otra caché; queda como idea si la ventana se queda corta |
 | 2026-11-10 | `/api/diagnostico` dice si el servidor ve `API_FOOTBALL_KEY` (nunca su valor) y qué despliegue es (rama y commit) | En la prueba de la rama, Ajustes decía "Sin configurar" porque se miraba un despliegue anterior a la clave |
+| 2026-11-10 | **Registro, tarea 3 (API-Football) fusionada en `main`** (rama `registro-api-futbol`, PR #11, commit `cca495a`) | Migración `20261109000001` aplicada (4 tablas con RLS y 16 políticas, comprobado en solo lectura); verificada en el móvil con la cuenta de email; pruebas de GitHub Actions en verde. Falta verificarla en producción con la cuenta de Google |
