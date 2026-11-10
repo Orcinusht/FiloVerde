@@ -632,3 +632,48 @@ test('con fecha en la captura, todo como antes: solo ese día (y ±1 si no apare
   await consultarSelecciones([{ indice: 0, evento: 'Bayern de Múnich - Arsenal', fecha: DIA, hora: '', liga: '', deporte: 'Fútbol' }], ctxVacio(), (f) => partidosDeDias(f, opciones(a, api.f, [])))
   assert.deepEqual(api.peticiones.map((p) => new URL(p.url).searchParams.get('date')), [DIA])
 })
+
+// ---------- Retoques del registro 2: deporte y liga ----------
+
+test('confirmado: deporte y liga llevan la marca aunque ya coincidieran (también día y hora)', () => {
+  const p = partido('Bayern München', 'Arsenal')
+  const r = decidirRelleno(sel({ evento_fecha: DIA, evento_hora: '21:00', liga: 'Champions League', deporte: 'Fútbol' }), {}, p, 'Champions League', 'Fútbol')
+  assert.deepEqual(r.cambios, {})
+  assert.deepEqual(r.confirmados.sort(), ['deporte', 'evento_fecha', 'evento_hora', 'liga'])
+  // "futbol" escrito de otra forma: se pone el nombre de tu catálogo.
+  assert.equal(decidirRelleno(sel({ deporte: 'futbol' }), {}, p, 'Champions League', 'Fútbol').cambios.deporte, 'Fútbol')
+})
+
+test('liga: vacía o dudosa → la de tu catálogo; distinta y clara (la pusiste tú o se lee bien) → sugerencia, nunca se pisa', () => {
+  const p = partido('Bayern München', 'Arsenal')
+  assert.equal(decidirRelleno(sel({ deporte: 'Fútbol' }), {}, p, 'Champions League', 'Fútbol').cambios.liga, 'Champions League')
+  assert.equal(decidirRelleno(sel({ liga: 'Bundesliga', deporte: 'Fútbol' }), { liga: 'deducido' }, p, 'Champions League', 'Fútbol').cambios.liga, 'Champions League')
+  const clara = decidirRelleno(sel({ liga: 'Bundesliga', deporte: 'Fútbol' }), {}, p, 'Champions League', 'Fútbol')
+  assert.equal(clara.cambios.liga, undefined)
+  assert.equal(clara.sugerencias.liga, 'Champions League')
+  assert.ok(!clara.confirmados.includes('liga'))
+})
+
+test('deporte distinto (la IA puso «Baloncesto») y la API tiene el partido de fútbol: todo queda como sugerencia «Usar Fútbol»', () => {
+  const p = partido('Real Madrid', 'Valencia', { liga_id: 140, liga: 'La Liga', pais: 'Spain' })
+  const r = decidirRelleno(sel({ evento_fecha: DIA, liga: 'Liga Endesa', deporte: 'Baloncesto' }), { deporte: 'deducido' }, p, 'LaLiga', 'Fútbol')
+  assert.deepEqual(r.cambios, {}, 'no se cambia nada solo')
+  assert.deepEqual(r.confirmados, [])
+  assert.equal(r.sugerencias.deporte, 'Fútbol')
+  // Al pulsar «Usar Fútbol» (deporte vacío y liga sustituible) se rellena todo.
+  const usar = decidirRelleno(sel({ evento_fecha: DIA, liga: 'Liga Endesa', deporte: '' }), { liga: 'api', deporte: 'api' }, p, 'LaLiga', 'Fútbol')
+  assert.deepEqual([usar.cambios.deporte, usar.cambios.liga, usar.cambios.evento_hora], ['Fútbol', 'LaLiga', '21:00'])
+})
+
+test('consulta: un deporte en ámbar se envía sin deporte (se consulta); el servidor sigue sin consultar deportes claros que no son fútbol', async () => {
+  let pedidas = 0
+  const obtener = async () => {
+    pedidas++
+    return { partidos: new Map([[DIA, jornada()]]), consultados: new Set<string>(), avisos: new Set<never>() }
+  }
+  const ctx: Contexto = { hoy: DIA, catalogoFutbol: [], equivalencias: [], recordados: new Map() }
+  const tenis = await consultarSelecciones([{ indice: 0, evento: 'Real Madrid - Valencia', fecha: DIA, hora: '', liga: '', deporte: 'Tenis' }], ctx, obtener)
+  assert.deepEqual([tenis.resultados.length, pedidas], [0, 0])
+  const dudoso = await consultarSelecciones([{ indice: 0, evento: 'Real Madrid - Valencia', fecha: DIA, hora: '', liga: '', deporte: '' }], ctx, obtener)
+  assert.equal(dudoso.resultados[0].nivel, 'clara')
+})

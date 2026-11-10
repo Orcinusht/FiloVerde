@@ -122,7 +122,8 @@ type ApiSeleccion = {
   nivel: ResultadoSeleccion['nivel']
   partidos: PartidoCliente[]
   elegido: PartidoCliente | null
-  sugerencias: { dia?: string; hora?: string; liga?: string }
+  sugerencias: { dia?: string; hora?: string; liga?: string; deporte?: string }
+  sinAplicar?: boolean // la captura dice otro deporte: el partido es solo una sugerencia
 }
 
 // ¿El resultado guardado no es el que saldría al calcularlo? Entonces se escribió a mano.
@@ -321,9 +322,12 @@ export function FormularioApuesta(props: Props) {
     dudososRef.current = dudosos
   }, [dudosos])
   const nombreFutbol = buscarDeporte(catalogo, 'Fútbol')?.nombre ?? 'Fútbol'
+  // Se consulta si es fútbol o no tiene deporte, o si el deporte está en ámbar (la IA dudó). Un
+  // deporte distinto leído con claridad (p. ej. tenis) no se consulta.
+  const seConsulta = (i: number, deporte: string) => esDeFutbol(deporte) || esAmbar(dudosos[`selecciones.${i}.deporte`])
   const indicesPartido = (i: number) => (tipo === 'mismo_partido' ? valores.selecciones.map((_, j) => j) : [i])
   const clavesApi = valores.selecciones
-    .map((s, i) => (tipo === 'mismo_partido' && i > 0 ? '' : `${claveConocida(s.evento)}|${s.evento_fecha}|${esDeFutbol(s.deporte) ? 1 : 0}`))
+    .map((s, i) => (tipo === 'mismo_partido' && i > 0 ? '' : `${claveConocida(s.evento)}|${s.evento_fecha}|${seConsulta(i, s.deporte) ? 1 : 0}`))
     .join('#')
   useEffect(() => {
     if (!buscarApi) return
@@ -331,7 +335,7 @@ export function FormularioApuesta(props: Props) {
       const v = valoresRef.current
       const pedir = v.selecciones
         .map((s, i) => ({ s, i, clave: claveConocida(s.evento) }))
-        .filter((x) => (tipo !== 'mismo_partido' || x.i === 0) && x.clave && ladosDelEvento(x.s.evento) && esDeFutbol(x.s.deporte))
+        .filter((x) => (tipo !== 'mismo_partido' || x.i === 0) && x.clave && ladosDelEvento(x.s.evento) && seConsulta(x.i, x.s.deporte))
         .filter((x) => !consultadosApi.current.has(`${x.i}|${x.clave}|${x.s.evento_fecha}`))
       if (!pedir.length) return
       for (const x of pedir) consultadosApi.current.add(`${x.i}|${x.clave}|${x.s.evento_fecha}`)
@@ -346,7 +350,8 @@ export function FormularioApuesta(props: Props) {
             fecha: /^\d{4}-\d{2}-\d{2}$/.test(x.s.evento_fecha) ? x.s.evento_fecha : '',
             hora: /^\d{2}:\d{2}$/.test(x.s.evento_hora.slice(0, 5)) && !esAmbar(d[`selecciones.${x.i}.evento_hora`]) ? x.s.evento_hora.slice(0, 5) : '',
             liga: esAmbar(d[`selecciones.${x.i}.liga`]) ? '' : x.s.liga.slice(0, 80),
-            deporte: x.s.deporte.slice(0, 60),
+            // Deporte en ámbar (la IA dudó): se consulta igual; si el partido es de fútbol, sale como sugerencia.
+            deporte: esDeFutbol(x.s.deporte) ? x.s.deporte.slice(0, 60) : '',
           })),
         }),
       })
@@ -373,30 +378,40 @@ export function FormularioApuesta(props: Props) {
   }, [buscarApi, clavesApi, tipo])
 
   // Aplica un partido de la API (coincidencia clara, ficha elegida u "otro día" aceptado).
-  function aplicarPartido(i: number, p: PartidoCliente, clave: string, base: Pick<ApiSeleccion, 'nivel' | 'partidos'>, forzarDia = false) {
+  function aplicarPartido(i: number, p: PartidoCliente, clave: string, base: Pick<ApiSeleccion, 'nivel' | 'partidos'>, forzarDia = false, forzarFutbol = false) {
     const indices = tipo === 'mismo_partido' ? valoresRef.current.selecciones.map((_, j) => j) : [i]
     const actual = valoresRef.current.selecciones[i]
     if (!actual) return
     const marcas: Marcas = {}
     for (const c of ['evento_fecha', 'evento_hora', 'liga', 'deporte'] as CampoPartido[]) marcas[c] = dudososRef.current[`selecciones.${i}.${c}`]
-    const s = { evento_fecha: forzarDia ? p.fecha : actual.evento_fecha, evento_hora: actual.evento_hora, liga: actual.liga, deporte: actual.deporte }
+    const s = { evento_fecha: forzarDia ? p.fecha : actual.evento_fecha, evento_hora: actual.evento_hora, liga: actual.liga, deporte: forzarFutbol ? '' : actual.deporte }
     if (forzarDia) marcas.evento_fecha = 'api'
+    if (forzarFutbol) {
+      // El usuario eligió "Usar Fútbol": la liga de otro deporte deja de valer (se sustituye).
+      marcas.deporte = 'api'
+      if (!esDeFutbol(actual.deporte)) marcas.liga = 'api'
+    }
     const r = decidirRelleno(s, marcas, { ...p, liga_id: p.liga.apiId, liga: p.liga.apiNombreOriginal, pais: p.liga.pais, local_id: 0, visitante_id: 0, estado: '' }, p.liga.nombre, nombreFutbol)
     if (forzarDia) r.cambios.evento_fecha = p.fecha
     const campos = Object.keys(r.cambios) as CampoPartido[]
+    const marcados = [...campos, ...r.confirmados]
     if (campos.includes('evento_fecha')) for (const j of indices) consultadosApi.current.add(`${j}|${clave}|${r.cambios.evento_fecha}`)
     if (campos.length) {
       setValores((v) => ({
         ...v,
         selecciones: v.selecciones.map((x, j) => (indices.includes(j) ? { ...x, ...r.cambios } : x)),
       }))
+    }
+    if (marcados.length) {
+      // Marca azul en lo rellenado Y en lo que ya coincidía con la API.
       setDudosos((d) => {
         const n = { ...d }
-        for (const j of indices) for (const c of campos) n[`selecciones.${j}.${c}`] = 'api'
+        for (const j of indices) for (const c of marcados) n[`selecciones.${j}.${c}`] = 'api'
         return n
       })
     }
-    setApiSel((a) => ({ ...a, [i]: { clave, ...base, elegido: p, sugerencias: r.sugerencias } }))
+    setApiSel((a) => ({ ...a, [i]: { clave, ...base, elegido: p, sugerencias: r.sugerencias, sinAplicar: !!r.sugerencias.deporte } }))
+    if (r.sugerencias.deporte) return // otro deporte: solo sugerencia, no se toca nada más
     // API-Football tiene prioridad sobre "partidos conocidos": su aviso deja de mostrarse.
     setDeducidos((d) => {
       if (!d[i]) return d
@@ -440,7 +455,7 @@ export function FormularioApuesta(props: Props) {
   function eleccionesApi(v: ValoresFormulario) {
     return Object.entries(apiSel)
       .map(([k, a]) => ({ i: Number(k), a }))
-      .filter(({ i, a }) => a.elegido && v.selecciones[i] && claveConocida(v.selecciones[i].evento) === a.clave)
+      .filter(({ i, a }) => a.elegido && !a.sinAplicar && v.selecciones[i] && claveConocida(v.selecciones[i].evento) === a.clave)
       .map(({ i, a }) => ({ partidoId: a.elegido!.id, fecha: a.elegido!.fecha, evento: v.selecciones[i].evento.slice(0, 200), liga: v.selecciones[i].liga.slice(0, 80) }))
   }
 
@@ -517,6 +532,11 @@ export function FormularioApuesta(props: Props) {
         n = { ...n, promo_cuota_original: '', promo_aumento: '', promo_base: '', promo_credito: '' }
         // Asegurada: el crédito si se pierde es, por defecto, el importe apostado.
         if (n.promo_tipo === 'asegurada') n.promo_credito = v.importe
+        // Aumento de ganancias: la cuota original es la de la apuesta (la única que muestra la captura).
+        if (n.promo_tipo === 'aumento') {
+          const c = cuotaDeLaApuesta(n)
+          if (c != null) n = { ...n, promo_cuota_original: cuotaATexto(c), promo_base: 'cuota_original' }
+        }
       }
       return sincronizarPromo(n)
     }
@@ -834,6 +854,7 @@ export function FormularioApuesta(props: Props) {
         ligasFutbol={ligasFutbol}
         ligaEnCatalogo={!sel.liga.trim() || !!buscarLiga(catalogo, sel.deporte, sel.liga)}
         onElegir={(p, forzarDia) => aplicarPartido(i, p, a.clave, { nivel: a.nivel, partidos: a.partidos }, forzarDia)}
+        onUsarFutbol={(p) => aplicarPartido(i, p, a.clave, { nivel: a.nivel, partidos: a.partidos }, false, true)}
         onDescartar={() => descartarPartidoApi(i)}
         onSugerencia={(c, v) => usarSugerencia(i, c, v)}
         onLiga={(l) => cambiarLiga(indicesPartido(i), l)}
@@ -1443,10 +1464,12 @@ function PartidoApiFutbol({
   ligasFutbol,
   ligaEnCatalogo,
   onElegir,
+  onUsarFutbol,
   onDescartar,
   onSugerencia,
   onLiga,
 }: {
+  onUsarFutbol: (p: PartidoCliente) => void
   a: ApiSeleccion
   sel: ValoresSeleccion
   ligasFutbol: string[]
@@ -1483,6 +1506,19 @@ function PartidoApiFutbol({
     )
   }
   const sug = a.sugerencias
+  if (a.sinAplicar && sug.deporte) {
+    return (
+      <div className="space-y-2 rounded-xl bg-sky-500/10 px-3 py-2 text-sm text-sky-900 dark:text-sky-200" data-api-futbol="otro-deporte">
+        <p>
+          La captura dice «{sel.deporte}», pero API-Football tiene este partido de fútbol: {e.local} - {e.visitante} · {textoDia(e.fecha, e.hora || undefined)} ·{' '}
+          {e.liga.apiNombre}.
+        </p>
+        <button type="button" onClick={() => onUsarFutbol(e)} className="h-11 rounded-xl border border-sky-500/50 bg-surface px-3 text-sm font-semibold text-foreground">
+          Usar {sug.deporte}
+        </button>
+      </div>
+    )
+  }
   return (
     <div className="space-y-2 rounded-xl bg-sky-500/10 px-3 py-2 text-sm text-sky-900 dark:text-sky-200" data-api-futbol="confirmado">
       <p>
@@ -1678,6 +1714,7 @@ function BloquePromocion({
   const conAumento = valores.promo && esPromoAumento(valores.promo_tipo)
   const calculo = conAumento
     ? calcularAumento({
+        tipo: valores.promo_tipo,
         importe: textoACentimos(valores.importe) ?? null,
         cuotaTotal: cuotaDeLaApuesta(valores),
         gananciaPotencial: textoACentimos(valores.ganancia_potencial) ?? null,
@@ -1686,13 +1723,20 @@ function BloquePromocion({
         base: valores.promo_base,
       })
     : null
-  // Escribir en uno de los dos campos lo convierte en el dato "base"; el otro se calcula.
-  // Si se vacía el que manda, se vacían los dos (para no recalcular a partir del calculado).
+  // Escribir un valor en uno de los dos campos lo convierte en el dato "base" y el otro se calcula.
+  // Borrar un campo lo deja VACÍO (solo ese) y el otro vuelve a como estaba ANTES de empezar a editar
+  // este (al borrar letra a letra, los valores intermedios lo habrían recalculado).
+  const antes = useRef<{ campo: string; otro: string; datos: string } | null>(null)
+  const datosApuesta = `${valores.importe}|${valores.cuota_total}|${valores.ganancia_potencial}|${valores.tipo}`
   const escribir = (campo: 'promo_cuota_original' | 'promo_aumento', v: string) => {
     const base = campo === 'promo_cuota_original' ? 'cuota_original' : 'aumento'
-    if (!v.trim() && valores.promo_base === base) onCambio({ promo_cuota_original: '', promo_aumento: '', promo_base: '' })
+    const otro = campo === 'promo_cuota_original' ? 'promo_aumento' : 'promo_cuota_original'
+    if (antes.current?.campo !== campo || antes.current.datos !== datosApuesta) antes.current = { campo, otro: valores[otro], datos: datosApuesta }
+    if (!v.trim()) onCambio({ [campo]: '', [otro]: antes.current.otro, promo_base: '' })
     else onCambio({ [campo]: v, promo_base: base })
   }
+  // El aumento "falta" solo si hay cuota original pero no se puede calcular (faltan las ganancias).
+  const faltaAumento = !!calculo && calculo.faltaAumento && !calculo.falta && !valores.promo_aumento.trim()
   const eur = (c: number | null | undefined) => (c == null ? '—' : formatoImporte(c))
 
   return (
@@ -1719,26 +1763,27 @@ function BloquePromocion({
                 >
                   <Entrada
                     inputMode="decimal"
-                    placeholder="1,80"
                     value={valores.promo_cuota_original}
                     onChange={(v) => escribir('promo_cuota_original', v)}
                     marca={calculo.falta ? 'falta' : dudosos.promo_cuota_original}
                     conError={!!errores.promo_cuota_original}
                   />
                 </Campo>
-                <Campo etiqueta="Aumento (€)" {...p('promo_aumento')}>
+                <Campo
+                  etiqueta="Aumento (€)"
+                  {...p('promo_aumento', faltaAumento && !dudosos.promo_aumento ? 'falta' : undefined)}
+                >
                   <Entrada
                     inputMode="decimal"
-                    placeholder="0,00"
                     value={valores.promo_aumento}
                     onChange={(v) => escribir('promo_aumento', v)}
-                    marca={dudosos.promo_aumento}
+                    marca={faltaAumento ? 'falta' : dudosos.promo_aumento}
                     conError={!!errores.promo_aumento}
                   />
                 </Campo>
               </div>
               <p className="text-xs text-muted">
-                Cuota original = sin la promoción. Escribe uno de los dos y el otro se calcula
+                Cuota original = sin la promoción. Aumento = ganancias − importe × cuota original. Escribe uno de los dos y el otro se calcula
                 {calculo.base === 'cuota_original' ? ' (ahora se calcula el aumento)' : calculo.base === 'aumento' ? ' (ahora se calcula la cuota original)' : ''}.
               </p>
               <p aria-label="Resumen de la promoción" className="rounded-xl bg-brand/10 px-3 py-2 text-sm">

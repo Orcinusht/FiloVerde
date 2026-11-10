@@ -312,33 +312,43 @@ export type Marcas = Partial<Record<CampoPartido, string | undefined>>
 
 export type Relleno = {
   cambios: Partial<SeleccionActual> // se aplican y se marcan "confirmado por API-Football"
-  sugerencias: { dia?: string; hora?: string; liga?: string } // la captura dice otra cosa: no se impone
+  confirmados: CampoPartido[] // ya coincidían con la API: también llevan la marca azul
+  sugerencias: { dia?: string; hora?: string; liga?: string; deporte?: string } // la captura dice otra cosa: no se impone
 }
 
 // Nunca pisa un dato que la captura muestre con claridad (ni lo que hayas escrito tú):
 //   · día: solo si está vacío; si es otro, sugerencia ("la API indica el 4 nov").
 //   · hora y liga: si están vacías o dudosas (ámbar, deducidas de otra apuesta o puestas antes por
 //     la API); si la captura las muestra claras y son otras, sugerencia.
-//   · deporte: "Fútbol" (de tu catálogo) si está vacío o dudoso.
+//   · deporte: "Fútbol" (de tu catálogo) si está vacío o ya es fútbol. Si es OTRO deporte (la IA se
+//     equivocó), no se toca nada: todo el partido queda como sugerencia ("Usar Fútbol").
+//   · lo que ya coincide con la API se marca igualmente como confirmado.
 export function decidirRelleno(s: SeleccionActual, marcas: Marcas, p: PartidoApi, liga: string, futbol: string): Relleno {
   const cambios: Partial<SeleccionActual> = {}
+  const confirmados: CampoPartido[] = []
   const sugerencias: Relleno['sugerencias'] = {}
+  if (!esDeFutbol(s.deporte)) return { cambios, confirmados, sugerencias: { deporte: futbol } }
   const vacio = (c: CampoPartido) => !s[c].trim()
   const sustituible = (c: CampoPartido) => vacio(c) || (marcas[c] !== undefined && marcas[c] !== 'nueva')
   if (vacio('evento_fecha')) cambios.evento_fecha = p.fecha
   else if (s.evento_fecha.slice(0, 10) !== p.fecha) sugerencias.dia = p.fecha
+  else confirmados.push('evento_fecha')
   const mismoDia = vacio('evento_fecha') || s.evento_fecha.slice(0, 10) === p.fecha
   if (p.hora) {
-    if (mismoDia && sustituible('evento_hora')) cambios.evento_hora = p.hora
+    if (mismoDia && s.evento_hora.slice(0, 5) === p.hora) confirmados.push('evento_hora')
+    else if (mismoDia && sustituible('evento_hora')) cambios.evento_hora = p.hora
     else if (s.evento_hora.slice(0, 5) !== p.hora) sugerencias.hora = p.hora
   }
   if (liga) {
-    if (sustituible('liga')) {
-      if (s.liga !== liga) cambios.liga = liga
-    } else if (normalizarLiga(s.liga) !== normalizarLiga(liga)) sugerencias.liga = liga
+    if (normalizarLiga(s.liga) === normalizarLiga(liga) && s.liga.trim()) {
+      if (s.liga !== liga && sustituible('liga')) cambios.liga = liga
+      else confirmados.push('liga')
+    } else if (sustituible('liga')) cambios.liga = liga
+    else sugerencias.liga = liga
   }
-  if (sustituible('deporte') && s.deporte !== futbol) cambios.deporte = futbol
-  return { cambios, sugerencias }
+  if (s.deporte !== futbol) cambios.deporte = futbol // vacío o fútbol escrito de otra forma
+  else confirmados.push('deporte')
+  return { cambios, confirmados, sugerencias }
 }
 
 // ¿Se consulta esta selección? Solo fútbol (o sin deporte) y con un partido de dos lados.

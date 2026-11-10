@@ -1,4 +1,5 @@
 import 'server-only'
+import { REGLAS_PROMOCION } from '@/lib/apuestas/promociones-ia'
 import Anthropic from '@anthropic-ai/sdk'
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod'
 import { esquemaPropuestaIA, type PropuestaIA } from '@/lib/apuestas/propuesta'
@@ -70,9 +71,7 @@ Mercados de JUGADOR (goles, remates, remates a puerta, asistencias, tarjetas, pu
 - El estado y lo cobrado se leen como siempre (la casa ya los calcula con el sustituto).
 - No marques "pronostico" ni "sustituto" como dudosos si se leen con claridad.
 
-Promociones (de cada apuesta). SOLO lees; no calcules nada y no inventes:
-- "promo_tipo" SOLO si la captura indica la promoción de forma explícita: "superaumento" (Superaumento, Supercuota…), "aumento" (Aumento de ganancias, Cuota mejorada, Boost…), "asegurada" (Apuesta asegurada, Reembolso si pierdes…), "credito" (Apuesta gratuita, Free bet, Apuesta con crédito, Bono de apuesta), "otra" (otra promoción escrita que no encaje). Si no lo dice, null (una cuota alta NO es una promoción).
-- "promo_cuota_original": la cuota SIN la promoción (suele aparecer tachada junto a la nueva), copiada tal cual. "promo_aumento": el aumento de ganancias en unidades de moneda, si aparece escrito. "promo_credito": en una asegurada, el crédito que devuelven si se pierde, si aparece escrito (p. ej. "hasta 10 €"). Lo que no aparezca, null; nunca lo calcules a partir de otros datos.
+${REGLAS_PROMOCION}
 
 Campos dudosos ("dudosos" de cada apuesta), con "campo" y "motivo":
 - Marca un campo SOLO si: no aparece en la imagen ("no_visible"), se ve borroso o cortado ("borroso"), o lo has deducido sin verlo escrito ("deducido").
@@ -84,8 +83,10 @@ Campos dudosos ("dudosos" de cada apuesta), con "campo" y "motivo":
 // 4 = lee las promociones (tipo, cuota original, aumento y crédito; sin calcular) ·
 // 5 = jugador tachado frente a sustituto + caché de la parte fija (instrucciones y catálogo) ·
 // 6 = apuestas cortadas ("incompleta") y fecha del evento copiada como texto (la calcula el código) ·
-// 7 = casa indicada por el usuario (casa de la tanda) y "casa_distinta" si la captura muestra otra.
-export const VERSION_INSTRUCCIONES = 7
+// 7 = casa indicada por el usuario (casa de la tanda) y "casa_distinta" si la captura muestra otra ·
+// 8 = qué SÍ y qué NO es promoción ("goles de ventaja", "pago anticipado" y "sustituto" no lo son;
+//     "otra" solo con "promoción", "bono" u "oferta"); la cuota original solo si aparece tachada.
+export const VERSION_INSTRUCCIONES = 8
 
 export async function transcribirCaptura(
   imagen: Buffer,

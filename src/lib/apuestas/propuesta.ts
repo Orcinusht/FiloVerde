@@ -265,8 +265,12 @@ export function apuestaARevision(p: ApuestaIA, catalogo?: Catalogo, referencia: 
     valores.promo_tipo = tipoPromo
     if (!dudosos.promo_tipo) dudosos.promo_tipo = 'propuesta'
     if (esPromoAumento(tipoPromo)) {
-      const c0 = cuotaADecimal(p.promo_cuota_original)
-      if (p.promo_cuota_original && c0 === undefined) marcar('promo_cuota_original', 'borroso')
+      // Aumento de ganancias: la captura muestra UNA sola cuota, que es la original (la mejora va en
+      // las ganancias). Es un dato leído: sin marca. Superaumento: la original es la tachada (si no
+      // se lee, queda vacía y en ámbar "falta"; nunca un valor por defecto).
+      const leida = cuotaADecimal(p.promo_cuota_original)
+      const c0 = leida ?? (tipoPromo === 'aumento' && !p.promo_cuota_original ? cuotaADecimal(valores.cuota_total) : undefined)
+      if (p.promo_cuota_original && leida === undefined) marcar('promo_cuota_original', 'borroso')
       const au = p.promo_aumento != null ? eurosACentimos(p.promo_aumento) : null
       valores.promo_cuota_original = c0 ? cuotaATexto(c0) : ''
       valores.promo_aumento = au != null ? centimosATexto(au) : ''
