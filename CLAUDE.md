@@ -95,14 +95,11 @@ archivo o panel ponerlas).
    main `61b2bcb`; pruebas de GitHub Actions en verde; sin migración; instrucciones v8): "Descartar
    todas" en la cola de revisión, chip "Por resolver", aumento de ganancias bien calculado y campos de
    promoción que se pueden vaciar, qué NO es promoción (v8) y deporte y liga confirmados por
-   API-Football. **Verificados en el móvil con la cuenta de email (commit 0f5b91b).** Falta
-   verificarlos en producción con la cuenta de Google. Ver "Registro: retoques 2".
+   API-Football. **Verificados en el móvil con la cuenta de email (commit 0f5b91b)** y **en producción
+   con la cuenta de Google el 2026-11-11** (main `684bec0`). Ver "Registro: retoques 2".
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-11, tras fusionar los retoques del registro 2)
-0. **Retoques del registro 2** (fusionados el 2026-11-11, PR #12): verificar en producción con la cuenta
-   de Google (chip "Por resolver", "Descartar todas" cancelando la confirmación, y que Análisis,
-   Bankroll y Gráficas siguen igual). **El tenis se trata aparte** (punto 3 del encargo, fuera de esta
-   tarea).
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-11, tras verificar los retoques del registro 2 en producción)
+0. **El tenis** (punto 3 del encargo de los retoques del registro 2): se trata aparte, sin empezar.
 1. **API-Football, limitación futura** (tarea 3 fusionada el 2026-11-10; plan **Pro: 7.500 llamadas al
    día**): la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
    USUARIO (`api_futbol_uso`); con más usuarios haría falta un contador GLOBAL (p. ej. una tabla común
@@ -1334,3 +1331,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-10 | Chip "Por resolver" (apuestas pendientes de resultado) junto a "+ Nueva", sin burbuja en la barra | Acceso rápido; distinto de "sin revisar"; una consulta solo en Apuestas |
 | 2026-11-10 | "Descartar todas" solo con lo no guardado y con confirmación; espera si hay capturas leyéndose | No dejar lecturas a medias ni tocar lo guardado |
 | 2026-11-11 | **Retoques del registro 2 fusionados en `main`** (rama `registro-retoques-2`, PR #12, commit `61b2bcb`) | Sin migración; instrucciones v8; verificados en el móvil con la cuenta de email; comprobaciones de la PR esperadas en verde antes de fusionar. Falta verificarlos en producción con la cuenta de Google |
+| 2026-11-11 | **Retoques del registro 2 verificados en producción con la cuenta de Google** (main `684bec0`) | Chip "Por resolver", "Descartar todas" con confirmación, y Análisis, Bankroll y Gráficas sin cambios |
