@@ -91,15 +91,18 @@ archivo o panel ponerlas).
    posibles"; las elecciones se recuerdan al guardar. Sin fecha en la captura, ventana de hoy − 7 a
    hoy + 2. **Verificada en el móvil con la cuenta de email (commit 017ce24).** Falta verificarla en
    producción con la cuenta de Google. Ver "Registro: API-Football".
-   **Retoques del registro 2, hechos en la rama `registro-retoques-2` el 2026-11-10** (sin fusionar;
-   sin migración; instrucciones v8): "Descartar todas" en la cola de revisión, chip "Por resolver",
-   aumento de ganancias bien calculado y campos de promoción que se pueden vaciar, qué NO es promoción
-   (v8) y deporte y liga confirmados por API-Football. Ver "Registro: retoques 2".
+   **Retoques del registro 2, fusionados el 2026-11-11** (rama `registro-retoques-2`, PR #12, commit de
+   main `61b2bcb`; pruebas de GitHub Actions en verde; sin migración; instrucciones v8): "Descartar
+   todas" en la cola de revisión, chip "Por resolver", aumento de ganancias bien calculado y campos de
+   promoción que se pueden vaciar, qué NO es promoción (v8) y deporte y liga confirmados por
+   API-Football. **Verificados en el móvil con la cuenta de email (commit 0f5b91b).** Falta
+   verificarlos en producción con la cuenta de Google. Ver "Registro: retoques 2".
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-10, tras fusionar la tarea 3 del registro)
-0. **Retoques del registro 2** (rama `registro-retoques-2`): verificar en el móvil con el despliegue de
-   la rama, fusionar y verificar en producción con la cuenta de Google. **El tenis se trata aparte**
-   (punto 3 del encargo, fuera de esta tarea).
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-11, tras fusionar los retoques del registro 2)
+0. **Retoques del registro 2** (fusionados el 2026-11-11, PR #12): verificar en producción con la cuenta
+   de Google (chip "Por resolver", "Descartar todas" cancelando la confirmación, y que Análisis,
+   Bankroll y Gráficas siguen igual). **El tenis se trata aparte** (punto 3 del encargo, fuera de esta
+   tarea).
 1. **API-Football, limitación futura** (tarea 3 fusionada el 2026-11-10; plan **Pro: 7.500 llamadas al
    día**): la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
    USUARIO (`api_futbol_uso`); con más usuarios haría falta un contador GLOBAL (p. ej. una tabla común
@@ -674,7 +677,7 @@ Solo fútbol. La API propone y el usuario decide: todo editable. Rama `registro-
   `comprobar_rls_en_vivo.sql` con 8 comprobaciones nuevas (79 en total); `npm run probar:local` con una
   API-Football simulada (puerto 54323).
 
-## Registro: retoques 2 (2026-11-10, rama `registro-retoques-2`)
+## Registro: retoques 2 (2026-11-10, rama `registro-retoques-2`; fusionados el 2026-11-11, PR #12)
 
 Sin migración. Instrucciones de la IA **v8**.
 
@@ -1330,3 +1333,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-10 | API-Football marca deporte y liga aunque ya coincidieran; otro deporte → sugerencia "Usar Fútbol" (se consulta si la IA dudó del deporte; un deporte claro distinto, no) | La API también confirma; nunca cambia solo un dato claro; el tenis se queda fuera |
 | 2026-11-10 | Chip "Por resolver" (apuestas pendientes de resultado) junto a "+ Nueva", sin burbuja en la barra | Acceso rápido; distinto de "sin revisar"; una consulta solo en Apuestas |
 | 2026-11-10 | "Descartar todas" solo con lo no guardado y con confirmación; espera si hay capturas leyéndose | No dejar lecturas a medias ni tocar lo guardado |
+| 2026-11-11 | **Retoques del registro 2 fusionados en `main`** (rama `registro-retoques-2`, PR #12, commit `61b2bcb`) | Sin migración; instrucciones v8; verificados en el móvil con la cuenta de email; comprobaciones de la PR esperadas en verde antes de fusionar. Falta verificarlos en producción con la cuenta de Google |
