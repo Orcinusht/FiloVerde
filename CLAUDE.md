@@ -97,8 +97,15 @@ archivo o panel ponerlas).
    promoción que se pueden vaciar, qué NO es promoción (v8) y deporte y liga confirmados por
    API-Football. **Verificados en el móvil con la cuenta de email (commit 0f5b91b)** y **en producción
    con la cuenta de Google el 2026-11-11** (main `684bec0`). Ver "Registro: retoques 2".
+5. **Análisis: selector de periodo y balance de la semana**, hecho en la rama `analisis-periodo-semana`
+   el 2026-11-12 (sin fusionar; sin migración): selector "tipo + navegador" (Día, Semana, Mes, Año,
+   Todo con flechas, atajos y calendario en una hoja inferior), balance diario de la semana arriba
+   (con flechas a semanas anteriores), sin la nota "Solo cuentan…" ni el apartado "Evolución". Ver
+   "Análisis: selector de periodo y balance de la semana".
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-11, tras verificar los retoques del registro 2 en producción)
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-12, al empezar el selector de periodo y el balance semanal)
+- **Análisis: selector de periodo y balance de la semana** (rama `analisis-periodo-semana`): verificar en
+  el móvil con el despliegue de la rama, fusionar y verificar en producción con la cuenta de Google.
 0. **El tenis** (punto 3 del encargo de los retoques del registro 2): se trata aparte, sin empezar.
 1. **API-Football, limitación futura** (tarea 3 fusionada el 2026-11-10; plan **Pro: 7.500 llamadas al
    día**): la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
@@ -239,14 +246,15 @@ src/
                         opciones/ = pantalla común pagina-opciones.tsx + gestion-opciones.tsx),
                         deportes/ (catálogo: editor-catalogo.tsx con Renombrar —aviso N/M—, Archivar y
                         Borrar sin uso; revisar/ = "Revisar posibles errores"), cuenta
-      analisis/         pantalla Análisis (Fase 2): analisis.tsx (servidor: lee y calcula),
-                        controles.tsx (periodo, segmento, orden, tipo y Mercado/Liga; todo en la
-                        dirección; FiltroFechas = fichas de periodo, Selector y Conmutador, usados
-                        también en Gráficas y Bankroll). Sección "Evolución": tablas por mes y día y
-                        enlace "Ver evolución →" a Gráficas
+      analisis/         pantalla Análisis (Fase 2): analisis.tsx (servidor: lee y calcula; arriba el
+                        balance de la semana, luego "Análisis del periodo" con el selector nuevo;
+                        bloque "Por mes y por día de la semana"), controles.tsx (Selector y
+                        Conmutador; FiltroFechas = las fichas de periodo de antes, que SOLO usan ya
+                        Gráficas y Bankroll; todo en la dirección)
         detalle/          las apuestas que forman una fila (segmento o aciertos), con la tarjeta de
                           la lista, Todas/Verdes/Rojas en aciertos y páginas de 50; también las de
-                          una serie de Gráficas (con ?casa= y ?volver=/graficas…, "← Gráficas")
+                          una serie de Gráficas (con ?casa= y ?volver=/graficas…, "← Gráficas") y las
+                          de un día del balance semanal (?vista=dia&dia=AAAA-MM-DD)
       graficas/         pestaña Gráficas (Fase 3): graficas.tsx (servidor: casa, periodo, beneficio
                         acumulado con caídas y una gráfica por valor del segmento con "Ver más")
       bankroll/         Fase 3: page.tsx (global, casas, movimientos con filtros) · casa/[id]/ (detalle de
@@ -266,6 +274,8 @@ src/
     grafica-linea.tsx gráfica de línea propia en SVG (sin librerías): eje en euros, línea del 0,
                       color según el resultado, eje de fechas y escala compartibles, etiqueta del
                       punto más cercano al dedo (y con las flechas), puntos de depósito/retirada
+    selector-periodo.tsx selector de periodo "tipo + navegador" (Día, Semana, Mes, Año, Todo, flechas,
+                      "Volver a…", hoja inferior con atajos y calendario de rango); hoy solo en Análisis
     bottom-nav.tsx    barra inferior de 5 pestañas (Apuestas, Análisis, Gráficas, Bankroll, Ajustes)
     apuestas/         formulario de revisión, flujo de capturas (registro-capturas.tsx: cola con
                       Anterior/Siguiente y resumen), eleccion-apuestas.tsx ("¿Cuáles quieres
@@ -297,7 +307,10 @@ src/
                       con la sesión del usuario; sin claves, se prueba con un cliente falso)
     analisis/         calculos.ts (funciones puras: métricas, segmentos y aciertos con los ids de
                       sus apuestas, detalle, rachas, periodos, MUESTRA_MINIMA, mes y día de la semana en hora
-                      de España) · evolucion.ts (funciones puras: beneficio acumulado, caídas,
+                      de España) · periodo.ts (selector de Análisis: rango de los periodos nuevos y de
+                      antes, títulos, flechas, "Volver a…" y paso a Gráficas) · semana.ts (balance
+                      diario de la semana: semana de `bsem`, filas por día con sus ids, total) ·
+                      evolucion.ts (funciones puras: beneficio acumulado, caídas,
                       por mes/día y curva del saldo de Bankroll) · leer.ts (consultas
                       con la sesión, en tandas de 1000) · direccion.ts (enlaces de Análisis y del
                       detalle, y lectura de sus parámetros)
@@ -324,6 +337,7 @@ tests/                prueba de seguridad RLS + lógica de apuestas (logica.test
                       + deportes y ligas (catalogo.test.ts) + evolución en el tiempo (evolucion.test.ts) + gráficas (graficas.test.ts)
                       + registro: fecha del partido y partidos conocidos (partidos.test.ts)
                       + casa de la tanda (casa-tanda.test.ts) + API-Football (api-futbol.test.ts)
+                      + selector de periodo y balance de la semana (periodo-semana.test.ts)
 scripts/              iconos · simulador.mjs (Supabase + Claude + API-Football falsos) · probar-local.mjs (prueba completa)
 public/               sw.js e iconos
 ```
@@ -547,6 +561,57 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 
 **Cambios en la base de datos = nueva migración** en `supabase/migrations/` (nunca editar una
 ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
+
+## Análisis: selector de periodo y balance de la semana (2026-11-12, rama `analisis-periodo-semana`)
+
+Sin migración. Solo la pantalla Análisis y su detalle; Gráficas y Bankroll siguen con las fichas de antes.
+Reglas de cálculo sin cambios.
+
+- **Nota quitada**: "Solo cuentan las apuestas resueltas del periodo; …" ya no sale (la regla sigue igual).
+  Quedan las notas de pre-partido/normal y de muestra pequeña.
+- **"Evolución" quitado**: sin su título, el enlace "Ver evolución →" ni su nota. Las tablas "Por mes" y
+  "Por día de la semana" siguen igual en el bloque "Por mes y por día de la semana". No había ninguna
+  ruta `/analisis/evolucion`; `enlaceGraficas` se borró (solo lo usaban ese enlace y una prueba).
+- **Selector "tipo + navegador"** (`components/selector-periodo.tsx` + `lib/analisis/periodo.ts`, que
+  calcula en el servidor el rango, el título, las flechas y "Volver a…"):
+  - Fila de 5 botones: **Día · Semana · Mes · Año · Todo** (un toque = el periodo actual de ese tipo).
+  - Debajo, **‹ título ⋯ ›**: "Hoy · jue 12 nov", "Ayer · mié 11 nov", "Semana del 9 al 15 nov",
+    "Semana del 26 oct al 1 nov", "Noviembre 2026", "2026", "Todo el historial". La flecha **›** se
+    apaga si el siguiente periodo empezaría después de hoy; **"Volver a hoy / a esta semana / a este mes /
+    a este año"** solo si te has alejado.
+  - **⋯** abre una **hoja inferior** con **atajos** (Hoy, Ayer, Últimos 7 días, Últimos 30 días) y un
+    **rango personalizado con calendario** propio (se toca el primer día y el último; los dos cuentan;
+    días de 44 px; Escape o fuera la cierran). Con un atajo o un rango, ningún tipo marcado y el título
+    lo dice ("Últimos 7 días (6 nov – 12 nov)", "Del 10 al 13 nov").
+  - **Dirección**: los periodos de antes (`hoy`, `ayer`, `7d`, `mes`, `30d`, `ano`, `todo`,
+    `personalizado` con `desde`/`hasta`) se escriben y se calculan **igual que antes** (`rangoPeriodo`
+    sin cambios; probado con 6 momentos, también cambios de hora). Nuevos: `periodo=dia|semana|mes|ano` +
+    `ref=AAAA-MM-DD` (primer día del periodo). Cuando coinciden con uno de antes se escribe el de antes
+    (Día de hoy = `hoy`, ayer = `ayer`, el mes y el año actuales = `mes` y `ano`). Un `ref` futuro o mal
+    escrito → el periodo actual.
+  - **Detalle**: recibe `periodo` y `ref` como el resto y usa el mismo selector. Al volver a Gráficas
+    desde un detalle, un periodo nuevo se pasa como `personalizado` con sus días (`periodoParaGraficas`).
+- **Balance de la semana** (`lib/analisis/semana.ts`; tarjeta arriba del todo, antes de "Análisis del
+  periodo"): beneficio neto de cada día de **lunes a domingo**, en hora de España, por la **fecha de la
+  apuesta**, solo resueltas con resultado (ganada, perdida, cash out, media ganada, media perdida; con
+  crédito también suman, como el beneficio neto). En la semana en curso, **solo hasta hoy**; las demás,
+  los 7 días. Cada fila: día, nº de apuestas, barra desde el centro (verde/roja) y beneficio con signo
+  (neutro y "—" si no hubo). Abajo, **"Total hasta hoy" / "Total de la semana"** = suma de las filas.
+  - Dice "No depende del periodo de abajo"; su semana va en **`?bsem=`** (0 = esta, sin escribir; −1 la
+    anterior…). El selector de periodo la conserva y no la cambia; las flechas del balance no tocan el
+    periodo.
+  - Título: "Esta semana", "Semana anterior" y "Semana del 26 oct al 1 nov". **›** apagada en la semana en
+    curso; **‹** apagada en la semana de tu **primera apuesta** (`leerPrimeraFecha`, cualquier estado; sin
+    apuestas, no se va atrás); un `bsem` más antiguo se queda en ese límite. **"Volver a esta semana"**
+    solo si te has alejado.
+  - **Pulsar un día** → `/analisis/detalle?vista=dia&dia=…` (con todo lo de Análisis para volver): lee las
+    apuestas de ese día y usa la MISMA función que la fila (`filaDia`): recuento, beneficio y lista no
+    pueden diferir. Un día sin apuestas no se puede pulsar.
+- **Pruebas**: `tests/periodo-semana.test.ts` (periodos de antes = mismo rango; Día/Semana/Mes/Año con
+  flechas, títulos y "Volver a…"; paso a Gráficas; hoy lunes, martes y domingo; semana anterior y
+  antiguas con el límite de la primera apuesta; 23:30 de España en su día; semana del cambio de hora;
+  día sin apuestas; total = filas = detalle = beneficio de Análisis) y la prueba local (selector,
+  hoja, calendario, balance, día, semana anterior y 320/390/430 px en claro y oscuro).
 
 ## Registro: fecha del partido y partidos conocidos (mejoras del registro, tarea 1)
 
@@ -825,9 +890,10 @@ Error → mensaje en español y `[graficas:leer]` al log.
 - **Cabecera → detalle** (`/analisis/detalle` con `casa` y `volver=/graficas?…`): misma lista e igual
   recuento que la cabecera; "← Gráficas" vuelve como estaba (con el periodo que tenga el detalle).
 - **Análisis**: sin la gráfica ni las dos tarjetas de caída; se quedan "Por mes" y "Por día de la
-  semana" con "Ver evolución →" (a Gráficas con el mismo periodo).
+  semana" (desde el 2026-11-12, sin el enlace "Ver evolución →": Gráficas está en la barra inferior).
 
-**Periodos** (todas las pantallas con filtro: Análisis, detalle, Gráficas y Bankroll): Hoy, Ayer,
+**Periodos** (Gráficas y Bankroll; Análisis y su detalle usan desde el 2026-11-12 el selector nuevo, con
+los mismos periodos y las mismas cifras): Hoy, Ayer,
 Últimos 7 días (contando hoy), Este mes, Últimos 30 días, Este año, Todo y Personalizado, con días
 naturales de **España** (los días del cambio de hora tienen 23 o 25 horas). Fichas con desplazamiento
 horizontal (44 px de alto; la elegida en verde y centrada). Las direcciones antiguas (`?periodo=mes`…)
@@ -876,7 +942,9 @@ apuestas resueltas y pendientes del periodo (las anuladas no se leen), en tandas
 fijo (fecha, creación, id), sus selecciones (por lotes de 150 ids) y los nombres de casa y
 estrategia. Error → mensaje en español y `[analisis:leer]` al log. Sin migración.
 
-- **Filtro de fechas** (en la dirección: `?periodo=hoy|ayer|7d|mes|30d|ano|personalizado&desde=&hasta=`): Hoy,
+- **Filtro de fechas** (desde el 2026-11-12, con el selector "tipo + navegador": ver "Análisis: selector de
+  periodo y balance de la semana"; en la dirección: `?periodo=hoy|ayer|7d|mes|30d|ano|personalizado&desde=&hasta=`
+  y los nuevos `dia|semana|mes|ano` con `ref`): Hoy,
   Ayer, Últimos 7 días, Este mes, Últimos 30 días (contando hoy), Este año, Todo y Personalizado (los dos días incluidos; al
   revés se dan la vuelta). Por `apuestas.fecha`, con los días de **España**. Se filtra en la
   consulta. **Todo** respeta el filtro (resumen, rachas, segmentos y aciertos) salvo "En juego", que
@@ -1080,7 +1148,7 @@ código ya soporta los dos casos.
 ```bash
 npm install          # instalar dependencias (la primera vez)
 npm run dev          # arrancar en local → http://localhost:3000 (necesita .env.local)
-npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas + partidos + casa de la tanda + API-Football (sin Docker ni internet) · también en GitHub
+npm test             # prueba de seguridad RLS + lógica de apuestas + copia en CSV + análisis + bankroll + casas y estrategias + deportes y ligas + evolución + gráficas + partidos + casa de la tanda + API-Football + periodo y semana (sin Docker ni internet) · también en GitHub
 npm run probar:local # prueba COMPLETA en local con simulador de Supabase, Claude y API-Football + navegador móvil
                      # (capturas de pantalla en .prueba-local/; no usa internet ni datos reales)
 npm run lint         # revisar el código
@@ -1332,3 +1400,10 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-10 | "Descartar todas" solo con lo no guardado y con confirmación; espera si hay capturas leyéndose | No dejar lecturas a medias ni tocar lo guardado |
 | 2026-11-11 | **Retoques del registro 2 fusionados en `main`** (rama `registro-retoques-2`, PR #12, commit `61b2bcb`) | Sin migración; instrucciones v8; verificados en el móvil con la cuenta de email; comprobaciones de la PR esperadas en verde antes de fusionar. Falta verificarlos en producción con la cuenta de Google |
 | 2026-11-11 | **Retoques del registro 2 verificados en producción con la cuenta de Google** (main `684bec0`) | Chip "Por resolver", "Descartar todas" con confirmación, y Análisis, Bankroll y Gráficas sin cambios |
+| 2026-11-12 | **Análisis: selector de periodo y balance de la semana** en la rama `analisis-periodo-semana` (sin migración) | Encargo de 4 puntos: quitar la nota "Solo cuentan…", selector nuevo, balance diario de la semana y quitar "Evolución" |
+| 2026-11-12 | Selector "tipo + navegador" (diseño B): Día · Semana · Mes · Año · Todo + ‹ título › + hoja inferior con atajos y calendario | Elegido por el usuario: cambiar de tipo es un toque y moverse otro, con el pulgar; los "últimos N días" y el personalizado, en la hoja |
+| 2026-11-12 | Periodos nuevos en la dirección (`dia`, `semana` y `mes`/`ano` con `ref`); los de antes se escriben y calculan igual | Las direcciones guardadas y las cifras no cambian; Gráficas y Bankroll entienden lo que les llega |
+| 2026-11-12 | Selector nuevo solo en Análisis y su detalle; Gráficas y Bankroll, con las fichas de antes | Petición del usuario: no tocar otras pantallas sin avisar |
+| 2026-11-12 | Balance de la semana arriba, en tarjeta propia, con `bsem` separado del periodo y flechas limitadas a la semana de la primera apuesta | Dos "periodos" en la misma pantalla sin confusión; no navegar por semanas vacías |
+| 2026-11-12 | Detalle de un día con la misma función que su fila (`filaDia`) | El recuento, el beneficio y la lista no pueden diferir |
+| 2026-11-12 | "Evolución" quitado (título, enlace y nota); se quedan las tablas por mes y día | Solo llevaba a Gráficas, que está en la barra inferior |

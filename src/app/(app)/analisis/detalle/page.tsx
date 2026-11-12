@@ -7,10 +7,13 @@ import { createClient } from '@/lib/supabase/server'
 import { registrarError, usuarioActual } from '@/lib/server/capturas'
 import type { FilaApuesta } from '@/lib/server/datos'
 import { leerApuestasAnalisis } from '@/lib/analisis/leer'
-import { PERIODOS, detalle, esPeriodo, rangoPeriodo, type ApuestaAnalisis, type Color } from '@/lib/analisis/calculos'
-import { enlaceDetalleAcierto, enlaceDetalleSegmento, leerPeticionDetalle, vueltaDetalle } from '@/lib/analisis/direccion'
+import { detalle, type ApuestaAnalisis, type Color } from '@/lib/analisis/calculos'
+import { enlaceDetalleAcierto, enlaceDetalleDia, enlaceDetalleSegmento, leerPeticionDetalle, vueltaDetalle } from '@/lib/analisis/direccion'
+import { fechaLarga, hoyEnEspana, navegacionPeriodo, rangoAnalisis, tituloPeriodo } from '@/lib/analisis/periodo'
+import { esDiaValido, filaDia, rangoDia } from '@/lib/analisis/semana'
+import { formatoImporte } from '@/lib/apuestas/dinero'
 import { leerCasa } from '@/lib/graficas/series'
-import { FiltroFechas } from '../controles'
+import { SelectorPeriodo } from '@/components/selector-periodo'
 import { NOMBRE_TIPO, esTipoApuesta, type EstadoApuesta, type TipoApuesta } from '@/lib/apuestas/estados'
 
 export const metadata = { title: 'Detalle · Análisis · Filoverde' }
@@ -83,10 +86,12 @@ async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
   await connection() // datos del momento: nunca se prerenderizan
   const volver = vueltaDetalle(sp).href
   const casa = leerCasa(uno(sp.casa)) // solo desde Gráficas: '' = todas
+  if (uno(sp.vista) === 'dia') return <DetalleDia sp={sp} volver={volver} />
   const peticion = leerPeticionDetalle(sp)
   if (!peticion) return <Aviso volver={volver}>Esta dirección no corresponde a ninguna fila del análisis.</Aviso>
-  const periodo = esPeriodo(uno(sp.periodo)) ? uno(sp.periodo) : 'todo'
-  const rango = rangoPeriodo(periodo as keyof typeof PERIODOS, uno(sp.desde), uno(sp.hasta))
+  const hoy = hoyEnEspana()
+  const rango = rangoAnalisis(uno(sp.periodo), { desde: uno(sp.desde), hasta: uno(sp.hasta), ref: uno(sp.ref) })
+  const selector = <SelectorPeriodo nav={navegacionPeriodo(rango, hoy)} hoy={hoy} />
   if (peticion.vista === 'aciertos') peticion.tipo = esTipoApuesta(peticion.tipo) ? peticion.tipo : undefined
   const pagina = Math.max(0, Math.min(1000, Number.parseInt(uno(sp.pagina) || '0', 10) || 0))
 
@@ -109,9 +114,7 @@ async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
   if (!d)
     return (
       <>
-        <div className="px-4 pt-2">
-          <FiltroFechas periodo={rango.periodo} desde={rango.desdeDia} hasta={rango.hastaDia} periodos={PERIODOS} />
-        </div>
+        <div className="px-4 pt-2">{selector}</div>
         <Aviso volver={volver}>No hay apuestas en esta fila con el periodo y los filtros elegidos.</Aviso>
       </>
     )
@@ -127,8 +130,7 @@ async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
     return p > 0 ? `${base}&pagina=${p}` : base
   }
   const actual = enlace(pagina)
-  const periodoTxt =
-    rango.periodo === 'todo' ? 'Todo el historial' : `${rango.desdeDia || '…'} a ${rango.hastaDia || '…'}`
+  const periodoTxt = tituloPeriodo(rango, hoy)
   const recuento =
     peticion.vista === 'seg'
       ? plural(total, 'apuesta', 'apuestas')
@@ -136,7 +138,7 @@ async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
 
   return (
     <div className="space-y-3 px-4 pb-6 pt-2">
-      <FiltroFechas periodo={rango.periodo} desde={rango.desdeDia} hasta={rango.hastaDia} periodos={PERIODOS} />
+      {selector}
       <div className="space-y-1 rounded-2xl border border-border bg-surface p-3">
         <p className="break-words text-base font-semibold" data-detalle="titulo">
           {d.titulo}
@@ -202,6 +204,82 @@ async function DetalleAnalisis({ searchParams }: { searchParams: Busqueda }) {
           {(pagina + 1) * POR_PAGINA < total ? (
             <Link href={enlace(pagina + 1)} className="flex h-11 items-center px-2 font-semibold text-brand">
               Más antiguas →
+            </Link>
+          ) : (
+            <span />
+          )}
+        </nav>
+      )}
+    </div>
+  )
+}
+
+// Un día del balance semanal: sus apuestas resueltas, con la MISMA función que la fila
+// (`filaDia`), así que la lista, el recuento y el beneficio no pueden diferir de la tarjeta.
+async function DetalleDia({ sp, volver }: { sp: Record<string, string | string[] | undefined>; volver: string }) {
+  const dia = uno(sp.dia)
+  if (!esDiaValido(dia)) return <Aviso volver={volver}>Esta dirección no corresponde a ningún día.</Aviso>
+  const pagina = Math.max(0, Math.min(1000, Number.parseInt(uno(sp.pagina) || '0', 10) || 0))
+  let apuestas: ApuestaAnalisis[] = []
+  let fallo: 'sesion' | 'error' | null = null
+  try {
+    const supabase = await createClient()
+    const userId = await usuarioActual(supabase)
+    if (!userId) fallo = 'sesion'
+    else apuestas = await leerApuestasAnalisis(supabase, userId, rangoDia(dia))
+  } catch (e) {
+    registrarError('analisis:detalle-dia', e)
+    fallo = 'error'
+  }
+  if (fallo === 'sesion') return <Aviso volver={volver}>Tu sesión ha caducado. Vuelve a entrar para ver el detalle.</Aviso>
+  if (fallo === 'error') return <Aviso volver={volver}>No se ha podido cargar el detalle. Recarga la página en unos segundos.</Aviso>
+  const fila = filaDia(apuestas, dia)
+  const hoy = hoyEnEspana()
+  const porId = new Map(apuestas.map((a) => [a.id, a]))
+  const total = fila.ids.length
+  const visibles = fila.ids.slice(pagina * POR_PAGINA, (pagina + 1) * POR_PAGINA).map((id) => porId.get(id)!)
+  const base = enlaceDetalleDia(sp, dia)
+  const enlace = (p: number) => (p > 0 ? `${base}&pagina=${p}` : base)
+  const divisa = apuestas[0]?.divisa ?? 'EUR'
+  return (
+    <div className="space-y-3 px-4 pb-6 pt-2">
+      <div className="space-y-1 rounded-2xl border border-border bg-surface p-3">
+        <p className="break-words text-base font-semibold" data-detalle="titulo">
+          {fechaLarga(dia, hoy)}
+        </p>
+        <p className="text-xs text-muted">Balance de la semana · día en hora de España</p>
+        <p className="text-sm font-medium" data-detalle="recuento" data-detalle-beneficio={fila.beneficio}>
+          {plural(total, 'apuesta', 'apuestas')}
+          {total > 0 && <> · {formatoImporte(fila.beneficio, divisa, { conSigno: true })}</>}
+        </p>
+        <p className="text-xs text-muted">Solo las apuestas resueltas de ese día (por la fecha de la apuesta), sin anuladas ni pendientes.</p>
+      </div>
+      {total === 0 ? (
+        <p className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">Ese día no hay apuestas resueltas.</p>
+      ) : (
+        <ul className="space-y-2" data-detalle="lista">
+          {visibles.map((a) => (
+            <li key={a.id}>
+              <TarjetaApuesta a={paraTarjeta(a)} volver={enlace(pagina)} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {total > POR_PAGINA && (
+        <nav className="flex items-center justify-between text-sm">
+          {pagina > 0 ? (
+            <Link href={enlace(pagina - 1)} className="flex h-11 items-center px-2 font-semibold text-brand">
+              ← Anteriores
+            </Link>
+          ) : (
+            <span />
+          )}
+          <span className="text-muted">
+            {pagina * POR_PAGINA + 1}–{Math.min(total, (pagina + 1) * POR_PAGINA)} de {total}
+          </span>
+          {(pagina + 1) * POR_PAGINA < total ? (
+            <Link href={enlace(pagina + 1)} className="flex h-11 items-center px-2 font-semibold text-brand">
+              Siguientes →
             </Link>
           ) : (
             <span />

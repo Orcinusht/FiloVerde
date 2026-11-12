@@ -1841,13 +1841,46 @@ async function comprobarTarjetas(p, e) {
   assert.equal(await valorTarjeta(p, 'Yield'), e.importe ? pct(e.propio / e.importe) : '—')
   assert.equal(await valorTarjeta(p, '% de acierto'), e.g + e.p ? pct(e.g / (e.g + e.p)) : '—')
 }
-// Filtro de periodo (fichas): pulsa la ficha y, en Personalizado, escribe los días.
+// Filtro de periodo. En Análisis (y su detalle), el selector nuevo «tipo + navegador»: tipos,
+// atajos de la hoja inferior y calendario. En Gráficas y Bankroll, las fichas de siempre.
+const MESES_CAL = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+async function irAMesCalendario(p, dia) {
+  const objetivo = `${MESES_CAL[Number(dia.slice(5, 7)) - 1]} ${dia.slice(0, 4)}`
+  const mes = p.locator('[data-calendario-mes]')
+  for (let i = 0; i < 200 && (await mes.innerText()) !== objetivo; i++) {
+    const [nombre, ano] = (await mes.innerText()).split(' ')
+    const actual = `${ano}-${String(MESES_CAL.indexOf(nombre) + 1).padStart(2, '0')}`
+    await p.getByRole('button', { name: actual > dia.slice(0, 7) ? 'Mes anterior' : 'Mes siguiente' }).click()
+  }
+  assert.equal(await mes.innerText(), objetivo)
+}
 async function elegirPeriodo(p, valor, { desde, hasta, dentro = 'main' } = {}) {
-  await p.locator(`${dentro} [role="group"][aria-label="Periodo"]:visible [data-periodo="${valor}"]`).click()
+  const nuevo = p.locator(`${dentro} [data-selector-periodo]:visible`)
+  // Espera a que la pantalla tenga uno de los dos selectores antes de decidir cuál es.
+  await p.locator(`${dentro} [data-selector-periodo]:visible, ${dentro} [role="group"][aria-label="Periodo"]:visible`).first().waitFor()
+  const esNuevo = (await nuevo.count()) > 0
+  if (esNuevo) {
+    const TIPO = { hoy: 'dia', mes: 'mes', ano: 'ano', todo: 'todo' }
+    if (TIPO[valor]) await nuevo.locator(`[data-tipo-periodo="${TIPO[valor]}"]`).click()
+    else {
+      await nuevo.locator('[data-abrir-hoja]').click()
+      const hoja = p.locator('[data-hoja-periodo]')
+      await hoja.waitFor()
+      if (valor === 'personalizado') {
+        await irAMesCalendario(p, desde)
+        await hoja.locator(`[data-dia="${desde}"]`).click()
+        await irAMesCalendario(p, hasta)
+        await hoja.locator(`[data-dia="${hasta}"]`).click()
+        await hoja.locator('[data-ver-rango]').click()
+      } else await hoja.locator(`[data-atajo="${valor}"]`).click()
+    }
+  } else await p.locator(`${dentro} [role="group"][aria-label="Periodo"]:visible [data-periodo="${valor}"]`).click()
   if (valor === 'personalizado') {
-    await p.getByLabel('Desde').fill(desde)
-    await p.getByLabel('Hasta').fill(hasta)
-    await p.getByRole('button', { name: 'Ver', exact: true }).click()
+    if (!esNuevo) {
+      await p.getByLabel('Desde').fill(desde)
+      await p.getByLabel('Hasta').fill(hasta)
+      await p.getByRole('button', { name: 'Ver', exact: true }).click()
+    }
     await p.waitForURL(new RegExp(`desde=${desde}`))
   } else if (valor === 'todo') await p.waitForURL((u) => !new URL(u).searchParams.has('periodo'))
   else await p.waitForURL(new RegExp(`periodo=${valor}`))
@@ -2016,7 +2049,7 @@ bien('Un ?volver= externo se ignora (vuelve a /apuestas)')
 paso('Análisis → Evolución: beneficio acumulado, caídas, meses y días (comparados con la base de datos)')
 const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const DIAS_ES = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
-const evo = (p) => p.locator('[data-seccion="evolucion"]:visible')
+const evo = (p) => p.locator('[data-seccion="mes-dia"]:visible')
 async function caidasBd(userId, extra = '') {
   const filas = await sql(`select resultado_economico::bigint r from apuestas where user_id = '${userId}' and estado in ${RESUELTOS}
     and resultado_economico is not null ${extra} order by fecha, created_at, id`)
@@ -2028,9 +2061,12 @@ await pag.goto(`${APP}/analisis?periodo=30d`)
 await evo(pag).waitFor()
 assert.equal(await pag.locator('main [data-grafica]:visible').count(), 0, 'Análisis ya no tiene la gráfica')
 assert.equal(await pag.locator('[data-tarjeta="Mayor caída desde un máximo"]:visible').count(), 0, 'ni las caídas')
-await evo(pag).getByText('Se usa la fecha de la apuesta (la fecha en que se resolvió no se guarda).', { exact: false }).waitFor()
-assert.equal(await evo(pag).locator('[data-enlace="ver-evolucion"]').getAttribute('href'), '/graficas?periodo=30d')
-bien('Análisis: sin la gráfica ni las caídas; «Ver evolución →» lleva a Gráficas con el mismo periodo')
+assert.equal(await pag.locator('[data-enlace="ver-evolucion"]').count(), 0, 'sin «Ver evolución →»')
+assert.equal(await pag.locator('[data-seccion="evolucion"]').count(), 0, 'sin el apartado «Evolución»')
+assert.equal(await pag.getByText('Se usa la fecha de la apuesta (la fecha en que se resolvió no se guarda).', { exact: false }).count(), 0, 'sin su nota')
+await evo(pag).getByRole('heading', { name: 'Por mes y por día de la semana' }).waitFor()
+assert.equal(await pag.getByRole('link', { name: 'Gráficas' }).count(), 1, 'Gráficas, solo en la barra inferior')
+bien('Análisis: sin la gráfica ni las caídas; sin «Evolución» ni su enlace; quedan «Por mes y por día de la semana»')
 // Meses y días: misma cuenta que la BD (hora de España).
 const mesesBd = await sql(`select to_char(fecha at time zone 'Europe/Madrid', 'YYYY-MM') m, count(*)::int n from apuestas
   where user_id = '${ANA.id}' and estado in ${RESUELTOS} and resultado_economico is not null group by 1 order by 1 desc`)
@@ -2253,7 +2289,7 @@ for (const ancho of [320, 375, 390, 430]) {
     const ctx = await navegador.newContext({ ...movil, viewport: { width: ancho, height: 800 }, colorScheme: tema })
     await ctx.addCookies([cookieSesion(ANA)])
     const p = await ctx.newPage()
-    for (const ruta of ['/analisis', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/analisis/detalle?seg=dia&clave=%231', '/analisis?periodo=ano', '/graficas', '/graficas?seg=liga&escala=misma&periodo=7d', '/graficas?periodo=hoy', '/bankroll', '/bankroll?periodo=30d', '/bankroll/nuevo', '/ajustes/casas', '/ajustes/estrategias', '/ajustes/deportes', '/ajustes/deportes/revisar']) {
+    for (const ruta of ['/analisis', '/analisis?periodo=semana&bsem=-1', '/analisis?periodo=mes&ref=2026-01-01', '/analisis/detalle?vista=dia&dia=2026-01-05', '/analisis?seg=mercado&periodo=personalizado&desde=2026-01-01&hasta=2026-12-31', '/analisis?ac=liga', '/analisis/detalle?seg=directo&clave=%23Pre-partido', '/analisis/detalle?vista=aciertos&ac=mercado&clave=%23Sin+dato&color=rojas', '/analisis/detalle?seg=dia&clave=%231', '/analisis?periodo=ano', '/graficas', '/graficas?seg=liga&escala=misma&periodo=7d', '/graficas?periodo=hoy', '/bankroll', '/bankroll?periodo=30d', '/bankroll/nuevo', '/ajustes/casas', '/ajustes/estrategias', '/ajustes/deportes', '/ajustes/deportes/revisar']) {
       await p.goto(`${APP}${ruta}`, { waitUntil: 'networkidle' })
       const ancho2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
       assert.ok(ancho2 <= 0, `${ruta} a ${ancho}px (${tema}): scroll horizontal de ${ancho2}px`)
@@ -3208,7 +3244,8 @@ assert.ok((await chip.innerText()).includes('Por resolver'))
 await foto('114-por-resolver')
 await chip.click()
 await pag.waitForURL(`${APP}/apuestas?estado=pendiente`)
-assert.equal(await pag.getByLabel('Filtrar por estado').inputValue(), 'pendiente')
+// La dirección cambia un instante antes que la pantalla: se espera a que el filtro lo muestre.
+assert.ok(await esperar(async () => (await pag.getByLabel('Filtrar por estado').inputValue()) === 'pendiente'), 'filtro «pendiente»')
 for (const ancho of [320, 375, 430]) {
   await pag.setViewportSize({ width: ancho, height: 800 })
   assert.ok(await sinScrollHorizontal(), `sin desbordar a ${ancho} px`)
@@ -3226,6 +3263,195 @@ assert.equal(await impBk.inputValue(), '')
 await impBk.pressSequentially('7,25')
 assert.equal(await impBk.inputValue(), '7,25')
 bien('Importe de un movimiento: se vacía y se reescribe')
+
+// ---------- Análisis: selector «tipo + navegador» y balance diario de la semana ----------
+paso('Análisis: sin la nota «Solo cuentan…», balance de la semana (esta, la anterior y las antiguas) y día a día')
+const diaM = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date(iso))
+const masDias = (d, n) => { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10) }
+const isoDow = (d) => { const [y, m, dd] = d.split('-').map(Number); return ((new Date(Date.UTC(y, m - 1, dd)).getUTCDay() + 6) % 7) + 1 }
+const HOY_M = diaM(new Date().toISOString())
+const LUNES_M = masDias(HOY_M, 1 - isoDow(HOY_M))
+// Dos resueltas de Ana esta semana para que el balance tenga cifras: el lunes a las 23:30 de España
+// (debe caer en el lunes) y hoy. Se borran al terminar este paso.
+const nuevasBal = await sql(`insert into apuestas (user_id, tipo, fecha, importe, divisa, cuota_total, estado, resultado_economico, notas)
+  values ('${ANA.id}', 'simple', ('${LUNES_M} 23:30'::timestamp at time zone 'Europe/Madrid'), 1000, 'EUR', 2.4, 'ganada', 1400, 'balance-semana'),
+         ('${ANA.id}', 'simple', ('${HOY_M} 00:05'::timestamp at time zone 'Europe/Madrid'), 700, 'EUR', 1.9, 'perdida', -700, 'balance-semana')
+  returning id`)
+const condRango = (desde, hastaExcl) => `and fecha >= ('${desde} 00:00'::timestamp at time zone 'Europe/Madrid') and fecha < ('${hastaExcl} 00:00'::timestamp at time zone 'Europe/Madrid')`
+async function balanceBd(lunes, hasta) {
+  const filas = await sql(`select (fecha at time zone 'Europe/Madrid')::date::text d, count(*)::int n, sum(resultado_economico)::bigint b from apuestas
+    where user_id = '${ANA.id}' and estado in ${RESUELTOS} and resultado_economico is not null ${condRango(lunes, masDias(lunes, 7))} group by 1`)
+  const por = new Map(filas.map((f) => [f.d, { n: f.n, b: Number(f.b) }]))
+  const dias = []
+  for (let d = lunes; d <= hasta && d < masDias(lunes, 7); d = masDias(d, 1)) dias.push([d, por.get(d)?.n ?? 0, por.get(d)?.b ?? 0])
+  return dias
+}
+const bal = (p) => p.locator('[data-seccion="balance-semana"]:visible')
+async function leerBalance(p) {
+  const filas = bal(p).locator('[data-balance-dia]')
+  const out = []
+  for (let i = 0; i < (await filas.count()); i++) {
+    const f = filas.nth(i)
+    out.push([await f.getAttribute('data-balance-dia'), Number(await f.getAttribute('data-balance-dia-n')), Number(await f.locator('[data-balance-dia-beneficio]').getAttribute('data-balance-dia-beneficio'))])
+  }
+  const t = bal(p).locator('[data-balance-total]')
+  return { filas: out, total: Number(await t.getAttribute('data-balance-total')), n: Number(await t.getAttribute('data-balance-n')) }
+}
+await pag.goto(`${APP}/analisis`, { waitUntil: 'networkidle' })
+assert.equal(await pag.getByText('Solo cuentan las apuestas resueltas del periodo', { exact: false }).count(), 0, 'la nota ya no sale')
+await pag.getByText('Lo no marcado como directo cuenta como pre-partido', { exact: false }).waitFor()
+// El balance va ANTES del selector de periodo.
+const orden = await pag.evaluate(() => {
+  const b = document.querySelector('[data-seccion="balance-semana"]')
+  const s = document.querySelector('[data-selector-periodo]')
+  return !!(b && s && b.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING)
+})
+assert.ok(orden, 'balance arriba, antes del selector')
+assert.ok((await bal(pag).locator('[data-aviso="balance-independiente"]').innerText()).startsWith('No depende del periodo de abajo'))
+await pag.getByText('Análisis del periodo', { exact: true }).first().waitFor()
+assert.equal(await bal(pag).locator('[data-balance-titulo]').innerText(), 'Esta semana')
+let b0 = await leerBalance(pag)
+const bd0 = await balanceBd(LUNES_M, HOY_M)
+assert.deepEqual(b0.filas, bd0, 'días de lunes a hoy, con sus apuestas y beneficio como en la BD')
+assert.equal(b0.filas[0][0], LUNES_M)
+assert.equal(b0.filas.at(-1)[0], HOY_M, 'solo hasta hoy')
+assert.equal(b0.total, bd0.reduce((t, f) => t + f[2], 0), 'total = suma de las filas')
+assert.equal(b0.n, bd0.reduce((t, f) => t + f[1], 0))
+assert.ok(b0.filas[0][1] >= 1, 'la de las 23:30 del lunes cae en el lunes')
+const eSem = await esperado(ANA.id, condRango(LUNES_M, masDias(HOY_M, 1)))
+assert.equal(b0.total, eSem.beneficio, 'total = beneficio neto de Análisis de lunes a hoy')
+assert.equal(await bal(pag).locator('[data-bsem="siguiente"]').getAttribute('aria-disabled'), 'true', '› apagada en la semana en curso')
+assert.equal(await bal(pag).locator('[data-bsem="volver"]').count(), 0, 'sin «Volver a esta semana» en la semana en curso')
+await foto('115-balance-semana')
+bien(`Esta semana: ${b0.filas.length} días (lunes a hoy), total ${eur(b0.total, true)} = suma de filas = BD = Análisis; › apagada`)
+// Pulsar un día: sus apuestas, con el mismo recuento y beneficio.
+const diaCon = b0.filas.find((f) => f[1] > 0)
+await bal(pag).locator(`[data-balance-dia="${diaCon[0]}"] a`).click()
+await pag.waitForURL(/\/analisis\/detalle\?.*vista=dia/)
+await pag.locator('[data-detalle="titulo"]').waitFor()
+assert.equal(Number(await pag.locator('[data-detalle="recuento"]').getAttribute('data-detalle-beneficio')), diaCon[2])
+assert.ok((await pag.locator('[data-detalle="recuento"]').innerText()).startsWith(`${diaCon[1]} apuesta`))
+assert.equal(await pag.locator('[data-detalle="lista"] > li').count(), Math.min(50, diaCon[1]))
+await foto('116-balance-dia')
+await pag.getByRole('link', { name: '← Análisis' }).click()
+await pag.waitForURL(`${APP}/analisis`)
+bien(`Pulsar ${diaCon[0]}: ${diaCon[1]} apuestas y ${eur(diaCon[2], true)}, como la fila; «← Análisis» vuelve`)
+// Semana anterior: los 7 días; «Volver a esta semana».
+await bal(pag).locator('[data-bsem="anterior"]').click()
+await pag.waitForURL(/bsem=-1/)
+await esperar(async () => (await bal(pag).locator('[data-balance-titulo]').innerText()) === 'Semana anterior')
+const b1 = await leerBalance(pag)
+const bd1 = await balanceBd(masDias(LUNES_M, -7), masDias(LUNES_M, -1))
+assert.equal(b1.filas.length, 7)
+assert.deepEqual(b1.filas, bd1)
+assert.equal(b1.total, (await esperado(ANA.id, condRango(masDias(LUNES_M, -7), LUNES_M))).beneficio)
+// El selector de periodo NO cambia el balance (ni su semana).
+await elegirPeriodo(pag, 'mes')
+assert.ok(pag.url().includes('bsem=-1'), 'el periodo conserva la semana del balance')
+assert.deepEqual(await leerBalance(pag), b1, 'mismo balance con otro periodo')
+await bal(pag).locator('[data-bsem="volver"]').click()
+await pag.waitForURL((u) => !new URL(u).searchParams.has('bsem'))
+await esperar(async () => (await bal(pag).locator('[data-balance-titulo]').innerText()) === 'Esta semana')
+assert.ok(pag.url().includes('periodo=mes'), '«Volver a esta semana» no toca el periodo')
+bien(`Semana anterior: 7 días, total ${eur(b1.total, true)} como la BD; el periodo no cambia el balance; «Volver a esta semana»`)
+// Semanas antiguas: título con fechas y ‹ apagada en la semana de la primera apuesta.
+const [{ f: primeraAna }] = await sql(`select to_char(min(fecha) at time zone 'Europe/Madrid', 'YYYY-MM-DD') f from apuestas where user_id = '${ANA.id}'`)
+const lunesPrimera = masDias(primeraAna, 1 - isoDow(primeraAna))
+const semanasAtras = Math.round((Date.parse(LUNES_M) - Date.parse(lunesPrimera)) / (7 * 86400000))
+await pag.goto(`${APP}/analisis?bsem=-9999`, { waitUntil: 'networkidle' })
+assert.equal(await bal(pag).locator('[data-bsem="anterior"]').getAttribute('aria-disabled'), 'true', '‹ apagada en la semana de la primera apuesta')
+assert.equal((await leerBalance(pag)).filas[0][0], lunesPrimera)
+if (semanasAtras >= 2) assert.ok((await bal(pag).locator('[data-balance-titulo]').innerText()).startsWith('Semana del '))
+await bal(pag).locator('[data-bsem="volver"]').waitFor()
+bien(`Semanas antiguas: no se pasa de la semana de la primera apuesta (${lunesPrimera}, ${semanasAtras} atrás); título con las fechas`)
+
+paso('Análisis: selector «tipo + navegador» (Día, Semana, Mes, Año, Todo, atajos y calendario) con las mismas cifras')
+const sel = (p) => p.locator('main [data-selector-periodo]:visible')
+const conParams = (u, esperado) => Object.entries(esperado).every(([k, v]) => new URL(u).searchParams.get(k) === v)
+const tituloSel = (p) => sel(p).locator('[data-periodo-titulo]').innerText()
+await pag.goto(`${APP}/analisis`, { waitUntil: 'networkidle' })
+assert.equal(await sel(pag).locator('[data-tipo-periodo="todo"]').getAttribute('aria-pressed'), 'true')
+assert.equal(await tituloSel(pag), 'Todo el historial')
+await sel(pag).locator('[data-tipo-periodo="semana"]').click()
+await pag.waitForURL((u) => conParams(u, { periodo: 'semana', ref: LUNES_M }))
+await esperar(async () => (await tituloSel(pag)).startsWith('Semana del '))
+assert.ok(await sel(pag).locator('[data-flecha="siguiente"]').isDisabled(), '› apagada en la semana en curso')
+assert.equal(await sel(pag).locator('[data-volver-periodo]').count(), 0)
+let eS = await esperado(ANA.id, condRango(LUNES_M, masDias(LUNES_M, 7)))
+if (eS.n > 0) await comprobarTarjetas(pag, eS)
+await sel(pag).locator('[data-flecha="anterior"]').click()
+await pag.waitForURL(new RegExp(`ref=${masDias(LUNES_M, -7)}`))
+await sel(pag).locator('[data-volver-periodo]', { hasText: 'Volver a esta semana' }).waitFor()
+eS = await esperado(ANA.id, condRango(masDias(LUNES_M, -7), LUNES_M))
+if (eS.n > 0) await comprobarTarjetas(pag, eS)
+else await pag.getByText('No hay apuestas resueltas en este periodo').waitFor()
+await foto('117-selector-semana-anterior')
+// El detalle recibe el mismo periodo.
+if (eS.n > 0) {
+  const fila = filasDe(pag, 'segmentos').filter({ visible: true }).first()
+  await abrirYContar(pag, fila, { esperado: await numeroDato(fila, 'Apuestas') })
+  assert.ok(pag.url().includes(`periodo=semana`) && pag.url().includes(`ref=${masDias(LUNES_M, -7)}`), pag.url())
+  assert.ok((await tituloSel(pag)).startsWith('Semana del '))
+  await pag.getByRole('link', { name: '← Análisis' }).click()
+  await pag.waitForURL(/\/analisis\?/)
+}
+await sel(pag).locator('[data-volver-periodo]').click()
+await pag.waitForURL(new RegExp(`ref=${LUNES_M}`))
+bien('Semana: la actual con › apagada, ‹ a la anterior con «Volver a esta semana», cifras como la BD y el detalle con el mismo periodo')
+// Mes anterior y Día con las flechas.
+await sel(pag).locator('[data-tipo-periodo="mes"]').click()
+await pag.waitForURL((u) => new URL(u).searchParams.get('periodo') === 'mes' && !new URL(u).searchParams.has('ref'))
+await sel(pag).locator('[data-flecha="anterior"]').click()
+const mesAnt = `${masDias(`${HOY_M.slice(0, 7)}-01`, -1).slice(0, 7)}-01`
+await pag.waitForURL((u) => conParams(u, { periodo: 'mes', ref: mesAnt }))
+const eMA = await esperado(ANA.id, `and fecha >= ('${mesAnt} 00:00'::timestamp at time zone 'Europe/Madrid') and fecha < ('${HOY_M.slice(0, 7)}-01 00:00'::timestamp at time zone 'Europe/Madrid')`)
+if (eMA.n > 0) await comprobarTarjetas(pag, eMA)
+else await pag.getByText('No hay apuestas resueltas en este periodo').waitFor()
+await sel(pag).locator('[data-volver-periodo]', { hasText: 'Volver a este mes' }).waitFor()
+await sel(pag).locator('[data-tipo-periodo="dia"]').click()
+await pag.waitForURL(/periodo=hoy/)
+assert.ok((await tituloSel(pag)).startsWith('Hoy · '))
+await sel(pag).locator('[data-flecha="anterior"]').click()
+await pag.waitForURL(/periodo=ayer/)
+assert.ok((await tituloSel(pag)).startsWith('Ayer · '))
+await sel(pag).locator('[data-flecha="siguiente"]').click()
+await pag.waitForURL(/periodo=hoy/)
+bien(`Mes anterior (${mesAnt.slice(0, 7)}: ${eMA.n} resueltas como la BD) con «Volver a este mes»; Día: Hoy ‹ Ayer › Hoy`)
+// Direcciones de antes: mismas cifras.
+for (const per of ['7d', '30d', 'ano']) {
+  await pag.goto(`${APP}/analisis?periodo=${per}`, { waitUntil: 'networkidle' })
+  const cond =
+    per === 'ano'
+      ? `and fecha >= ('${HOY_M.slice(0, 4)}-01-01 00:00'::timestamp at time zone 'Europe/Madrid') and fecha < ('${Number(HOY_M.slice(0, 4)) + 1}-01-01 00:00'::timestamp at time zone 'Europe/Madrid')`
+      : condRango(masDias(HOY_M, per === '7d' ? -6 : -29), masDias(HOY_M, 1))
+  const e = await esperado(ANA.id, cond)
+  if (e.n > 0) await comprobarTarjetas(pag, e)
+  assert.ok((await tituloSel(pag)).startsWith({ '7d': 'Últimos 7 días', '30d': 'Últimos 30 días', ano: HOY_M.slice(0, 4) }[per]))
+}
+bien('Direcciones de antes (7d, 30d, ano): mismas cifras que la BD y su título')
+// Hoja inferior: atajos y calendario, sin desbordar a 320, 390 y 430 px.
+for (const ancho of [320, 390, 430]) {
+  await pag.setViewportSize({ width: ancho, height: 800 })
+  await pag.goto(`${APP}/analisis`, { waitUntil: 'networkidle' })
+  await sel(pag).locator('[data-abrir-hoja]').click()
+  await pag.locator('[data-hoja-periodo] [role="dialog"]').waitFor()
+  assert.ok(await sinScrollHorizontal(), `hoja a ${ancho} px`)
+  const celda = await pag.locator('[data-calendario] [data-dia]').first().boundingBox()
+  assert.ok(celda.height >= 44 && celda.width >= 40, `días del calendario a ${ancho} px: ${JSON.stringify(celda)}`)
+  if (ancho === 390) await foto('118-hoja-periodo')
+  await pag.keyboard.press('Escape')
+  await pag.locator('[data-hoja-periodo]').waitFor({ state: 'detached' })
+}
+await pag.setViewportSize({ width: 390, height: 844 })
+const ini = masDias(HOY_M, -9)
+await elegirPeriodo(pag, 'personalizado', { desde: ini, hasta: masDias(HOY_M, -2) })
+const eP = await esperado(ANA.id, condRango(ini, masDias(HOY_M, -1)))
+if (eP.n > 0) await comprobarTarjetas(pag, eP)
+assert.equal(await sel(pag).locator('[aria-pressed="true"]').count(), 0, 'personalizado: ningún tipo marcado')
+await elegirPeriodo(pag, '7d')
+assert.ok((await tituloSel(pag)).startsWith('Últimos 7 días'))
+bien('Hoja: atajos y calendario (personalizado como la BD); cabe a 320, 390 y 430 px con días de 44 px; Escape la cierra')
+await sql(`delete from apuestas where id in (${nuevasBal.map((x) => `'${x.id}'`).join(',')})`)
 
 paso('Otro usuario (Beto) no ve nada de Ana')
 const ctxBeto = await navegador.newContext(movil)

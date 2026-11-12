@@ -2,20 +2,18 @@ import Link from 'next/link'
 import { connection } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { registrarError, usuarioActual } from '@/lib/server/capturas'
-import { leerApuestasAnalisis, leerEnJuego } from '@/lib/analisis/leer'
+import { leerApuestasAnalisis, leerEnJuego, leerPrimeraFecha } from '@/lib/analisis/leer'
 import {
   MUESTRA_MINIMA,
-  PERIODOS,
   SEGMENTOS,
   AGRUPACIONES_ACIERTO,
   aciertos,
   cuotaMediaTxt,
+  enMadrid,
   esAgrupacionAcierto,
-  esPeriodo,
   esSegmentoSelector,
   porcentaje,
   rachaTxt,
-  rangoPeriodo,
   resumen,
   segmentar,
   type AgrupacionAcierto,
@@ -25,10 +23,13 @@ import {
   type OrdenSegmento,
   type Segmento,
 } from '@/lib/analisis/calculos'
-import { enlaceDetalleAcierto, enlaceDetalleSegmento, enlaceGraficas } from '@/lib/analisis/direccion'
+import { enlaceBalance, enlaceDetalleAcierto, enlaceDetalleDia, enlaceDetalleSegmento } from '@/lib/analisis/direccion'
+import { DIA_LARGO, diaCorto, diaSemana, hoyEnEspana, navegacionPeriodo, rangoAnalisis } from '@/lib/analisis/periodo'
+import { balanceSemana, leerBsem, semana, type FilaDia, type Semana } from '@/lib/analisis/semana'
+import { SelectorPeriodo } from '@/components/selector-periodo'
 import { formatoImporte } from '@/lib/apuestas/dinero'
 import { NOMBRE_TIPO, TIPOS_APUESTA, esTipoApuesta } from '@/lib/apuestas/estados'
-import { FiltroFechas, Selector } from './controles'
+import { Selector } from './controles'
 import { porDiaSemana, porMes } from '@/lib/analisis/evolucion'
 
 type Busqueda = Promise<Record<string, string | string[] | undefined>>
@@ -37,8 +38,8 @@ const uno = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) 
 export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
   const sp = await searchParams
   await connection() // datos del momento: nunca se prerenderizan
-  const periodo = esPeriodo(uno(sp.periodo)) ? uno(sp.periodo) : 'todo'
-  const rango = rangoPeriodo(periodo as keyof typeof PERIODOS, uno(sp.desde), uno(sp.hasta))
+  const hoy = hoyEnEspana()
+  const rango = rangoAnalisis(uno(sp.periodo), { desde: uno(sp.desde), hasta: uno(sp.hasta), ref: uno(sp.ref) })
   const seg: Segmento = esSegmentoSelector(uno(sp.seg)) ? (uno(sp.seg) as Segmento) : 'casa'
   const orden: OrdenSegmento = uno(sp.orden) === 'n' ? 'n' : 'beneficio'
   const tipo = esTipoApuesta(uno(sp.tipo)) ? uno(sp.tipo) : ''
@@ -46,12 +47,24 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
 
   let apuestas: ApuestaAnalisis[] = []
   let pendientes = { n: 0, importe: 0 } // "En juego": todas, sin filtro de fechas
+  // Balance diario de la semana: su propia semana (`bsem`), NO depende del periodo elegido.
+  let sem: Semana = semana(0, hoy, null)
+  let apuestasSemana: ApuestaAnalisis[] = []
   let fallo: 'sesion' | 'error' | null = null
   try {
     const supabase = await createClient()
     const userId = await usuarioActual(supabase)
     if (!userId) fallo = 'sesion'
-    else [apuestas, pendientes] = await Promise.all([leerApuestasAnalisis(supabase, userId, rango), leerEnJuego(supabase, userId)])
+    else {
+      let primera: string | null
+      ;[apuestas, pendientes, primera] = await Promise.all([
+        leerApuestasAnalisis(supabase, userId, rango),
+        leerEnJuego(supabase, userId),
+        leerPrimeraFecha(supabase, userId),
+      ])
+      sem = semana(leerBsem(uno(sp.bsem)), hoy, primera ? enMadrid(primera).dia : null)
+      apuestasSemana = await leerApuestasAnalisis(supabase, userId, sem)
+    }
   } catch (e) {
     registrarError('analisis:leer', e)
     fallo = 'error'
@@ -64,10 +77,18 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
 
   return (
     <div className="space-y-5 px-4 pb-6 pt-2">
-      <FiltroFechas periodo={rango.periodo} desde={rango.desdeDia} hasta={rango.hastaDia} periodos={PERIODOS} />
+      <BalanceSemana sem={sem} apuestas={apuestasSemana} hoy={hoy} divisa={apuestasSemana[0]?.divisa ?? r.divisa} sp={sp} />
+
+      <div className="flex items-center gap-3 pt-1" aria-hidden="true">
+        <span className="h-px flex-1 bg-border" />
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Análisis del periodo</span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      <h2 className="sr-only">Análisis del periodo</h2>
+
+      <SelectorPeriodo nav={navegacionPeriodo(rango, hoy)} hoy={hoy} />
 
       <ul className="space-y-1 rounded-2xl border border-border bg-surface p-3 text-xs text-muted">
-        <li>Solo cuentan las apuestas resueltas del periodo; anuladas y pendientes quedan fuera (las pendientes salen en «En juego», todas, sin filtro de fechas).</li>
         <li>Lo no marcado como directo cuenta como pre-partido, y lo no marcado como precipitada cuenta como normal (las casillas las marcas tú).</li>
         <li>Con pocas apuestas las cifras engañan: no se saca ninguna conclusión con muestra pequeña (menos de {MUESTRA_MINIMA}).</li>
       </ul>
@@ -128,12 +149,7 @@ export async function Analisis({ searchParams }: { searchParams: Busqueda }) {
             )}
           </section>
 
-          <Evolucion
-            apuestas={apuestas}
-            dinero={dinero}
-            enlace={(seg, clave) => enlaceDetalleSegmento(sp, seg, clave)}
-            enlaceGraficas={enlaceGraficas(sp)}
-          />
+          <PorMesYDia apuestas={apuestas} dinero={dinero} enlace={(seg, clave) => enlaceDetalleSegmento(sp, seg, clave)} />
 
           <section aria-labelledby="t-segmentos" className="space-y-2">
             <h2 id="t-segmentos" className="text-sm font-semibold uppercase tracking-wide text-muted">
@@ -286,43 +302,157 @@ function ListaSegmento({
   )
 }
 
-// ---------- Evolución en el tiempo ----------
+// ---------- Por mes y por día de la semana ----------
 
 type Dinero = (c: number | null, s?: boolean) => string
 
-// La gráfica de beneficio acumulado y las caídas están en Gráficas (desde el 2026-11-06); aquí
-// quedan las tablas por mes y por día, con un enlace a Gráficas con el mismo periodo.
-function Evolucion({
-  apuestas,
-  dinero,
-  enlace,
-  enlaceGraficas,
-}: {
-  apuestas: ApuestaAnalisis[]
-  dinero: Dinero
-  enlace: (seg: Segmento, clave: string) => string
-  enlaceGraficas: string
-}) {
+// Las tablas por mes y por día de la semana del periodo elegido (la gráfica del beneficio
+// acumulado está en la pestaña Gráficas).
+function PorMesYDia({ apuestas, dinero, enlace }: { apuestas: ApuestaAnalisis[]; dinero: Dinero; enlace: (seg: Segmento, clave: string) => string }) {
   return (
-    <section aria-labelledby="t-evolucion" className="space-y-3" data-seccion="evolucion">
-      <div className="flex items-center justify-between gap-2">
-        <h2 id="t-evolucion" className="text-sm font-semibold uppercase tracking-wide text-muted">
-          Evolución
-        </h2>
-        <Link href={enlaceGraficas} className="flex h-11 items-center text-sm font-semibold text-brand" data-enlace="ver-evolucion">
-          Ver evolución →
-        </Link>
-      </div>
-      <p className="rounded-2xl border border-border bg-surface p-3 text-xs text-muted">
-        Se usa la fecha de la apuesta (la fecha en que se resolvió no se guarda). Con pocas apuestas, estas cifras engañan. La
-        gráfica del beneficio acumulado y las caídas están en Gráficas.
-      </p>
+    <section aria-labelledby="t-mes-dia" className="space-y-3" data-seccion="mes-dia">
+      <h2 id="t-mes-dia" className="text-sm font-semibold uppercase tracking-wide text-muted">
+        Por mes y por día de la semana
+      </h2>
       <h3 className="pt-1 text-sm font-medium">Por mes</h3>
       <ListaSegmento tabla="meses" filas={porMes(apuestas)} dinero={dinero} enlace={(clave) => enlace('mes', clave)} />
       <h3 className="pt-1 text-sm font-medium">Por día de la semana</h3>
       <ListaSegmento tabla="dias" filas={porDiaSemana(apuestas)} dinero={dinero} enlace={(clave) => enlace('dia', clave)} />
       <p className="text-xs text-muted">Meses y días en hora de España. Pulsa una fila para ver sus apuestas.</p>
     </section>
+  )
+}
+
+// ---------- Balance diario de la semana ----------
+
+// Tarjeta propia, arriba del todo. Su semana va en `?bsem=` (0 esta, -1 la anterior…) y no cambia
+// con el selector de periodo. Cada fila abre el detalle con las apuestas de ese día.
+function BalanceSemana({
+  sem,
+  apuestas,
+  hoy,
+  divisa,
+  sp,
+}: {
+  sem: Semana
+  apuestas: ApuestaAnalisis[]
+  hoy: string
+  divisa: string
+  sp: Record<string, string | string[] | undefined>
+}) {
+  const { filas, total } = balanceSemana(apuestas, sem)
+  const max = Math.max(1, ...filas.map((f) => Math.abs(f.beneficio)))
+  const dinero = (c: number, conSigno = false) => formatoImporte(c, divisa, { conSigno })
+  const flecha = 'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-2xl'
+  const apagada = `${flecha} opacity-30`
+  return (
+    <section aria-labelledby="t-balance" className="space-y-3 rounded-2xl border border-border bg-surface p-3" data-seccion="balance-semana">
+      <div>
+        <h2 id="t-balance" className="text-sm font-semibold uppercase tracking-wide text-muted">
+          Balance de la semana
+        </h2>
+        <p className="mt-1 text-xs text-muted" data-aviso="balance-independiente">
+          No depende del periodo de abajo. Beneficio neto de cada día de lunes a domingo (hora de España), solo con apuestas
+          resueltas y por la fecha de la apuesta.
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        {sem.hayAnterior ? (
+          <Link href={enlaceBalance(sp, sem.bsem - 1)} replace scroll={false} aria-label="Semana anterior" data-bsem="anterior" className={flecha}>
+            <span aria-hidden="true">‹</span>
+          </Link>
+        ) : (
+          <span aria-disabled="true" aria-label="No hay semanas anteriores con apuestas" data-bsem="anterior" className={apagada}>
+            <span aria-hidden="true">‹</span>
+          </span>
+        )}
+        <div className="min-w-0 flex-1 text-center">
+          <p className="break-words text-base font-semibold leading-tight" data-balance-titulo>
+            {sem.titulo}
+          </p>
+          {sem.bsem >= -1 && <p className="text-xs text-muted">{sem.tramo.charAt(0).toUpperCase() + sem.tramo.slice(1)}</p>}
+          {sem.bsem < 0 && (
+            <Link href={enlaceBalance(sp, 0)} replace scroll={false} data-bsem="volver" className="mt-0.5 inline-flex h-8 items-center text-sm font-semibold text-brand">
+              Volver a esta semana
+            </Link>
+          )}
+        </div>
+        {sem.haySiguiente ? (
+          <Link href={enlaceBalance(sp, sem.bsem + 1)} replace scroll={false} aria-label="Semana siguiente" data-bsem="siguiente" className={flecha}>
+            <span aria-hidden="true">›</span>
+          </Link>
+        ) : (
+          <span aria-disabled="true" aria-label="Es la semana en curso" data-bsem="siguiente" className={apagada}>
+            <span aria-hidden="true">›</span>
+          </span>
+        )}
+      </div>
+      <ul className="divide-y divide-border rounded-xl border border-border bg-background" data-tabla="balance-semana">
+        {filas.map((f) => (
+          <FilaBalance key={f.dia} f={f} max={max} hoy={hoy} dinero={dinero} href={f.n > 0 ? enlaceDetalleDia(sp, f.dia) : null} />
+        ))}
+      </ul>
+      <div className="flex items-baseline justify-between gap-2 px-1" data-balance-total={total.beneficio} data-balance-n={total.n}>
+        <p className="text-sm font-semibold">
+          {sem.bsem === 0 ? 'Total hasta hoy' : 'Total de la semana'}
+          <span className="ml-1 text-xs font-normal text-muted">· {total.n === 1 ? '1 apuesta' : `${total.n} apuestas`}</span>
+        </p>
+        <p className={`text-lg font-semibold tabular-nums ${colorTono(total.beneficio)}`}>{total.n ? dinero(total.beneficio, true) : '—'}</p>
+      </div>
+    </section>
+  )
+}
+
+function FilaBalance({
+  f,
+  max,
+  hoy,
+  dinero,
+  href,
+}: {
+  f: FilaDia
+  max: number
+  hoy: string
+  dinero: (c: number, s?: boolean) => string
+  href: string | null
+}) {
+  const nombre = `${DIA_LARGO[diaSemana(f.dia)].slice(0, 3)} ${diaCorto(f.dia, hoy)}`
+  const contenido = (
+    <>
+      <div className="w-[4.75rem] shrink-0">
+        <p className="text-sm font-medium">
+          {nombre}
+          {f.dia === hoy && <span className="sr-only"> (hoy)</span>}
+        </p>
+        <p className="text-xs text-muted">{f.n === 0 ? 'Sin apuestas' : f.n === 1 ? '1 apuesta' : `${f.n} apuestas`}</p>
+      </div>
+      <div className="relative h-3 min-w-0 flex-1 rounded-full bg-border/40" aria-hidden="true">
+        <div className="absolute inset-y-0 left-1/2 w-px bg-muted/60" />
+        {f.beneficio !== 0 && (
+          <div
+            className={`absolute inset-y-0 rounded-full ${f.beneficio > 0 ? 'left-1/2 bg-green-600 dark:bg-green-500' : 'right-1/2 bg-red-600 dark:bg-red-500'}`}
+            style={{ width: `${(Math.abs(f.beneficio) / max) * 50}%` }}
+          />
+        )}
+      </div>
+      <p className={`w-[5.5rem] shrink-0 text-right text-sm font-semibold tabular-nums ${colorTono(f.beneficio)}`} data-balance-dia-beneficio={f.beneficio}>
+        {f.n === 0 ? '—' : dinero(f.beneficio, true)}
+      </p>
+    </>
+  )
+  return (
+    <li data-balance-dia={f.dia} data-balance-dia-n={f.n} className={f.dia === hoy ? 'bg-brand/5' : ''}>
+      {href ? (
+        <Link href={href} className="flex min-h-12 items-center gap-2 px-3 py-2 active:bg-surface">
+          {contenido}
+          <span aria-hidden="true" className="shrink-0 text-lg text-muted">
+            ›
+          </span>
+        </Link>
+      ) : (
+        <div className="flex min-h-12 items-center gap-2 px-3 py-2 pr-7">{contenido}</div>
+      )}
+    </li>
   )
 }
 
