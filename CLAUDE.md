@@ -97,15 +97,18 @@ archivo o panel ponerlas).
    promoción que se pueden vaciar, qué NO es promoción (v8) y deporte y liga confirmados por
    API-Football. **Verificados en el móvil con la cuenta de email (commit 0f5b91b)** y **en producción
    con la cuenta de Google el 2026-11-11** (main `684bec0`). Ver "Registro: retoques 2".
-5. **Análisis: selector de periodo y balance de la semana**, hecho en la rama `analisis-periodo-semana`
-   el 2026-11-12 (sin fusionar; sin migración): selector "tipo + navegador" (Día, Semana, Mes, Año,
+5. **Análisis: selector de periodo y balance de la semana, fusionado el 2026-11-12** (rama
+   `analisis-periodo-semana`, PR #13, commit de main `dc2b9ab`; pruebas de GitHub Actions en verde; sin
+   migración): selector "tipo + navegador" (Día, Semana, Mes, Año,
    Todo con flechas, atajos y calendario en una hoja inferior), balance diario de la semana arriba
    (con flechas a semanas anteriores), sin la nota "Solo cuentan…" ni el apartado "Evolución". Ver
-   "Análisis: selector de periodo y balance de la semana".
+   "Análisis: selector de periodo y balance de la semana". **Verificado en el móvil con la cuenta de
+   email (commit 7d5b1a2).** Falta verificarlo en producción con la cuenta de Google.
 
-### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-12, al empezar el selector de periodo y el balance semanal)
-- **Análisis: selector de periodo y balance de la semana** (rama `analisis-periodo-semana`): verificar en
-  el móvil con el despliegue de la rama, fusionar y verificar en producción con la cuenta de Google.
+### Pendiente (sin fase asignada salvo indicación; revisado el 2026-11-12, tras fusionar el selector de periodo y el balance semanal)
+- **Análisis: selector de periodo y balance de la semana** (fusionado el 2026-11-12, PR #13): verificar en
+  producción con la cuenta de Google (balance: total = suma de los días; selector: Este mes, Últimos 30
+  días y Todo con las mismas cifras que antes; Gráficas y Bankroll siguen igual).
 0. **El tenis** (punto 3 del encargo de los retoques del registro 2): se trata aparte, sin empezar.
 1. **API-Football, limitación futura** (tarea 3 fusionada el 2026-11-10; plan **Pro: 7.500 llamadas al
    día**): la clave de la API es ÚNICA (una cuenta) y el tope diario se cuenta POR
@@ -562,7 +565,7 @@ captura que se descartaron). Bucket privado de Storage: `capturas`, con rutas
 **Cambios en la base de datos = nueva migración** en `supabase/migrations/` (nunca editar una
 ya aplicada) + actualizar `tests/rls.test.mjs` si hay tablas nuevas.
 
-## Análisis: selector de periodo y balance de la semana (2026-11-12, rama `analisis-periodo-semana`)
+## Análisis: selector de periodo y balance de la semana (2026-11-12, rama `analisis-periodo-semana`; fusionado el 2026-11-12, PR #13)
 
 Sin migración. Solo la pantalla Análisis y su detalle; Gráficas y Bankroll siguen con las fichas de antes.
 Reglas de cálculo sin cambios.
@@ -1407,3 +1410,4 @@ aplicadas con `supabase migration repair --status applied <versión>`.)
 | 2026-11-12 | Balance de la semana arriba, en tarjeta propia, con `bsem` separado del periodo y flechas limitadas a la semana de la primera apuesta | Dos "periodos" en la misma pantalla sin confusión; no navegar por semanas vacías |
 | 2026-11-12 | Detalle de un día con la misma función que su fila (`filaDia`) | El recuento, el beneficio y la lista no pueden diferir |
 | 2026-11-12 | "Evolución" quitado (título, enlace y nota); se quedan las tablas por mes y día | Solo llevaba a Gráficas, que está en la barra inferior |
+| 2026-11-12 | **Análisis: selector de periodo y balance de la semana fusionado en `main`** (rama `analisis-periodo-semana`, PR #13, commit `dc2b9ab`) | Sin migración; verificado en el móvil con la cuenta de email; comprobaciones de la PR en verde antes de fusionar. Falta verificarlo en producción con la cuenta de Google |
