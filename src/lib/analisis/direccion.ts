@@ -14,12 +14,15 @@ import {
   type Segmento,
 } from './calculos.ts'
 import { rutaVueltaSegura } from '../navegador/volver-a-lista.ts'
+import { periodoParaGraficas } from './periodo.ts'
 
 type Params = Record<string, string | string[] | undefined> | URLSearchParams
 
 // Parámetros de la pantalla Análisis que se conservan al ir y volver del detalle.
-// "casa" y "volver" solo llegan cuando el detalle se abre desde Gráficas.
-export const PARAMS_ANALISIS = ['periodo', 'desde', 'hasta', 'seg', 'orden', 'ac', 'tipo', 'casa', 'volver'] as const
+// "ref" es el primer día de un periodo navegable (Día, Semana, Mes, Año) y "bsem" la semana del
+// balance diario (0 esta, -1 la anterior…). "casa" y "volver" solo llegan cuando el detalle se abre
+// desde Gráficas.
+export const PARAMS_ANALISIS = ['periodo', 'desde', 'hasta', 'ref', 'seg', 'orden', 'ac', 'tipo', 'bsem', 'casa', 'volver'] as const
 
 function valor(p: Params, k: string): string {
   if (p instanceof URLSearchParams) return p.get(k) ?? ''
@@ -48,15 +51,19 @@ export function enlaceAnalisis(p: Params): string {
   return s ? `/analisis?${s}` : '/analisis'
 }
 
-// "/graficas?…" con el mismo periodo (desde Análisis: "Ver evolución →").
-export function enlaceGraficas(p: Params): string {
-  const q = new URLSearchParams()
-  for (const k of ['periodo', 'desde', 'hasta']) {
-    const v = valor(p, k)
-    if (v) q.set(k, v)
-  }
-  const s = q.toString()
-  return s ? `/graficas?${s}` : '/graficas'
+// Análisis con otra semana en el balance diario (0 = esta semana: no se escribe).
+export function enlaceBalance(p: Params, bsem: number): string {
+  const [ruta, q = ''] = enlaceAnalisis(p).split('?')
+  const qs = new URLSearchParams(q)
+  if (bsem < 0) qs.set('bsem', String(bsem))
+  else qs.delete('bsem')
+  const s = qs.toString()
+  return s ? `${ruta}?${s}` : ruta
+}
+
+// Detalle de un día del balance semanal: sus apuestas resueltas.
+export function enlaceDetalleDia(p: Params, dia: string): string {
+  return `/analisis/detalle?${consulta(p, { vista: 'dia', dia })}`
 }
 
 // Detalle de una serie de Gráficas: la fila del segmento con el periodo y la casa, y "volver" a
@@ -103,8 +110,11 @@ export function vueltaDetalle(p: Params): { href: string; texto: string } {
   const v = rutaVueltaSegura(valor(p, 'volver'), '')
   if (v === '/graficas' || v.startsWith('/graficas?')) {
     const q = new URLSearchParams(v.split('?')[1] ?? '')
+    // Gráficas no conoce los periodos nuevos (Día, Semana, un mes o año pasados): van como
+    // "personalizado" con sus días; los de antes, tal cual.
+    const per = periodoParaGraficas(valor(p, 'periodo'), valor(p, 'desde'), valor(p, 'hasta'), valor(p, 'ref'))
     for (const k of ['periodo', 'desde', 'hasta']) {
-      const x = valor(p, k)
+      const x = per[k]
       if (x) q.set(k, x)
       else q.delete(k)
     }

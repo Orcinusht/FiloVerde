@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { SEGMENTOS, detalle, enRango, metricas, rangoPeriodo, segmentar, type ApuestaAnalisis, type SeleccionAnalisis, type Segmento } from '../src/lib/analisis/calculos.ts'
 import { curvaBeneficio } from '../src/lib/analisis/evolucion.ts'
 import { leerApuestasAnalisis } from '../src/lib/analisis/leer.ts'
-import { enlaceDetalleGraficas, enlaceGraficas, leerPeticionDetalle, vueltaDetalle } from '../src/lib/analisis/direccion.ts'
+import { enlaceDetalleGraficas, leerPeticionDetalle, vueltaDetalle } from '../src/lib/analisis/direccion.ts'
 import { rutaVueltaSegura } from '../src/lib/navegador/volver-a-lista.ts'
 import { CASA_SIN, curvaGrafica, dominioFechas, escalaComun, filtrarCasa, leerCasa, seriesPorSegmento, seriesVisibles } from '../src/lib/graficas/series.ts'
 import { marcasEje, puntoMasCercano, tonoDe, vecinos } from '../src/lib/graficas/geometria.ts'
@@ -295,7 +295,6 @@ test('detalle de una serie con casa: mismas apuestas y recuento que la cabecera;
   assert.match(vueltaDetalle(q2).href, /periodo=hoy/)
   // Sin volver (desde Análisis): "← Análisis"
   assert.deepEqual(vueltaDetalle(new URLSearchParams('vista=seg&seg=casa&clave=%23x&periodo=mes')), { href: '/analisis?periodo=mes&seg=casa', texto: '← Análisis' })
-  assert.equal(enlaceGraficas({ periodo: 'ayer', seg: 'tipo' }), '/graficas?periodo=ayer')
 })
 
 test('?volver= acepta /graficas y rechaza variantes maliciosas', () => {

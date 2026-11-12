@@ -99,3 +99,11 @@ export async function leerApuestasAnalisis(
     selecciones: (porApuesta.get(a.id) ?? []).sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0)),
   }))
 }
+
+// Fecha de tu primera apuesta (cualquier estado; null si no hay): límite de la flecha ‹ del
+// balance semanal, para no ir hacia atrás por semanas vacías.
+export async function leerPrimeraFecha(supabase: SupabaseClient, userId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('apuestas').select('fecha').eq('user_id', userId).order('fecha').limit(1)
+  if (error) throw error
+  return (data?.[0]?.fecha as string | undefined) ?? null
+}
